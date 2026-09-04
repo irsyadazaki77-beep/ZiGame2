@@ -9,6 +9,7 @@ import { ShopBanner } from '../components/shop/ShopBanner';
 import { GachaMachineWidget } from '../components/shop/GachaMachineWidget';
 import { CoinGambleWidget } from '../components/shop/CoinGambleWidget';
 import { storageService } from '../services/storageService';
+import { economyService } from '../services/economyService';
 
 interface ShopProps {
   profile: ProfileType;
@@ -73,9 +74,18 @@ export default function Shop({ profile, onUpdateProfile }: ShopProps) {
     if (!isConfirmed) return;
 
     audio.playCoin();
+    
+    // Server validation for purchase
+    const result = await economyService.buyItem(item.id, profile.name); // Using profile name as ID for demo
+    if (!result.success) {
+      audio.playHit();
+      showToast('Pembelian Gagal', result.message || 'Gagal memproses transaksi di server', 'error');
+      return;
+    }
+
     const updatedProfile = {
       ...profile,
-      coins: profile.coins - item.cost,
+      coins: result.remainingCoins ?? profile.coins - item.cost,
     };
 
     if (item.type === 'avatar') {
@@ -94,19 +104,30 @@ export default function Shop({ profile, onUpdateProfile }: ShopProps) {
     showToast('Pembelian Berhasil', `${item.name} berhasil dibeli dan dipasang ke profil Anda!`, 'success');
   };
 
-  const handleSpinGacha = () => {
+  const handleSpinGacha = async () => {
     if (profile.coins < 50 || gachaState !== 'idle') return;
 
     audio.playCoin();
-    const allPool = [...PREMIUM_AVATARS, ...PREMIUM_THEMES];
     setGachaState('spinning');
+    const allPool = [...PREMIUM_AVATARS, ...PREMIUM_THEMES];
 
-    // Deduct 50 coins
+    const result = await economyService.gacha(profile.name); // Server authoritative
+
+    if (!result.success) {
+      setGachaState('idle');
+      audio.playHit();
+      showToast('Gacha Gagal', result.message || 'Gagal memproses transaksi gacha.', 'error');
+      return;
+    }
+
+    // Deduct 50 coins immediately in UI state
     onUpdateProfile({
       ...profile,
-      coins: profile.coins - 50,
+      coins: result.remainingCoins ?? profile.coins - 50,
     });
 
+    const finalReward = allPool.find(item => item.id === result.rewardId);
+    
     let rolls = 0;
     const interval = setInterval(() => {
       const rand = allPool[Math.floor(Math.random() * allPool.length)];
@@ -116,7 +137,12 @@ export default function Shop({ profile, onUpdateProfile }: ShopProps) {
 
       if (rolls >= 15) {
         clearInterval(interval);
-        const finalReward = allPool[Math.floor(Math.random() * allPool.length)];
+        
+        if (!finalReward) {
+          setGachaState('idle');
+          return;
+        }
+
         setGachaReward(finalReward);
         setGachaState('revealed');
         audio.playScore();
@@ -125,14 +151,11 @@ export default function Shop({ profile, onUpdateProfile }: ShopProps) {
         if (finalReward.type === 'avatar' && !unlockedAvatars.includes(finalReward.value)) {
           const newAvatars = [...unlockedAvatars, finalReward.value];
           setUnlockedAvatars(newAvatars);
-          onUpdateProfile({ ...profile, coins: profile.coins - 50, unlockedAvatars: newAvatars });
+          onUpdateProfile({ ...profile, coins: result.remainingCoins ?? profile.coins - 50, unlockedAvatars: newAvatars });
         } else if (finalReward.type === 'theme' && !unlockedThemes.includes(finalReward.value)) {
           const newThemes = [...unlockedThemes, finalReward.value];
           setUnlockedThemes(newThemes);
-          onUpdateProfile({ ...profile, coins: profile.coins - 50, unlockedThemes: newThemes });
-        } else {
-          // If already unlocked, just deduct coins (which was already done in the initial state)
-          // But to be consistent with React state, maybe no action needed
+          onUpdateProfile({ ...profile, coins: result.remainingCoins ?? profile.coins - 50, unlockedThemes: newThemes });
         }
       }
     }, 120);
@@ -150,12 +173,28 @@ export default function Shop({ profile, onUpdateProfile }: ShopProps) {
     setGachaReward(null);
   };
 
-  const handleGambleResult = (changeCoins: number, msg: string, isWin: boolean) => {
-    onUpdateProfile({
-      ...profile,
-      coins: Math.max(0, profile.coins + changeCoins),
-    });
-    showToast(isWin ? 'Menang Pertaruhan!' : 'Kalah Pertaruhan', msg, isWin ? 'success' : 'error');
+  const handleGamble = async (bet: number, choice: 'heads' | 'tails') => {
+    const res = await economyService.gamble(bet, choice, profile.name);
+    
+    if (res.success && typeof res.changeCoins === 'number') {
+      onUpdateProfile({
+        ...profile,
+        coins: res.remainingCoins ?? profile.coins + res.changeCoins,
+      });
+      const msg = res.won 
+        ? `BERHASIL! Koin melayang di sisi ${res.outcomeSide?.toUpperCase()}! Anda menang +${bet}🪙!`
+        : `SAYANG! Koin mendarat di sisi ${res.outcomeSide?.toUpperCase()}. Anda kehilangan ${bet}🪙.`;
+      
+      setTimeout(() => {
+        showToast(res.won ? 'Menang Pertaruhan!' : 'Kalah Pertaruhan', msg, res.won ? 'success' : 'error');
+      }, 1200);
+    } else {
+      setTimeout(() => {
+        showToast('Gagal', res.message || 'Gagal terhubung ke server', 'error');
+      }, 1200);
+    }
+    
+    return res;
   };
 
   const visibleItems = tab === 'avatars' ? PREMIUM_AVATARS : tab === 'themes' ? PREMIUM_THEMES : [...PREMIUM_AVATARS, ...PREMIUM_THEMES];
@@ -185,7 +224,7 @@ export default function Shop({ profile, onUpdateProfile }: ShopProps) {
 
         <CoinGambleWidget
           coins={profile.coins}
-          onGambleResult={handleGambleResult}
+          onGamble={handleGamble}
         />
       </div>
 

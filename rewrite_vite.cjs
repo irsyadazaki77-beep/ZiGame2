@@ -1,27 +1,16 @@
-import tailwindcss from '@tailwindcss/vite';
-import react from '@vitejs/plugin-react';
-import path from 'path';
-import { defineConfig } from 'vite';
-import { VitePWA } from 'vite-plugin-pwa';
-import fs from 'fs';
+const fs = require('fs');
 
-const logErrorPlugin = () => ({
-  name: 'log-error',
-  configureServer(server: any) {
-    server.middlewares.use('/log_error', (req: any, res: any) => {
-      let body = '';
-      req.on('data', (chunk: any) => body += chunk.toString());
-      req.on('end', () => {
-        fs.writeFileSync('error_log.txt', body + '\n', { flag: 'a' });
-        res.end('ok');
-      });
-    });
-  }
-});
+let content = fs.readFileSync('vite.config.ts', 'utf8');
 
-export default defineConfig(() => {
-  return {
-    plugins: [
+if (!content.includes('vite-plugin-pwa')) {
+  content = content.replace(
+    "import path from 'path';",
+    "import path from 'path';\nimport { VitePWA } from 'vite-plugin-pwa';"
+  );
+  
+  content = content.replace(
+    "plugins: [react(), tailwindcss(), logErrorPlugin()],",
+    `plugins: [
       react(), 
       tailwindcss(), 
       logErrorPlugin(),
@@ -44,24 +33,20 @@ export default defineConfig(() => {
           ]
         },
         workbox: {
-          navigateFallbackDenylist: [/^\/api\//],
+          navigateFallbackDenylist: [/^\/api\\//],
           runtimeCaching: [
             {
-              urlPattern: /^\/api\//,
+              urlPattern: /^\\/api\\//,
               handler: 'NetworkOnly',
             }
           ]
         }
       })
-    ],
-    resolve: {
-      alias: {
-        '@': path.resolve(__dirname, '.'),
-      },
-    },
-    server: {
-      hmr: process.env.DISABLE_HMR !== 'true',
-      watch: process.env.DISABLE_HMR === 'true' ? null : {},
-    },
-  };
-});
+    ],`
+  );
+  
+  fs.writeFileSync('vite.config.ts', content);
+  console.log('vite.config.ts updated with PWA');
+} else {
+  console.log('already has PWA');
+}

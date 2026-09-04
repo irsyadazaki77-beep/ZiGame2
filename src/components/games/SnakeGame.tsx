@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { audio } from '../../utils/audio';
 import { GameOverlay } from '../gameplay/GameOverlay';
 import { MobileControls } from '../gameplay/MobileControls';
+import { useGameEngine } from '../../hooks/useGameEngine';
 
 interface SnakeGameProps {
   onGameOver: (score: number) => void;
@@ -10,7 +11,6 @@ interface SnakeGameProps {
 }
 
 type Point = { x: number; y: number };
-type GameState = 'ready' | 'countdown' | 'playing' | 'paused' | 'gameover';
 
 const GRID_SIZE = 20;
 const INITIAL_SNAKE = [
@@ -22,36 +22,26 @@ const INITIAL_DIRECTION = { x: 0, y: -1 };
 const BASE_SPEED = 150; // ms per move
 
 export default function SnakeGame({ onGameOver, onScoreUpdate, highScore }: SnakeGameProps) {
-  const [gameState, setGameState] = useState<GameState>('ready');
-  const [countdown, setCountdown] = useState(3);
-  const [score, setScore] = useState(0);
-  const [muted, setMuted] = useState(audio.getMuteState());
+  const {
+    gameState,
+    setGameState,
+    gameStateRef,
+    score,
+    updateScore,
+    triggerGameOver,
+    startWithCountdown,
+    startLoop,
+    stopLoop,
+  } = useGameEngine({ onScoreUpdate, onGameOver });
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const gameStateRef = useRef(gameState);
   const snakeRef = useRef<Point[]>(INITIAL_SNAKE);
   const directionRef = useRef<Point>(INITIAL_DIRECTION);
   const nextDirectionRef = useRef<Point>(INITIAL_DIRECTION);
   const foodRef = useRef<Point>({ x: 5, y: 5 });
   
-  const gameLoopRef = useRef<number | null>(null);
-  const lastTimeRef = useRef<number>(0);
   const moveTimerRef = useRef<number>(0);
-
-  useEffect(() => {
-    gameStateRef.current = gameState;
-  }, [gameState]);
-
-  // Auto-pause when tab is hidden
-  useEffect(() => {
-    const handleVisibilityChange = () => {
-      if (document.hidden && gameStateRef.current === 'playing') {
-        setGameState('paused');
-      }
-    };
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
-  }, []);
+  const scoreRef = useRef<number>(0);
 
   const generateFood = useCallback((currentSnake: Point[]) => {
     let newFood: Point;
@@ -67,125 +57,7 @@ export default function SnakeGame({ onGameOver, onScoreUpdate, highScore }: Snak
     return newFood!;
   }, []);
 
-  const resetGame = () => {
-    snakeRef.current = [...INITIAL_SNAKE];
-    directionRef.current = { ...INITIAL_DIRECTION };
-    nextDirectionRef.current = { ...INITIAL_DIRECTION };
-    foodRef.current = generateFood(snakeRef.current);
-    setScore(0);
-    draw();
-  };
-
-  const startGame = () => {
-    resetGame();
-    setGameState('countdown');
-    setCountdown(3);
-    
-    let count = 3;
-    const interval = setInterval(() => {
-      count--;
-      if (count > 0) {
-        setCountdown(count);
-      } else {
-        clearInterval(interval);
-        setGameState('playing');
-        lastTimeRef.current = performance.now();
-        if (gameLoopRef.current) cancelAnimationFrame(gameLoopRef.current);
-        gameLoopRef.current = requestAnimationFrame(gameStep);
-      }
-    }, 1000);
-  };
-
-  const resumeGame = () => {
-    setGameState('countdown');
-    setCountdown(3);
-    
-    let count = 3;
-    const interval = setInterval(() => {
-      count--;
-      if (count > 0) {
-        setCountdown(count);
-      } else {
-        clearInterval(interval);
-        setGameState('playing');
-        lastTimeRef.current = performance.now();
-        if (gameLoopRef.current) cancelAnimationFrame(gameLoopRef.current);
-        gameLoopRef.current = requestAnimationFrame(gameStep);
-      }
-    }, 1000);
-  };
-
-  const gameStep = (timestamp: number) => {
-    if (gameStateRef.current !== 'playing') return;
-
-    const deltaTime = timestamp - lastTimeRef.current;
-    lastTimeRef.current = timestamp;
-
-    // Cap deltaTime to prevent huge jumps if tab was suspended
-    const safeDelta = Math.min(deltaTime, 100);
-    moveTimerRef.current += safeDelta;
-
-    // Speed increases slightly as score goes up
-    const currentSpeed = Math.max(50, BASE_SPEED - (score * 2));
-
-    if (moveTimerRef.current >= currentSpeed) {
-      moveTimerRef.current = 0;
-      updateGameLogic();
-    }
-
-    draw();
-    gameLoopRef.current = requestAnimationFrame(gameStep);
-  };
-
-  const updateGameLogic = () => {
-    const head = snakeRef.current[0];
-    directionRef.current = nextDirectionRef.current;
-    const newHead = {
-      x: head.x + directionRef.current.x,
-      y: head.y + directionRef.current.y,
-    };
-
-    // Wall collision
-    if (
-      newHead.x < 0 ||
-      newHead.x >= GRID_SIZE ||
-      newHead.y < 0 ||
-      newHead.y >= GRID_SIZE
-    ) {
-      handleGameOver();
-      return;
-    }
-
-    // Self collision
-    if (snakeRef.current.some(segment => segment.x === newHead.x && segment.y === newHead.y)) {
-      handleGameOver();
-      return;
-    }
-
-    const newSnake = [newHead, ...snakeRef.current];
-
-    // Food collision
-    if (newHead.x === foodRef.current.x && newHead.y === foodRef.current.y) {
-      audio.playCoin();
-      foodRef.current = generateFood(newSnake);
-      const newScore = score + 10;
-      setScore(newScore);
-      onScoreUpdate(newScore);
-    } else {
-      newSnake.pop();
-    }
-
-    snakeRef.current = newSnake;
-  };
-
-  const handleGameOver = () => {
-    setGameState('gameover');
-    if (gameLoopRef.current) cancelAnimationFrame(gameLoopRef.current);
-    audio.playExplosion();
-    onGameOver(score);
-  };
-
-  const draw = () => {
+  const draw = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
@@ -280,7 +152,81 @@ export default function SnakeGame({ onGameOver, onScoreUpdate, highScore }: Snak
         ctx.fillRect(eye2X, eye2Y, 3, 3);
       }
     });
-  };
+  }, []);
+
+  const updateGameLogic = useCallback(() => {
+    const head = snakeRef.current[0];
+    directionRef.current = nextDirectionRef.current;
+    const newHead = {
+      x: head.x + directionRef.current.x,
+      y: head.y + directionRef.current.y,
+    };
+
+    // Wall collision
+    if (
+      newHead.x < 0 ||
+      newHead.x >= GRID_SIZE ||
+      newHead.y < 0 ||
+      newHead.y >= GRID_SIZE
+    ) {
+      audio.playExplosion();
+      triggerGameOver();
+      return;
+    }
+
+    // Self collision
+    if (snakeRef.current.some(segment => segment.x === newHead.x && segment.y === newHead.y)) {
+      audio.playExplosion();
+      triggerGameOver();
+      return;
+    }
+
+    const newSnake = [newHead, ...snakeRef.current];
+
+    // Food collision
+    if (newHead.x === foodRef.current.x && newHead.y === foodRef.current.y) {
+      audio.playCoin();
+      foodRef.current = generateFood(newSnake);
+      const newScore = scoreRef.current + 10;
+      scoreRef.current = newScore;
+      updateScore(newScore);
+    } else {
+      newSnake.pop();
+    }
+
+    snakeRef.current = newSnake;
+  }, [generateFood, triggerGameOver, updateScore]);
+
+  const gameStep = useCallback((timestamp: number, deltaTime: number) => {
+    moveTimerRef.current += deltaTime;
+
+    // Speed increases slightly as score goes up
+    const currentSpeed = Math.max(50, BASE_SPEED - (scoreRef.current * 2));
+
+    if (moveTimerRef.current >= currentSpeed) {
+      moveTimerRef.current = 0;
+      updateGameLogic();
+    }
+
+    draw();
+  }, [draw, updateGameLogic]);
+
+  const resetGame = useCallback(() => {
+    snakeRef.current = [...INITIAL_SNAKE];
+    directionRef.current = { ...INITIAL_DIRECTION };
+    nextDirectionRef.current = { ...INITIAL_DIRECTION };
+    foodRef.current = generateFood(snakeRef.current);
+    scoreRef.current = 0;
+    updateScore(0);
+    draw();
+  }, [draw, generateFood, updateScore]);
+
+  const startGame = useCallback(() => {
+    resetGame();
+    startWithCountdown(() => {
+      startLoop(gameStep);
+    });
+  }, [resetGame, startWithCountdown, startLoop, gameStep]);
 
   // Keyboard controls
   useEffect(() => {
@@ -313,35 +259,17 @@ export default function SnakeGame({ onGameOver, onScoreUpdate, highScore }: Snak
           break;
       }
     };
+
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
-
-  // Auto-pause on blur
-  useEffect(() => {
-    const handleBlur = () => {
-      if (gameStateRef.current === 'playing') {
-        setGameState('paused');
-      }
-    };
-    window.addEventListener('blur', handleBlur);
-    return () => window.removeEventListener('blur', handleBlur);
-  }, []);
+  }, [gameStateRef, setGameState]);
 
   // Initial draw
   useEffect(() => {
     draw();
-  }, []);
+  }, [draw]);
 
-  // Handle pause/resume loop side effects
-  useEffect(() => {
-    if (gameState === 'paused' || gameState === 'gameover' || gameState === 'ready') {
-      if (gameLoopRef.current) cancelAnimationFrame(gameLoopRef.current);
-    }
-  }, [gameState]);
-
-
-  const handleDirection = (dir: 'up' | 'down' | 'left' | 'right') => {
+  const handleDirection = useCallback((dir: 'up' | 'down' | 'left' | 'right') => {
     switch (dir) {
       case 'up':
         if (directionRef.current.y !== 1) nextDirectionRef.current = { x: 0, y: -1 };
@@ -356,7 +284,7 @@ export default function SnakeGame({ onGameOver, onScoreUpdate, highScore }: Snak
         if (directionRef.current.x !== -1) nextDirectionRef.current = { x: 1, y: 0 };
         break;
     }
-  };
+  }, []);
 
   return (
     <div className="relative flex flex-col h-full w-full min-h-0 items-center justify-center overflow-hidden p-2 bg-zinc-950">

@@ -275,10 +275,10 @@ export default function Login({
             {isRegistering ? <UserPlus className="w-8 h-8" /> : <LogIn className="w-8 h-8" />}
           </div>
           <h2 className="text-2xl font-display font-black tracking-wider text-white uppercase">
-            {loggedInUser ? 'AKUN SAYA' : isRegistering ? 'DAFTAR PEMAIN' : 'MASUK SYSTEM'}
+            {loggedInUser ? 'PROFIL OFFLINE SAYA' : isRegistering ? 'BUAT PROFIL LOKAL' : 'MASUK PROFIL OFFLINE'}
           </h2>
           <p className="text-xs font-mono text-zinc-400 mt-1 uppercase tracking-wider">
-            {loggedInUser ? `SEDANG ONLINE SEBAGAI @${loggedInUser}` : 'SIMPAN SKOR & COIN KAMU DI CLOUD LOCAL'}
+            {loggedInUser ? `SEDANG BERMAIN SEBAGAI @${loggedInUser} (LOKAL)` : 'DATA DISIMPAN DI PENYIMPANAN BROWSER LOKAL (TIDAK ADA CLOUD SYNC)'}
           </p>
         </div>
 
@@ -534,12 +534,12 @@ export default function Login({
               ) : isRegistering ? (
                 <>
                   <UserPlus className="w-4 h-4" />
-                  <span>DAFTAR SEKARANG</span>
+                  <span>BUAT PROFIL LOKAL</span>
                 </>
               ) : (
                 <>
                   <LogIn className="w-4 h-4" />
-                  <span>MASUK SYSTEM</span>
+                  <span>MASUK PROFIL LOKAL</span>
                 </>
               )}
             </button>
@@ -569,7 +569,7 @@ export default function Login({
                 onClick={() => { audio.playCoin(); setIsRegistering(!isRegistering); setError(''); setSuccess(''); }}
                 className="text-xs font-mono text-zinc-500 hover:text-red-400 transition cursor-pointer uppercase tracking-wider"
               >
-                {isRegistering ? 'Sudah punya akun? Masuk di sini' : 'Belum punya akun? Daftar gratis'}
+                {isRegistering ? 'Sudah punya profil lokal? Masuk di sini' : 'Belum punya profil lokal? Buat sekarang'}
               </button>
             </div>
           </form>

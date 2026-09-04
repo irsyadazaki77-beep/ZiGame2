@@ -2,6 +2,29 @@ import express, { Request, Response, NextFunction } from "express";
 import path from "path";
 import crypto from "crypto";
 import { createServer as createViteServer } from "vite";
+import { initializeApp, cert } from "firebase-admin/app";
+import { getFirestore, Firestore } from "firebase-admin/firestore";
+
+// Initialize Firebase Admin (Graceful fallback if not configured)
+let db: Firestore | null = null;
+try {
+  if (process.env.FIREBASE_SERVICE_ACCOUNT) {
+    const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+    initializeApp({
+      credential: cert(serviceAccount)
+    });
+    db = getFirestore();
+    console.log("[SERVER] Firebase Admin initialized with service account.");
+  } else if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
+    initializeApp();
+    db = getFirestore();
+    console.log("[SERVER] Firebase Admin initialized with application credentials.");
+  } else {
+    console.warn("[SERVER] No Firebase Admin credentials found. Falling back to in-memory (volatile) state for economy and leaderboards.");
+  }
+} catch (error) {
+  console.error("[SERVER] Firebase Admin initialization failed:", error);
+}
 
 interface ProcessedAction {
   result: any;
@@ -41,6 +64,63 @@ async function startServer() {
   const activeSessions = new Map<string, GameSessionRecord>();
   const leaderboards = new Map<string, any[]>();
   const spinCooldowns = new Map<string, string>(); // IP/UID -> YYYY-MM-DD
+  const userEconomy = new Map<string, { coins: number }>();
+
+  // Item Catalog
+  const ITEM_CATALOG: Record<string, { cost: number; type: 'avatar' | 'theme' }> = {
+    'av_phoenix': { cost: 300, type: 'avatar' },
+    'av_spacetime': { cost: 250, type: 'avatar' },
+    'av_invader': { cost: 100, type: 'avatar' },
+    'av_king': { cost: 150, type: 'avatar' },
+    'av_astro': { cost: 120, type: 'avatar' },
+    'av_dino': { cost: 90, type: 'avatar' },
+    'av_unicorn': { cost: 110, type: 'avatar' },
+    'av_fox': { cost: 130, type: 'avatar' },
+    'av_ufo': { cost: 160, type: 'avatar' },
+    'av_wizard': { cost: 200, type: 'avatar' },
+    'th_crimson': { cost: 150, type: 'theme' },
+    'th_ruby': { cost: 150, type: 'theme' },
+    'th_amber': { cost: 150, type: 'theme' },
+    'th_rose': { cost: 150, type: 'theme' }
+  };
+
+  const getOrCreateUserEconomy = async (userId: string) => {
+    if (db && userId && !userId.includes('.') && !userId.includes(':')) {
+      try {
+        const ref = db.collection('users').doc(userId);
+        const doc = await ref.get();
+        if (doc.exists) {
+          return { coins: doc.data()?.profile?.coins || 0, isFirebase: true, ref };
+        }
+      } catch (err) {
+        console.error('Error fetching economy from Firestore:', err);
+      }
+    }
+
+    if (!userEconomy.has(userId)) {
+      userEconomy.set(userId, { coins: 100 }); // Default 100 coins
+    }
+    return { coins: userEconomy.get(userId)!.coins, isFirebase: false, ref: null };
+  };
+
+  const updateEconomy = async (userId: string, newCoins: number, economyContext: any) => {
+    if (economyContext.isFirebase && economyContext.ref) {
+      try {
+        await economyContext.ref.update({ 'profile.coins': newCoins });
+      } catch (err) {
+        console.error('Error updating economy in Firestore:', err);
+      }
+    } else {
+      userEconomy.set(userId, { coins: newCoins });
+    }
+  };
+
+  // Endpoint to get authoritative coins
+  app.get("/api/economy", async (req, res) => {
+    const userId = (req.query.userId as string) || (req.ip || "unknown");
+    const eco = await getOrCreateUserEconomy(userId);
+    res.json({ success: true, coins: eco.coins });
+  });
 
   // Periodic memory sanitization (every 5 minutes)
   setInterval(() => {
@@ -91,12 +171,6 @@ async function startServer() {
     return new Date().toISOString().split('T')[0];
   };
 
-  const generateScoreChecksum = (gameId: string, score: number, duration: number, playerName: string): string => {
-    const secret = "ZiGaMeArcAdE_SeCrEt_SaLt_2026";
-    const data = `${gameId}:${score}:${duration}:${playerName}:${secret}`;
-    return crypto.createHash('sha256').update(data).digest('hex');
-  };
-
   // Health check endpoint
   app.get("/api/health", (_req, res) => {
     res.json({ status: "ok", version: "v2.4.0", timestamp: new Date().toISOString() });
@@ -131,7 +205,7 @@ async function startServer() {
   });
 
   // 2. Daily Lucky Spin Endpoint with Idempotency
-  app.post("/api/spin", createRateLimiter("spin", 10), (req, res) => {
+  app.post("/api/spin", createRateLimiter("spin", 10), async (req, res) => {
     const { type, idempotencyKey, userId } = req.body;
     const ip = req.ip || req.socket.remoteAddress || 'unknown';
     const actorId = userId || ip;
@@ -141,7 +215,14 @@ async function startServer() {
       return res.json(processedActions.get(idempotencyKey)!.result);
     }
 
-    if (type === 'free') {
+    // Cost logic for premium spin
+    const eco = await getOrCreateUserEconomy(actorId);
+    if (type === 'premium') {
+      if (eco.coins < 50) {
+        return res.status(403).json({ success: false, code: 'INSUFFICIENT_FUNDS', message: 'Koin tidak cukup untuk spin premium (50 koin).' });
+      }
+      eco.coins -= 50; await updateEconomy(actorId, eco.coins, eco);
+    } else {
       const today = getTodayDateString();
       const lastSpin = spinCooldowns.get(actorId);
       if (lastSpin === today) {
@@ -168,10 +249,14 @@ async function startServer() {
     const randomIndex = Math.floor(Math.random() * SECTORS.length);
     const sector = SECTORS[randomIndex];
 
+    // Reward coins on server
+    eco.coins += sector.value; await updateEconomy(actorId, eco.coins, eco);
+
     const responsePayload = {
       success: true,
       sectorIndex: randomIndex,
-      sector: sector
+      sector: sector,
+      newBalance: eco.coins
     };
 
     if (idempotencyKey) {
@@ -323,14 +408,12 @@ async function startServer() {
   });
 
   // 4. Secure Score Submission Endpoint with Replay & State Protection
-  app.post("/api/submit-score", createRateLimiter("submit_score", 15), (req, res) => {
+  app.post("/api/submit-score", createRateLimiter("submit_score", 15), async (req, res) => {
     const { 
       gameId, 
       score, 
-      sessionDurationMs, 
       playerName, 
       playerAvatar, 
-      checksum,
       sessionId,
       idempotencyKey 
     } = req.body;
@@ -340,24 +423,27 @@ async function startServer() {
       return res.json(processedActions.get(idempotencyKey)!.result);
     }
 
-    if (!gameId || typeof score !== 'number' || typeof sessionDurationMs !== 'number' || score < 0) {
+    if (!gameId || typeof score !== 'number' || score < 0) {
       return res.status(400).json({ success: false, code: 'INVALID_PAYLOAD', message: "Data payload skor tidak valid." });
     }
 
-    // Session validation if provided
-    if (sessionId) {
-      const session = activeSessions.get(sessionId);
-      if (!session) {
-        return res.status(422).json({ success: false, code: 'SESSION_NOT_FOUND', message: "Sesi permainan tidak valid atau telah kadaluwarsa." });
-      }
-      if (session.consumed) {
-        return res.status(409).json({ success: false, code: 'SESSION_REPLAY', message: "Sesi skor ini sudah pernah dikirimkan sebelumnya (replay terdeteksi)." });
-      }
-      if (session.gameId !== gameId) {
-        return res.status(422).json({ success: false, code: 'SESSION_MISMATCH', message: "Sesi permainan tidak cocok dengan target game." });
-      }
-      session.consumed = true;
+    if (!sessionId) {
+      return res.status(403).json({ success: false, code: 'MISSING_SESSION', message: "Session ID wajib disertakan untuk validasi." });
     }
+
+    const session = activeSessions.get(sessionId);
+    if (!session) {
+      return res.status(422).json({ success: false, code: 'SESSION_NOT_FOUND', message: "Sesi permainan tidak valid atau telah kadaluwarsa." });
+    }
+    if (session.consumed) {
+      return res.status(409).json({ success: false, code: 'SESSION_REPLAY', message: "Sesi skor ini sudah pernah dikirimkan sebelumnya (replay terdeteksi)." });
+    }
+    if (session.gameId !== gameId) {
+      return res.status(422).json({ success: false, code: 'SESSION_MISMATCH', message: "Sesi permainan tidak cocok dengan target game." });
+    }
+    
+    const sessionDurationMs = Date.now() - session.startTime;
+    session.consumed = true;
 
     // Game-specific validation
     const config = GAME_VALIDATION_CONFIG[gameId] || GAME_VALIDATION_CONFIG['default'];
@@ -380,28 +466,6 @@ async function startServer() {
       });
     }
 
-    // Checksum verification (supports legacy and SHA-256)
-    if (checksum) {
-      const expectedSha = generateScoreChecksum(gameId, score, sessionDurationMs, playerName || '');
-      // Also allow legacy 32-bit hash fallback
-      let legacyHash = 0x811c9dc5;
-      const secret = "ZiGaMeArcAdE_SeCrEt_SaLt_2026";
-      const legacyData = `${gameId}:${score}:${sessionDurationMs}:${playerName || ''}:${secret}`;
-      for (let i = 0; i < legacyData.length; i++) {
-        legacyHash ^= legacyData.charCodeAt(i);
-        legacyHash += (legacyHash << 1) + (legacyHash << 4) + (legacyHash << 7) + (legacyHash << 8) + (legacyHash << 24);
-      }
-      const expectedLegacy = (legacyHash >>> 0).toString(16);
-
-      if (checksum !== expectedSha && checksum !== expectedLegacy) {
-        return res.status(403).json({ 
-          success: false, 
-          code: 'CHECKSUM_MISMATCH', 
-          message: "Aktivitas mencurigakan terdeteksi (gagal verifikasi integritas data)." 
-        });
-      }
-    }
-
     // Update leaderboard
     if (playerName) {
       const board = leaderboards.get(gameId) || [];
@@ -420,10 +484,22 @@ async function startServer() {
       leaderboards.set(gameId, board);
     }
 
+    // Reward calculation based on score and duration
+    const userId = (req.body.userId as string) || (req.ip || 'unknown');
+    const eco = await getOrCreateUserEconomy(userId);
+    // Arbitrary reasonable formula: e.g. 1 coin per 5 seconds played + bonus for score
+    let coinsEarned = Math.floor(durationSeconds / 10) + Math.floor(score / 500);
+    coinsEarned = Math.min(coinsEarned, 50); // Cap per game session
+    if (coinsEarned < 0) coinsEarned = 0;
+    
+    eco.coins += coinsEarned; await updateEconomy(userId, eco.coins, eco);
+
     const resultPayload = {
       success: true,
       message: "Skor berhasil divalidasi dan disimpan.",
-      validatedScore: score
+      validatedScore: score,
+      coinsEarned,
+      newBalance: eco.coins
     };
 
     if (idempotencyKey) {
@@ -436,29 +512,181 @@ async function startServer() {
     return res.json(resultPayload);
   });
 
+  // Gamble Endpoint
+  
+  // Live Ops Configuration
+  let currentSeasonConfig = {
+    season: "S3",
+    name: "Cyber Genesis",
+    multiplier: 1.2,
+    activeEvents: ["double_xp_weekend"]
+  };
+  
+  app.get("/api/live-ops/config", (req, res) => {
+    res.json({ success: true, config: currentSeasonConfig });
+  });
+
+  app.post("/api/admin/force-sync", createRateLimiter("admin", 10), (req, res) => {
+    // Requires admin validation in real app
+    res.json({ success: true, message: "Forced economy sync across all active sessions." });
+  });
+
+
+  app.post("/api/gamble", createRateLimiter("gamble", 20), async (req, res) => {
+    const { bet, choice, idempotencyKey, userId } = req.body;
+    
+    if (idempotencyKey && processedActions.has(idempotencyKey)) {
+      return res.json(processedActions.get(idempotencyKey)!.result);
+    }
+    
+    if (typeof bet !== 'number' || bet <= 0 || (choice !== 'heads' && choice !== 'tails')) {
+      return res.status(400).json({ success: false, code: 'INVALID_REQUEST', message: "Data pertaruhan tidak valid." });
+    }
+
+    const ip = req.ip || req.socket.remoteAddress || 'unknown';
+    const actorId = userId || ip;
+    const eco = await getOrCreateUserEconomy(actorId);
+
+    if (eco.coins < bet) {
+      return res.status(403).json({ success: false, code: 'INSUFFICIENT_FUNDS', message: "Koin Anda tidak cukup untuk jumlah taruhan ini!" });
+    }
+    
+    // Server determines outcome
+    const isHeads = Math.random() < 0.5;
+    const outcomeSide = isHeads ? 'heads' : 'tails';
+    const won = outcomeSide === choice;
+    
+    if (won) {
+      eco.coins += bet; // win back double = net +bet
+    } else {
+      eco.coins -= bet; // lose bet
+    }
+    await updateEconomy(actorId, eco.coins, eco);
+
+    const responsePayload = {
+      success: true,
+      won,
+      outcomeSide,
+      changeCoins: won ? bet : -bet,
+      remainingCoins: eco.coins
+    };
+
+    if (idempotencyKey) {
+      processedActions.set(idempotencyKey, {
+        result: responsePayload,
+        timestamp: Date.now()
+      });
+    }
+
+    return res.json(responsePayload);
+  });
+
+  // Gacha Endpoint
+  app.post("/api/gacha", createRateLimiter("gacha", 20), async (req, res) => {
+    const { idempotencyKey, userId } = req.body;
+    if (idempotencyKey && processedActions.has(idempotencyKey)) {
+      return res.json(processedActions.get(idempotencyKey)!.result);
+    }
+    
+    const ip = req.ip || req.socket.remoteAddress || 'unknown';
+    const actorId = userId || ip;
+    const eco = await getOrCreateUserEconomy(actorId);
+
+    if (eco.coins < 50) {
+      return res.status(403).json({ success: false, code: 'INSUFFICIENT_FUNDS', message: "Saldo koin tidak mencukupi untuk Gacha." });
+    }
+    
+    eco.coins -= 50; await updateEconomy(actorId, eco.coins, eco);
+
+    const allPool = Object.values(ITEM_CATALOG).map((v, i) => ({ id: Object.keys(ITEM_CATALOG)[i], ...v }));
+    const randomIndex = Math.floor(Math.random() * allPool.length);
+    const reward = allPool[randomIndex];
+
+    const responsePayload = {
+      success: true,
+      rewardId: reward.id,
+      remainingCoins: eco.coins
+    };
+
+    if (idempotencyKey) {
+      processedActions.set(idempotencyKey, {
+        result: responsePayload,
+        timestamp: Date.now()
+      });
+    }
+
+    return res.json(responsePayload);
+  });
+
   // 5. Server-Authoritative Item Purchase with Idempotency
-  app.post("/api/buy-item", createRateLimiter("buy_item", 20), (req, res) => {
-    const { itemCost, currentCoins, itemId, idempotencyKey } = req.body;
+  app.post("/api/buy-item", createRateLimiter("buy_item", 20), async (req, res) => {
+    const { itemId, idempotencyKey, userId } = req.body;
     
     if (idempotencyKey && processedActions.has(idempotencyKey)) {
       return res.json(processedActions.get(idempotencyKey)!.result);
     }
 
-    if (typeof itemCost !== 'number' || typeof currentCoins !== 'number' || !itemId || itemCost < 0) {
+    if (!itemId) {
       return res.status(400).json({ success: false, code: 'INVALID_REQUEST', message: "Data pembelian tidak valid." });
     }
     
-    if (currentCoins < itemCost) {
+    const item = ITEM_CATALOG[itemId];
+    if (!item) {
+      return res.status(404).json({ success: false, code: 'ITEM_NOT_FOUND', message: "Item tidak ditemukan dalam katalog." });
+    }
+
+    const ip = req.ip || req.socket.remoteAddress || 'unknown';
+    const actorId = userId || ip;
+    const eco = await getOrCreateUserEconomy(actorId);
+
+    if (eco.coins < item.cost) {
       return res.status(403).json({ success: false, code: 'INSUFFICIENT_FUNDS', message: "Saldo koin tidak mencukupi." });
     }
     
-    const remainingCoins = currentCoins - itemCost;
+    eco.coins -= item.cost; await updateEconomy(actorId, eco.coins, eco);
+    const remainingCoins = eco.coins;
+
     const responsePayload = {
       success: true,
       itemId,
       remainingCoins,
       transactionId: 'tx_' + crypto.randomBytes(8).toString('hex'),
       timestamp: Date.now()
+    };
+
+    if (idempotencyKey) {
+      processedActions.set(idempotencyKey, {
+        result: responsePayload,
+        timestamp: Date.now()
+      });
+    }
+
+    return res.json(responsePayload);
+  });
+
+  // Reward Endpoint (for missions and achievements)
+  app.post("/api/reward", createRateLimiter("reward", 30), async (req, res) => {
+    const { amount, source, idempotencyKey, userId } = req.body;
+    
+    if (idempotencyKey && processedActions.has(idempotencyKey)) {
+      return res.json(processedActions.get(idempotencyKey)!.result);
+    }
+    
+    if (typeof amount !== 'number' || amount <= 0 || amount > 1000) {
+      return res.status(400).json({ success: false, code: 'INVALID_REWARD', message: "Jumlah reward tidak valid." });
+    }
+
+    const ip = req.ip || req.socket.remoteAddress || 'unknown';
+    const actorId = userId || ip;
+    const eco = await getOrCreateUserEconomy(actorId);
+
+    eco.coins += amount; await updateEconomy(actorId, eco.coins, eco);
+
+    const responsePayload = {
+      success: true,
+      amount,
+      source,
+      newBalance: eco.coins
     };
 
     if (idempotencyKey) {

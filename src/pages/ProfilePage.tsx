@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { PlayerProfile, GameStats, Achievement, RecentlyPlayedEntry, FriendProfile, ActivityFeedItem, SocialPrivacySettings } from '../types';
+import { PlayerProfile, GameStats, Achievement, RecentlyPlayedEntry, FriendProfile, ActivityFeedItem, SocialPrivacySettings, GameMastery } from '../types';
 import { audio } from '../utils/audio';
 import { authService } from '../services/authService';
 import { socialService } from '../services/socialService';
@@ -17,6 +17,7 @@ interface ProfilePageProps {
   games: GameStats[];
   achievements: Achievement[];
   recentlyPlayed: RecentlyPlayedEntry[];
+  masteries: Record<string, GameMastery>;
   totalPlays: number;
   onUpdateProfile: (newProfile: PlayerProfile) => void;
   onResetStats: () => void;
@@ -42,6 +43,7 @@ export default function ProfilePage({
   onLogout,
   onLoginSuccess,
   onClearRecentlyPlayed,
+  masteries,
   onSelectGame
 }: ProfilePageProps) {
   // Navigation Tabs within Profile
@@ -515,11 +517,25 @@ export default function ProfilePage({
         </div>
 
         {/* Dynamic Action Buttons or Profile Currency Indicators */}
-        <div className="flex items-center gap-3 z-10 shrink-0 w-full sm:w-auto justify-center sm:justify-end">
-          <div className="px-4 py-2 bg-[#121626] border border-white/[0.05] rounded-2xl font-mono text-center">
-            <span className="block text-[10px] text-zinc-500 uppercase font-black">SALDO COIN</span>
+        
+        {/* Dynamic Action Buttons or Profile Currency Indicators */}
+        <div className="flex items-center gap-2 sm:gap-3 z-10 shrink-0 w-full sm:w-auto justify-center sm:justify-end flex-wrap">
+          <div className="px-3 sm:px-4 py-2 bg-[#121626] border border-white/[0.05] rounded-2xl font-mono text-center flex flex-col items-center">
+            <span className="block text-[9px] sm:text-[10px] text-zinc-500 uppercase font-black">LEVEL {profile.level || 1}</span>
+            <div className="w-20 h-1.5 bg-black/50 rounded-full mt-1 overflow-hidden relative">
+              <div 
+                className="absolute top-0 left-0 h-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.5)]" 
+                style={{ width: `${Math.min(100, (((profile.xp || 0) % 100) / 100) * 100)}%` }} 
+              />
+            </div>
+            <span className="block text-[8px] text-zinc-600 mt-1">{profile.xp || 0} XP</span>
+          </div>
+          
+          <div className="px-3 sm:px-4 py-2 bg-[#121626] border border-white/[0.05] rounded-2xl font-mono text-center">
+            <span className="block text-[9px] sm:text-[10px] text-zinc-500 uppercase font-black">SALDO COIN</span>
             <span className="text-sm font-black text-amber-400">🪙 {formatNumber(profile.coins)}</span>
           </div>
+
           {loggedInUser ? (
             <button
               onClick={handleLogoutClick}

@@ -5,6 +5,7 @@ import { GameStats, PlayerProfile, DailyMission } from '../types';
 import { GAME_LAYOUTS, DEFAULT_GAME_LAYOUT } from '../config/gameLayouts';
 import { GAME_REGISTRY } from '../config/gameRegistry';
 import { audio } from '../utils/audio';
+import { scoreService } from '../services/scoreService';
 
 import { GamePageHeader } from '../components/gamepage/GamePageHeader';
 import { GamePageRightSidebar } from '../components/gamepage/GamePageRightSidebar';
@@ -21,7 +22,7 @@ interface GamePageProps {
   profile: PlayerProfile;
   dailyMissions: DailyMission[];
   onScoreUpdate: (gameId: string, score: number) => void;
-  onGameOver: (gameId: string, score: number) => void;
+  onGameOver: (gameId: string, score: number, sessionId?: string) => void;
 }
 
 export type GameControlType = 'directional' | 'directional-action' | 'tap' | 'action' | 'keyboard' | 'none';
@@ -106,6 +107,16 @@ export default function GamePage({ games, profile, dailyMissions, onScoreUpdate,
 
   const activeGame = games.find((g) => g.id === gameId);
   const registryItem = gameId ? GAME_REGISTRY[gameId] : null;
+  const currentSessionIdRef = useRef<string | undefined>(undefined);
+
+  // Fetch session on restart
+  useEffect(() => {
+    if (activeGame) {
+      scoreService.startSession(activeGame.id, profile.name).then((res) => {
+        currentSessionIdRef.current = res.sessionId;
+      });
+    }
+  }, [activeGame, key, profile.name]);
 
   // Track recently played and check tutorial status on gameId change
   useEffect(() => {
@@ -291,7 +302,7 @@ export default function GamePage({ games, profile, dailyMissions, onScoreUpdate,
                   >
                     <GameComponent
                       key={key}
-                      onGameOver={(score: number) => onGameOver(activeGame.id, score)}
+                      onGameOver={(score: number) => onGameOver(activeGame.id, score, currentSessionIdRef.current)}
                       onScoreUpdate={(score: number) => onScoreUpdate(activeGame.id, score)}
                       highScore={activeGame.highScore}
                     />

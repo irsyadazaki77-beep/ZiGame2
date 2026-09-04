@@ -1,0 +1,37 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile and game sync state.",
+      "type": "object",
+      "properties": {
+        "schemaVersion": { "type": "number" },
+        "revision": { "type": "number" },
+        "updatedAt": { "type": "number" },
+        "userId": { "type": "string", "maxLength": 128 },
+        "deviceId": { "type": "string", "maxLength": 128 },
+        "profile": {
+          "type": "object",
+          "properties": {
+            "name": { "type": "string", "maxLength": 30 },
+            "avatar": { "type": "string", "maxLength": 10 },
+            "colorTheme": { "type": "string", "maxLength": 20 },
+            "coins": { "type": "number" },
+            "unlockedAvatars": { "type": "array" },
+            "unlockedThemes": { "type": "array" }
+          }
+        },
+        "games": { "type": "array" },
+        "achievements": { "type": "array" },
+        "missions": { "type": "array" },
+        "recentlyPlayed": { "type": "array" }
+      }
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "Stores all user save data."
+    }
+  }
+}

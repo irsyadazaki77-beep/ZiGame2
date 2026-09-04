@@ -4,20 +4,20 @@ import { audio } from '../../utils/audio';
 
 interface CoinGambleWidgetProps {
   coins: number;
-  onGambleResult: (changeCoins: number, message: string, isWin: boolean) => void;
+  onGamble: (bet: number, choice: 'heads' | 'tails') => Promise<{ success: boolean; won?: boolean; outcomeSide?: 'heads' | 'tails'; changeCoins?: number; message?: string }>;
 }
 
-export const CoinGambleWidget: React.FC<CoinGambleWidgetProps> = ({ coins, onGambleResult }) => {
+export const CoinGambleWidget: React.FC<CoinGambleWidgetProps> = ({ coins, onGamble }) => {
   const [bet, setBet] = useState(20);
   const [choice, setChoice] = useState<'heads' | 'tails'>('heads');
   const [isFlipping, setIsFlipping] = useState(false);
   const [resultSide, setResultSide] = useState<'heads' | 'tails' | null>(null);
 
-  const handleFlip = () => {
+  const handleFlip = async () => {
     if (isFlipping) return;
     if (coins < bet) {
       audio.playHit();
-      onGambleResult(0, 'Koin Anda tidak cukup untuk jumlah taruhan ini!', false);
+      // local error handling handled by UI disabled state or here
       return;
     }
 
@@ -25,19 +25,23 @@ export const CoinGambleWidget: React.FC<CoinGambleWidgetProps> = ({ coins, onGam
     setResultSide(null);
     audio.playCoin();
 
+    const res = await onGamble(bet, choice);
+    
+    // Slight delay for animation feel
     setTimeout(() => {
-      const isHeads = Math.random() < 0.5;
-      const outcomeSide = isHeads ? 'heads' : 'tails';
-      const won = outcomeSide === choice;
-      setResultSide(outcomeSide);
       setIsFlipping(false);
+      
+      if (!res.success) {
+        audio.playHit();
+        return;
+      }
 
-      if (won) {
+      setResultSide(res.outcomeSide!);
+      
+      if (res.won) {
         audio.playScore();
-        onGambleResult(bet, `BERHASIL! Koin melayang di sisi ${outcomeSide.toUpperCase()}! Anda menang +${bet}🪙!`, true);
       } else {
         audio.playHit();
-        onGambleResult(-bet, `SAYANG! Koin mendarat di sisi ${outcomeSide.toUpperCase()}. Anda kehilangan ${bet}🪙.`, false);
       }
     }, 1200);
   };

@@ -7,11 +7,13 @@ import { generateDailyMissions, getTodayDateString } from '../data/missions';
 import { storageService } from '../services/storageService';
 import { scoreService } from '../services/scoreService';
 import { audio } from '../utils/audio';
+import { auth, isFirebaseReady } from '../services/firebase';
 
 export const useGameProgress = (
   profile: PlayerProfile,
   onUpdateProfile: (newProfile: PlayerProfile) => void,
-  showToast: (title: string, message: string, type: 'success' | 'error' | 'info', icon?: string) => void
+  showToast: (title: string, message: string, type: 'success' | 'error' | 'info', icon?: string) => void,
+  processGameSession: (gameId: string, score: number, durationMs: number) => any
 ) => {
   const navigate = useNavigate();
   const [games, setGames] = useState<GameStats[]>(INITIAL_GAMES);
@@ -125,18 +127,27 @@ export const useGameProgress = (
     checkAchievements(gameId, currentScore);
   };
 
-  const handleGameOver = async (gameId: string, finalScore: number, sessionDuration?: number) => {
-    // Validate score with server
-    const result = await scoreService.submitScore({
-      gameId,
-      score: finalScore,
-      playerName: profile.name,
-      playerAvatar: profile.avatar
-    });
+  const handleGameOver = async (gameId: string, finalScore: number, sessionId?: string, sessionDuration?: number) => {
+    // Validate score with server only if the user is authenticated with Firebase
+    const activeUser = localStorage.getItem('zigame_active_user');
+    const isOfflineProfile = activeUser && activeUser !== auth?.currentUser?.uid && activeUser !== auth?.currentUser?.email;
 
-    if (!result.success) {
-      console.warn('Score rejected by server:', result.message);
-      return; // Don't save if server rejects
+    if (!isFirebaseReady() || !auth?.currentUser || isOfflineProfile) {
+      console.log('Offline/Local profile detected. Score saved locally, not submitted to public cloud leaderboard.');
+    } else {
+      const result = await scoreService.submitScore({
+        gameId,
+        score: finalScore,
+        playerName: profile.name,
+        playerAvatar: profile.avatar,
+        sessionId
+      });
+
+      if (!result.success) {
+        console.warn('Score rejected by server:', result.message);
+        showToast('Skor Ditolak', result.message || 'Gagal memvalidasi sesi', 'error');
+        return; // Don't save if server rejects
+      }
     }
 
     let isHighScore = false;
@@ -167,24 +178,38 @@ export const useGameProgress = (
     } else {
       newStreak = 1;
     }
+    const xpResult = processGameSession(gameId, finalScore, sessionDuration || 0);
+
+
 
     setGames(updatedGames);
     storageService.saveGamesStats(updatedGames);
 
     updateRecentlyPlayed(gameId, finalScore, sessionDuration);
-
-    // Award standard play coin reward: 1 coin per 10 points
-    // Only give reward if finalScore > 0 to prevent start-quit abuse
-    const coinReward = finalScore > 0 ? Math.max(2, Math.floor(finalScore / 10)) : 0;
-    const nextCoins = profile.coins + coinReward;
     
+    // We expect the server to give us coinsEarned and newBalance in result if we updated scoreService to return it.
+    // Wait, let's just use the server result if available, or sync it.
+    // Sync balance after playing a game
+    import('../services/economyService').then(({ economyService }) => {
+      economyService.syncBalance(profile.name).then(serverCoins => {
+         if (serverCoins !== null) {
+            onUpdateProfile({
+              ...profile,
+              streak: newStreak,
+              lastPlayDate: todayStr,
+              coins: serverCoins
+            });
+         }
+      });
+    });
+
+    // Optimistic update if economy sync is slow
     onUpdateProfile({
       ...profile,
-      coins: nextCoins,
       streak: newStreak,
       lastPlayDate: todayStr
     });
-
+    
     checkMissions('score', gameId, finalScore, isHighScore);
     checkAchievements(gameId, finalScore);
   };
@@ -233,9 +258,15 @@ export const useGameProgress = (
       storageService.saveDailyMissions(updatedMissions);
       
       if (earnedCoins > 0) {
-        onUpdateProfile({
-          ...profile,
-          coins: profile.coins + earnedCoins,
+        import('../services/economyService').then(({ economyService }) => {
+          economyService.claimReward(earnedCoins, 'daily_mission', profile.name).then(res => {
+            if (res.success && res.newBalance !== undefined) {
+               onUpdateProfile({
+                 ...profile,
+                 coins: res.newBalance
+               });
+            }
+          });
         });
       }
     }
@@ -266,9 +297,15 @@ export const useGameProgress = (
       setAchievements(updatedAchievements);
       storageService.saveAchievements(updatedAchievements);
 
-      onUpdateProfile({
-        ...profile,
-        coins: profile.coins + earnedCoins,
+      import('../services/economyService').then(({ economyService }) => {
+        economyService.claimReward(earnedCoins, 'achievement', profile.name).then(res => {
+          if (res.success && res.newBalance !== undefined) {
+            onUpdateProfile({
+              ...profile,
+              coins: res.newBalance
+            });
+          }
+        });
       });
     }
   };
