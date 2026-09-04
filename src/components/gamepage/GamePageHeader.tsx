@@ -60,30 +60,30 @@ export const GamePageHeader: React.FC<GamePageHeaderProps> = ({
 }) => {
   return (
     <div 
-      className="flex-none h-14 md:h-16 z-40 flex items-center justify-between px-4 md:px-6 bg-zinc-950/90 backdrop-blur-md border-b border-zinc-800/80 shadow-md select-none"
+      className="flex-none h-14 md:h-16 z-40 flex items-center justify-between px-4 md:px-6 bg-[#0d1017]/90 backdrop-blur-md border-b border-white/[0.06] shadow-sm select-none"
       id="arcade-top-navbar"
     >
       {/* Left: Back & Game Info */}
       <div className="flex items-center gap-3">
         <button
           onClick={() => { audio.playCoin(); onNavigateHome(); }}
-          className="w-9 h-9 flex items-center justify-center rounded-xl text-zinc-400 hover:text-white hover:bg-zinc-900 border border-zinc-800 transition-colors cursor-pointer"
+          className="w-9 h-9 flex items-center justify-center rounded-xl text-zinc-400 hover:text-white hover:bg-white/[0.06] border border-white/[0.08] transition-colors cursor-pointer"
           aria-label="Kembali ke Lobi"
           title="Kembali ke Lobi"
           id="back-to-lobby-btn"
         >
-          <ArrowLeft size={18} />
+          <ArrowLeft size={17} />
         </button>
 
-        <div className="w-px h-5 bg-zinc-800"></div>
+        <div className="w-px h-5 bg-white/[0.08]"></div>
 
         <div className="flex items-center gap-2.5">
-          <span className="text-2xl shrink-0" aria-hidden="true">{activeGame.icon}</span>
+          <span className="text-xl shrink-0" aria-hidden="true">{activeGame.icon}</span>
           <div className="flex flex-col">
-            <h1 className="font-display font-black text-xs md:text-sm tracking-wider uppercase text-zinc-100">
+            <h1 className="font-semibold text-xs md:text-sm text-zinc-100 leading-tight">
               {activeGame.title}
             </h1>
-            <span className="text-[10px] font-mono font-bold text-indigo-400 uppercase tracking-widest leading-none mt-0.5">
+            <span className="text-[11px] text-zinc-400 font-normal leading-none mt-0.5">
               {activeGame.genre || 'Arcade'}
             </span>
           </div>
@@ -95,7 +95,7 @@ export const GamePageHeader: React.FC<GamePageHeaderProps> = ({
         {/* Tutorial Guide Button */}
         <button
           onClick={() => { audio.playCoin(); onOpenTutorial(); }}
-          className="px-3 py-1.5 rounded-xl border border-indigo-500/30 bg-indigo-500/10 text-indigo-300 hover:bg-indigo-500/20 font-mono font-bold text-xs flex items-center gap-1.5 transition cursor-pointer"
+          className="px-3 py-1.5 rounded-xl border border-white/[0.08] bg-white/[0.04] text-zinc-300 hover:text-white hover:bg-white/[0.08] text-xs font-medium flex items-center gap-1.5 transition cursor-pointer"
           title="Panduan Cara Bermain"
           aria-label="Panduan Cara Bermain"
           id="header-tutorial-btn"
@@ -107,7 +107,7 @@ export const GamePageHeader: React.FC<GamePageHeaderProps> = ({
         {/* Quick Restart */}
         <button
           onClick={onRestart}
-          className="w-9 h-9 rounded-xl border border-zinc-800 bg-zinc-900 flex items-center justify-center text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors cursor-pointer"
+          className="w-9 h-9 rounded-xl border border-white/[0.08] bg-[#141824] flex items-center justify-center text-zinc-400 hover:text-white hover:bg-white/[0.08] transition-colors cursor-pointer"
           title="Restart Game"
           aria-label="Restart Game"
           id="quick-restart-btn"
@@ -131,21 +131,21 @@ export const GamePageHeader: React.FC<GamePageHeaderProps> = ({
         {/* Fullscreen */}
         <button
           onClick={toggleFullscreen}
-          className="w-9 h-9 rounded-xl border border-zinc-800 bg-zinc-900 hidden sm:flex items-center justify-center text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors cursor-pointer"
+          className="w-9 h-9 rounded-xl border border-white/[0.08] bg-[#141824] hidden sm:flex items-center justify-center text-zinc-400 hover:text-white hover:bg-white/[0.08] transition-colors cursor-pointer"
           title="Layar Penuh"
           aria-label="Toggle Layar Penuh"
           id="header-fullscreen-btn"
         >
-          {isFullscreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
+          {isFullscreen ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
         </button>
 
         {/* Community / Leaderboard Drawer Toggle */}
         <button
           onClick={() => { audio.playCoin(); setIsSidebarOpen(prev => !prev); }}
-          className={`px-3 py-1.5 rounded-xl border font-mono font-bold text-xs hidden lg:flex items-center gap-1.5 transition cursor-pointer ${
+          className={`px-3 py-1.5 rounded-xl border text-xs font-medium hidden lg:flex items-center gap-1.5 transition cursor-pointer ${
             isSidebarOpen
-              ? 'bg-indigo-600 border-indigo-500 text-white shadow-lg'
-              : 'bg-zinc-900 border-zinc-800 text-zinc-400 hover:text-white'
+              ? 'bg-indigo-600 border-indigo-500 text-white shadow-sm'
+              : 'bg-[#141824] border-white/[0.08] text-zinc-300 hover:text-white hover:bg-white/[0.08]'
           }`}
           title="Tutup/Buka Komunitas & Leaderboard"
           aria-label="Toggle Komunitas"

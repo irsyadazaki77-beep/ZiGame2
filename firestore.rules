@@ -22,7 +22,7 @@ service cloud.firestore {
         && data.profile.name.size() <= 30;
     }
 
-    // User Profile and Save Data
+    // User Profile and Sync State
     match /users/{userId} {
       allow read: if isSignedIn() && request.auth.uid == userId && isValidId(userId);
       
@@ -32,17 +32,17 @@ service cloud.firestore {
         && isValidUser(incoming())
         // Client cannot set initial coins > 100
         && (!('coins' in incoming().profile) || incoming().profile.coins <= 100)
-        // Ensure no protected fields are set on create
-        && !incoming().keys().hasAny(['isAdmin', 'isBanned', 'verifiedBalance']);
+        // Ensure no administrative / sensitive fields are set on create
+        && !incoming().keys().hasAny(['isAdmin', 'isBanned', 'verifiedBalance', 'role']);
 
       allow update: if (
         isSignedIn() 
         && request.auth.uid == userId 
         && isValidId(userId)
         && isValidUser(incoming())
-        // Client cannot tamper with administrative fields
-        && (!incoming().diff(existing()).affectedKeys().hasAny(['isAdmin', 'isBanned', 'verifiedBalance']))
-        // IMMUTABLE FIELD: Coins must not change during a client update
+        // Client cannot tamper with administrative / sensitive fields
+        && (!incoming().diff(existing()).affectedKeys().hasAny(['isAdmin', 'isBanned', 'verifiedBalance', 'role']))
+        // IMMUTABLE FIELD: Coins must not change during client-direct updates (must use /api endpoints)
         && (
           !('profile' in incoming()) || 
           !('coins' in incoming().profile) ||
@@ -53,6 +53,24 @@ service cloud.firestore {
       );
       
       allow delete: if false;
+    }
+
+    // Server-Authoritative Economy Store (Read: Owner, Write: Server Admin Only)
+    match /userEconomy/{userId} {
+      allow read: if isSignedIn() && request.auth.uid == userId && isValidId(userId);
+      allow write: if false;
+    }
+
+    // Spin Cooldowns (Read: Owner, Write: Server Admin Only)
+    match /spinCooldowns/{userId} {
+      allow read: if isSignedIn() && request.auth.uid == userId && isValidId(userId);
+      allow write: if false;
+    }
+
+    // Economy Transaction Ledger (Read: Owner, Write: Server Admin Only)
+    match /economyTransactions/{txId} {
+      allow read: if isSignedIn() && existing().userId == request.auth.uid && isValidId(txId);
+      allow write: if false;
     }
 
     // Cloud Saves collection with schema version validation
@@ -71,27 +89,28 @@ service cloud.firestore {
       allow delete: if isSignedIn() && existing().userId == request.auth.uid && isValidId(saveId);
     }
 
-    // Global Public Leaderboards (Read: Any Authenticated User, Write: Server Authoritative ONLY)
+    // Global Public Leaderboards (Read: Public, Write: Server Authoritative ONLY)
     match /leaderboards/{gameId} {
-      allow read: if true; // Public leaderboard view
+      allow read: if true;
       
       match /entries/{entryId} {
         allow read: if true;
-        // Leaderboard writes are handled by the server admin SDK
-        allow create, update, delete: if false;
+        allow write: if false;
       }
     }
 
-    // Transactions Ledger (Immutable Write-Once, Read: Owner Only)
-    match /transactions/{txId} {
-      allow read: if isSignedIn() && existing().userId == request.auth.uid && isValidId(txId);
-      // Transactions are handled by the server
-      allow create, update, delete: if false; 
+    // Game Sessions for Anti-Cheat Nonce Validation (Server Admin Only)
+    match /gameSessions/{sessionId} {
+      allow read, write: if false;
     }
 
-    // Game Sessions for Anti-Cheat Nonce Validation
-    match /gameSessions/{sessionId} {
-      // Game sessions are managed by the server
+    // Suspicious Score Audit Logs (Server Admin Only)
+    match /suspiciousScores/{scoreId} {
+      allow read, write: if false;
+    }
+
+    // Processed Actions for Idempotency (Server Admin Only)
+    match /processedActions/{actionKey} {
       allow read, write: if false;
     }
   }

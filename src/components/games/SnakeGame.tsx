@@ -11,6 +11,7 @@ interface SnakeGameProps {
 }
 
 type Point = { x: number; y: number };
+type Particle = { x: number; y: number; vx: number; vy: number; life: number; color: string };
 
 const GRID_SIZE = 20;
 const INITIAL_SNAKE = [
@@ -19,7 +20,7 @@ const INITIAL_SNAKE = [
   { x: 10, y: 12 },
 ];
 const INITIAL_DIRECTION = { x: 0, y: -1 };
-const BASE_SPEED = 150; // ms per move
+const BASE_SPEED = 140; // ms per move
 
 export default function SnakeGame({ onGameOver, onScoreUpdate, highScore }: SnakeGameProps) {
   const {
@@ -31,7 +32,6 @@ export default function SnakeGame({ onGameOver, onScoreUpdate, highScore }: Snak
     triggerGameOver,
     startWithCountdown,
     startLoop,
-    stopLoop,
   } = useGameEngine({ onScoreUpdate, onGameOver });
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -39,6 +39,8 @@ export default function SnakeGame({ onGameOver, onScoreUpdate, highScore }: Snak
   const directionRef = useRef<Point>(INITIAL_DIRECTION);
   const nextDirectionRef = useRef<Point>(INITIAL_DIRECTION);
   const foodRef = useRef<Point>({ x: 5, y: 5 });
+  const particlesRef = useRef<Particle[]>([]);
+  const shakeRef = useRef<number>(0);
   
   const moveTimerRef = useRef<number>(0);
   const scoreRef = useRef<number>(0);
@@ -57,48 +59,110 @@ export default function SnakeGame({ onGameOver, onScoreUpdate, highScore }: Snak
     return newFood!;
   }, []);
 
+  // Sharp DPR canvas setup
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    canvas.width = 500 * dpr;
+    canvas.height = 500 * dpr;
+    const ctx = canvas.getContext('2d');
+    if (ctx) {
+      ctx.scale(dpr, dpr);
+    }
+  }, []);
+
+  const spawnFoodParticles = (x: number, y: number) => {
+    const colors = ['#f43f5e', '#fb7185', '#fda4af', '#ffffff'];
+    for (let i = 0; i < 8; i++) {
+      const angle = (Math.PI * 2 * i) / 8;
+      const speed = 1.5 + Math.random() * 2;
+      particlesRef.current.push({
+        x,
+        y,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed,
+        life: 1.0,
+        color: colors[i % colors.length]
+      });
+    }
+  };
+
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    const cellSize = canvas.width / GRID_SIZE;
+    ctx.save();
 
-    // Draw Grid (optional, for cyber look)
-    ctx.strokeStyle = '#18181b'; // zinc-900
-    ctx.lineWidth = 1;
-    for (let i = 0; i <= GRID_SIZE; i++) {
-      ctx.beginPath();
-      ctx.moveTo(i * cellSize, 0);
-      ctx.lineTo(i * cellSize, canvas.height);
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.moveTo(0, i * cellSize);
-      ctx.lineTo(canvas.width, i * cellSize);
-      ctx.stroke();
+    // Subtle screen shake
+    if (shakeRef.current > 0) {
+      const sx = (Math.random() - 0.5) * shakeRef.current;
+      const sy = (Math.random() - 0.5) * shakeRef.current;
+      ctx.translate(sx, sy);
+      shakeRef.current = Math.max(0, shakeRef.current - 0.5);
     }
 
-    // Draw Food
+    const logicalSize = 500;
+    ctx.clearRect(0, 0, logicalSize, logicalSize);
+    const cellSize = logicalSize / GRID_SIZE;
+
+    // Clean Subtle Background
+    ctx.fillStyle = '#090b10';
+    ctx.fillRect(0, 0, logicalSize, logicalSize);
+
+    // Subtle Grid Points
+    ctx.fillStyle = '#171c2b';
+    for (let x = 0; x <= GRID_SIZE; x++) {
+      for (let y = 0; y <= GRID_SIZE; y++) {
+        ctx.fillRect(x * cellSize - 1, y * cellSize - 1, 2, 2);
+      }
+    }
+
+    // Food (Apple)
     const cx = foodRef.current.x * cellSize + cellSize / 2;
     const cy = foodRef.current.y * cellSize + cellSize / 2;
-    const radius = cellSize / 2.5;
+    const radius = cellSize / 2.6;
     
-    // Food Glow
-    ctx.shadowBlur = 20;
-    ctx.shadowColor = '#f43f5e';
-    ctx.fillStyle = '#f43f5e'; // rose-500
+    // Soft food halo
+    const glowGrad = ctx.createRadialGradient(cx, cy, radius * 0.2, cx, cy, radius * 1.8);
+    glowGrad.addColorStop(0, 'rgba(244, 63, 94, 0.4)');
+    glowGrad.addColorStop(1, 'rgba(244, 63, 94, 0)');
+    ctx.fillStyle = glowGrad;
+    ctx.beginPath();
+    ctx.arc(cx, cy, radius * 1.8, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Food body
+    ctx.fillStyle = '#f43f5e';
     ctx.beginPath();
     ctx.arc(cx, cy, radius, 0, Math.PI * 2);
     ctx.fill();
-    
-    // Food core
-    ctx.shadowBlur = 0;
-    ctx.fillStyle = '#fff1f2'; // rose-50
+
+    // Food highlight
+    ctx.fillStyle = '#ffe4e6';
     ctx.beginPath();
-    ctx.arc(cx, cy, radius * 0.4, 0, Math.PI * 2);
+    ctx.arc(cx - radius * 0.25, cy - radius * 0.25, radius * 0.35, 0, Math.PI * 2);
     ctx.fill();
+
+    // Draw Particles
+    for (let i = particlesRef.current.length - 1; i >= 0; i--) {
+      const p = particlesRef.current[i];
+      p.x += p.vx;
+      p.y += p.vy;
+      p.life -= 0.04;
+      if (p.life <= 0) {
+        particlesRef.current.splice(i, 1);
+        continue;
+      }
+      ctx.globalAlpha = p.life;
+      ctx.fillStyle = p.color;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, 2.5 * p.life, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1.0;
 
     // Draw Snake
     snakeRef.current.forEach((segment, index) => {
@@ -109,49 +173,42 @@ export default function SnakeGame({ onGameOver, onScoreUpdate, highScore }: Snak
       const h = cellSize - 4;
 
       if (isHead) {
-        ctx.fillStyle = '#a3e635'; // lime-400
-        ctx.shadowBlur = 20;
-        ctx.shadowColor = '#a3e635';
+        ctx.fillStyle = '#10b981'; // emerald-500
       } else {
-        // Gradient for body based on position
-        const opacity = Math.max(0.3, 1 - (index / snakeRef.current.length));
-        ctx.fillStyle = `rgba(101, 163, 13, ${opacity})`; // lime-600 with opacity
-        ctx.shadowBlur = 5;
-        ctx.shadowColor = '#65a30d';
+        const factor = Math.max(0.4, 1 - (index / snakeRef.current.length) * 0.6);
+        ctx.fillStyle = `rgba(16, 185, 129, ${factor})`;
       }
       
-      // Draw rounded rectangle for snake segments
       ctx.beginPath();
       ctx.roundRect(x, y, w, h, isHead ? 6 : 4);
       ctx.fill();
 
-      // Draw eyes for head
+      // Eyes for snake head
       if (isHead) {
-        ctx.shadowBlur = 0;
-        ctx.fillStyle = '#000000';
-        
-        // Determine eye positions based on direction
-        let eye1X, eye1Y, eye2X, eye2Y;
+        ctx.fillStyle = '#ffffff';
+        let eye1X = x + 4, eye1Y = y + 4, eye2X = x + w - 7, eye2Y = y + 4;
         const dir = directionRef.current;
         
         if (dir.x === 1) { // Right
-          eye1X = x + w - 4; eye1Y = y + 4;
-          eye2X = x + w - 4; eye2Y = y + h - 6;
+          eye1X = x + w - 6; eye1Y = y + 4;
+          eye2X = x + w - 6; eye2Y = y + h - 7;
         } else if (dir.x === -1) { // Left
-          eye1X = x + 4; eye1Y = y + 4;
-          eye2X = x + 4; eye2Y = y + h - 6;
+          eye1X = x + 3; eye1Y = y + 4;
+          eye2X = x + 3; eye2Y = y + h - 7;
         } else if (dir.y === -1) { // Up
-          eye1X = x + 4; eye1Y = y + 4;
-          eye2X = x + w - 6; eye2Y = y + 4;
+          eye1X = x + 4; eye1Y = y + 3;
+          eye2X = x + w - 7; eye2Y = y + 3;
         } else { // Down
           eye1X = x + 4; eye1Y = y + h - 6;
-          eye2X = x + w - 6; eye2Y = y + h - 6;
+          eye2X = x + w - 7; eye2Y = y + h - 6;
         }
 
         ctx.fillRect(eye1X, eye1Y, 3, 3);
         ctx.fillRect(eye2X, eye2Y, 3, 3);
       }
     });
+
+    ctx.restore();
   }, []);
 
   const updateGameLogic = useCallback(() => {
@@ -169,6 +226,7 @@ export default function SnakeGame({ onGameOver, onScoreUpdate, highScore }: Snak
       newHead.y < 0 ||
       newHead.y >= GRID_SIZE
     ) {
+      shakeRef.current = 8;
       audio.playExplosion();
       triggerGameOver();
       return;
@@ -176,6 +234,7 @@ export default function SnakeGame({ onGameOver, onScoreUpdate, highScore }: Snak
 
     // Self collision
     if (snakeRef.current.some(segment => segment.x === newHead.x && segment.y === newHead.y)) {
+      shakeRef.current = 8;
       audio.playExplosion();
       triggerGameOver();
       return;
@@ -186,6 +245,8 @@ export default function SnakeGame({ onGameOver, onScoreUpdate, highScore }: Snak
     // Food collision
     if (newHead.x === foodRef.current.x && newHead.y === foodRef.current.y) {
       audio.playCoin();
+      const cellSize = 500 / GRID_SIZE;
+      spawnFoodParticles(foodRef.current.x * cellSize + cellSize / 2, foodRef.current.y * cellSize + cellSize / 2);
       foodRef.current = generateFood(newSnake);
       const newScore = scoreRef.current + 10;
       scoreRef.current = newScore;
@@ -200,8 +261,7 @@ export default function SnakeGame({ onGameOver, onScoreUpdate, highScore }: Snak
   const gameStep = useCallback((timestamp: number, deltaTime: number) => {
     moveTimerRef.current += deltaTime;
 
-    // Speed increases slightly as score goes up
-    const currentSpeed = Math.max(50, BASE_SPEED - (scoreRef.current * 2));
+    const currentSpeed = Math.max(65, BASE_SPEED - (scoreRef.current * 1.5));
 
     if (moveTimerRef.current >= currentSpeed) {
       moveTimerRef.current = 0;
@@ -216,6 +276,7 @@ export default function SnakeGame({ onGameOver, onScoreUpdate, highScore }: Snak
     directionRef.current = { ...INITIAL_DIRECTION };
     nextDirectionRef.current = { ...INITIAL_DIRECTION };
     foodRef.current = generateFood(snakeRef.current);
+    particlesRef.current = [];
     scoreRef.current = 0;
     updateScore(0);
     draw();
@@ -264,7 +325,6 @@ export default function SnakeGame({ onGameOver, onScoreUpdate, highScore }: Snak
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [gameStateRef, setGameState]);
 
-  // Initial draw
   useEffect(() => {
     draw();
   }, [draw]);
@@ -287,36 +347,36 @@ export default function SnakeGame({ onGameOver, onScoreUpdate, highScore }: Snak
   }, []);
 
   return (
-    <div className="relative flex flex-col h-full w-full min-h-0 items-center justify-center overflow-hidden p-2 bg-zinc-950">
-      {/* HUD Bar inside the flex layout to prevent overlap */}
-      <div className="w-full flex-none flex justify-between items-center mb-2 px-2 font-mono text-xs">
-        <div className="text-lime-400 font-bold uppercase tracking-wider">
-          STATUS: <span className="text-white">ONLINE</span>
+    <div className="relative flex flex-col h-full w-full min-h-0 items-center justify-center overflow-hidden p-2 bg-[#090b10]">
+      {/* Clean In-game HUD */}
+      <div className="w-full flex-none flex justify-between items-center mb-2 px-3 text-xs">
+        <div className="text-zinc-400 font-medium">
+          Panjang: <span className="text-emerald-400 font-semibold">{snakeRef.current.length}</span>
         </div>
-        <div className="text-yellow-400 font-bold uppercase tracking-wider">
-          SKOR: <span className="text-white">{score}</span>
+        <div className="text-zinc-400 font-medium">
+          Skor: <span className="text-white font-bold">{score}</span>
         </div>
       </div>
 
       {/* Canvas Wrapper */}
-      <div className="relative flex-1 min-h-0 w-full flex items-center justify-center bg-black rounded-xl border border-zinc-800 shadow-[0_0_20px_rgba(0,0,0,0.5)] overflow-hidden">
+      <div className="relative flex-1 min-h-0 w-full flex items-center justify-center bg-[#090b10] rounded-2xl border border-white/[0.08] shadow-inner overflow-hidden">
         <canvas
           ref={canvasRef}
-          width={500}
-          height={500}
-          className="max-w-full max-h-full object-contain"
+          style={{ width: '100%', height: '100%', maxWidth: '500px', maxHeight: '500px' }}
+          className="object-contain"
         />
         
         <GameOverlay
           gameState={gameState}
           score={score}
+          highScore={highScore}
           onStart={startGame}
           onRestart={startGame}
-          instructions="Gunakan Arrow Keys, WASD, atau D-Pad untuk bergerak. Makan titik merah untuk tumbuh. Jangan tabrak dinding atau ekor sendiri!"
+          instructions="Arahkan ular untuk mengonsumsi titik merah. Hindari benturan dengan dinding batas atau badan sendiri!"
         />
       </div>
 
-      {/* Mobile Controls outside the canvas wrapper so it doesn't overlap */}
+      {/* Mobile Controls outside canvas */}
       {gameState === 'playing' && (
         <div className="flex-none mt-2">
           <MobileControls onDirection={handleDirection} />

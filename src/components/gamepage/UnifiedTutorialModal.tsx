@@ -37,23 +37,25 @@ export const UnifiedTutorialModal: React.FC<UnifiedTutorialModalProps> = ({
 
   return (
     <div
-      className="fixed inset-0 z-[120] bg-black/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-4 select-none font-sans animate-fade-in"
+      className="fixed inset-0 z-[120] bg-black/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 select-none font-sans"
       id="game-unified-tutorial-modal"
     >
-      <div className="bg-[#0e121c] border border-indigo-500/40 rounded-3xl max-w-xl w-full overflow-hidden shadow-[0_0_50px_rgba(99,102,241,0.25)] relative flex flex-col max-h-[90vh]">
+      <div className="bg-[#11151f] border border-white/[0.08] rounded-2xl max-w-lg w-full overflow-hidden shadow-2xl shadow-black/90 relative flex flex-col max-h-[88vh]">
         {/* Header Bar */}
-        <div className="p-4 sm:p-5 bg-gradient-to-r from-[#0d1017] via-indigo-950/40 to-[#0d1017] border-b border-white/[0.08] flex items-center justify-between">
+        <div className="p-4 sm:p-5 bg-[#0d1017] border-b border-white/[0.06] flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <span className="text-3xl p-2 rounded-2xl bg-zinc-900/90 border border-white/[0.08] shadow-inner">
+            <span className="text-2xl w-10 h-10 rounded-xl bg-[#181c2b] border border-white/[0.08] flex items-center justify-center shrink-0">
               {game.icon}
             </span>
             <div>
-              <div className="text-[10px] font-mono font-bold text-indigo-400 uppercase tracking-widest flex items-center gap-1">
-                <Gamepad2 size={12} /> PANDUAN RESMI ARKADE
-              </div>
-              <h2 className="text-lg sm:text-xl font-black font-display text-white uppercase tracking-wider">
+              <h2 className="text-base sm:text-lg font-semibold text-white">
                 {game.title}
               </h2>
+              <div className="text-xs text-zinc-400 flex items-center gap-2">
+                <span>Panduan Bermain</span>
+                <span>•</span>
+                <span className="text-amber-400 font-medium">Rekor: {(game.highScore || 0).toLocaleString()} pts</span>
+              </div>
             </div>
           </div>
           <button
@@ -66,69 +68,56 @@ export const UnifiedTutorialModal: React.FC<UnifiedTutorialModalProps> = ({
         </div>
 
         {/* Modal Body */}
-        <div className="p-4 sm:p-6 space-y-4 overflow-y-auto scrollbar-thin scrollbar-thumb-zinc-800 text-zinc-300">
-          {/* Objective & Personal Record */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <div className="sm:col-span-2 p-3.5 bg-black/40 border border-white/[0.06] rounded-2xl space-y-1">
-              <div className="flex items-center gap-1.5 text-amber-400 font-bold text-xs uppercase tracking-wider">
-                <Lightbulb size={14} />
-                <span>Objektif Utama</span>
-              </div>
-              <p className="text-xs text-zinc-300 leading-relaxed font-sans">
-                {tutorial.objective}
-              </p>
+        <div className="p-5 space-y-4 overflow-y-auto text-zinc-300 text-xs">
+          {/* Objective */}
+          <div className="space-y-1.5">
+            <div className="flex items-center gap-1.5 text-zinc-200 font-semibold">
+              <Lightbulb size={14} className="text-amber-400" />
+              <span>Objektif Permainan</span>
             </div>
-
-            <div className="p-3.5 bg-black/40 border border-white/[0.06] rounded-2xl flex flex-col justify-center space-y-1 font-mono">
-              <div className="text-[10px] text-zinc-500 uppercase tracking-wider font-bold">REKOR PRIBADI</div>
-              <div className="text-lg font-bold text-amber-400 font-display">
-                {(game.highScore || 0).toLocaleString()}{' '}
-                <span className="text-[10px] font-mono text-zinc-500">PTS</span>
-              </div>
-              <div className="text-[10px] text-indigo-400 font-bold uppercase">
-                TINGKAT: {game.difficulty || 'MEDIUM'}
-              </div>
-            </div>
+            <p className="text-zinc-300 leading-relaxed pl-5 font-normal">
+              {tutorial.objective}
+            </p>
           </div>
 
-          {/* Controls Box (Responsive to active input) */}
-          <div className="p-3.5 bg-black/40 border border-white/[0.06] rounded-2xl space-y-2.5">
+          {/* Controls */}
+          <div className="space-y-2.5 pt-3 border-t border-white/[0.06]">
             <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2 text-indigo-400 font-bold text-xs uppercase tracking-wider">
-                <Keyboard size={15} />
-                <span>Kontrol Permainan</span>
+              <div className="flex items-center gap-1.5 text-zinc-200 font-semibold">
+                <Keyboard size={14} className="text-indigo-400" />
+                <span>Kontrol</span>
               </div>
               {isGamepadConnected && (
-                <span className="px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-[10px] font-mono font-bold">
-                  🎮 Gamepad Terdeteksi
+                <span className="px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 text-[10px] font-medium">
+                  Gamepad Terhubung
                 </span>
               )}
             </div>
 
-            {/* Keyboard shortcuts */}
-            <div className="space-y-1.5">
-              <div className="text-[10px] font-mono text-zinc-400 uppercase font-semibold">Keyboard / PC:</div>
+            {/* Keyboard Keys */}
+            <div className="space-y-1.5 pl-5">
+              <div className="text-[11px] text-zinc-400 font-medium">Keyboard:</div>
               <div className="flex flex-wrap gap-1.5">
                 {tutorial.controls.keyboard.map((k, i) => (
-                  <span
+                  <kbd
                     key={i}
-                    className="px-2.5 py-1 bg-zinc-800 border border-white/[0.1] text-white font-mono font-bold text-xs rounded-lg shadow-sm"
+                    className="px-2 py-1 bg-[#181c2b] border border-white/[0.1] text-zinc-100 font-mono text-[11px] font-semibold rounded-md shadow-sm"
                   >
                     {k}
-                  </span>
+                  </kbd>
                 ))}
               </div>
             </div>
 
-            {/* Gamepad / Controller */}
+            {/* Gamepad */}
             {tutorial.controls.gamepad && (
-              <div className="space-y-1.5 pt-1 border-t border-white/[0.04]">
-                <div className="text-[10px] font-mono text-zinc-400 uppercase font-semibold">Gamepad Controller:</div>
+              <div className="space-y-1.5 pl-5 pt-1">
+                <div className="text-[11px] text-zinc-400 font-medium">Gamepad:</div>
                 <div className="flex flex-wrap gap-1.5">
                   {tutorial.controls.gamepad.map((k, i) => (
                     <span
                       key={i}
-                      className="px-2.5 py-1 bg-indigo-950/50 border border-indigo-500/30 text-indigo-200 font-mono font-bold text-xs rounded-lg"
+                      className="px-2 py-1 bg-indigo-950/40 border border-indigo-500/20 text-indigo-200 font-mono text-[11px] font-medium rounded-md"
                     >
                       {k}
                     </span>
@@ -138,70 +127,67 @@ export const UnifiedTutorialModal: React.FC<UnifiedTutorialModalProps> = ({
             )}
 
             {/* Touch / Mobile */}
-            <div className="space-y-1.5 pt-1 border-t border-white/[0.04]">
-              <div className="text-[10px] font-mono text-zinc-400 uppercase font-semibold">Sentuhan Layar / Mobile:</div>
-              <div className="text-xs text-zinc-300 font-sans">
+            <div className="space-y-1 pl-5 pt-1">
+              <div className="text-[11px] text-zinc-400 font-medium">Layar Sentuh (Mobile):</div>
+              <div className="text-zinc-300">
                 {tutorial.controls.touch.join(' • ')}
               </div>
             </div>
           </div>
 
-          {/* Scoring Rules & Pro Tips */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          {/* Scoring & Pro Tip */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-3 border-t border-white/[0.06]">
             {/* Scoring */}
-            <div className="p-3.5 bg-indigo-950/20 border border-indigo-500/20 rounded-2xl space-y-2">
-              <div className="text-[11px] font-bold text-indigo-300 uppercase tracking-wider flex items-center gap-1.5">
+            <div className="p-3 bg-[#161a27] border border-white/[0.05] rounded-xl space-y-1.5">
+              <div className="text-zinc-200 font-semibold flex items-center gap-1.5">
                 <Sparkles size={13} className="text-indigo-400" />
-                <span>Sistem Poin & Skor</span>
+                <span>Sistem Skor</span>
               </div>
-              <ul className="space-y-1 text-xs text-zinc-300 font-sans list-disc list-inside leading-relaxed">
-                {tutorial.scoring.map((s, idx) => (
+              <ul className="space-y-1 text-zinc-400 list-disc list-inside leading-relaxed text-[11px]">
+                {tutorial.scoring.slice(0, 3).map((s, idx) => (
                   <li key={idx}>{s}</li>
                 ))}
               </ul>
             </div>
 
-            {/* Pro Tips & Advanced Mechanic */}
-            <div className="p-3.5 bg-amber-950/20 border border-amber-500/20 rounded-2xl space-y-2">
-              <div className="text-[11px] font-bold text-amber-300 uppercase tracking-wider flex items-center gap-1.5">
+            {/* Pro Tip */}
+            <div className="p-3 bg-[#161a27] border border-white/[0.05] rounded-xl space-y-1.5">
+              <div className="text-zinc-200 font-semibold flex items-center gap-1.5">
                 <Zap size={13} className="text-amber-400" />
-                <span>Tips Pro & Taktik</span>
+                <span>Tips Taktik</span>
               </div>
-              <div className="text-xs text-zinc-300 space-y-1.5 font-sans leading-relaxed">
-                <p className="font-semibold text-amber-200/90">{tutorial.firstPlayHint}</p>
-                {tutorial.advancedMechanic && (
-                  <p className="text-[11px] text-zinc-400">{tutorial.advancedMechanic}</p>
-                )}
-              </div>
+              <p className="text-zinc-400 leading-relaxed text-[11px]">
+                {tutorial.firstPlayHint}
+              </p>
             </div>
           </div>
 
           {/* Don't show again checkbox */}
-          <label className="flex items-center gap-2.5 text-xs text-zinc-400 cursor-pointer pt-1">
+          <label className="flex items-center gap-2 text-xs text-zinc-400 cursor-pointer pt-2">
             <input
               type="checkbox"
               checked={dontShowAgain}
               onChange={(e) => setDontShowAgain(e.target.checked)}
-              className="w-4 h-4 rounded border-zinc-700 bg-zinc-950 text-indigo-600 focus:ring-0 cursor-pointer"
+              className="w-3.5 h-3.5 rounded border-white/20 bg-zinc-900 text-indigo-600 focus:ring-0 cursor-pointer"
             />
-            <span>Jangan tampilkan panduan ini secara otomatis lagi untuk game ini</span>
+            <span>Jangan tampilkan panduan ini otomatis lagi untuk game ini</span>
           </label>
         </div>
 
         {/* Modal Footer */}
-        <div className="p-4 sm:p-5 bg-[#0d1017] border-t border-white/[0.08] flex items-center justify-end gap-3 shrink-0">
+        <div className="p-4 bg-[#0d1017] border-t border-white/[0.06] flex items-center justify-end gap-2.5 shrink-0">
           <button
             onClick={onClose}
-            className="px-4 py-2.5 rounded-xl bg-white/[0.06] hover:bg-white/[0.12] text-zinc-300 font-mono font-bold text-xs transition cursor-pointer"
+            className="px-4 py-2 rounded-xl text-zinc-400 hover:text-white text-xs font-medium transition cursor-pointer"
           >
-            Lewati
+            Tutup
           </button>
           <button
             onClick={handleStart}
-            className="px-6 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-mono font-bold text-xs shadow-[0_0_20px_rgba(99,102,241,0.3)] transition flex items-center gap-2 cursor-pointer active:scale-95"
+            className="px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-sm shadow-indigo-600/20 transition flex items-center gap-2 cursor-pointer active:scale-98"
           >
-            <Play size={14} className="fill-white" />
-            MULAI BERMAIN
+            <Play size={13} fill="currentColor" />
+            Mulai Bermain
           </button>
         </div>
       </div>

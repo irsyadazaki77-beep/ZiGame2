@@ -13,21 +13,21 @@ interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
 
 export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
   ({ className = '', variant = 'primary', size = 'md', isLoading, disabled, children, ...props }, ref) => {
-    const baseStyle = 'inline-flex items-center justify-center font-bold tracking-wide uppercase transition-all duration-200 select-none cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950 disabled:opacity-50 disabled:pointer-events-none active:scale-[0.98]';
+    const baseStyle = 'inline-flex items-center justify-center font-semibold tracking-normal transition-all duration-150 select-none cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 focus-visible:ring-offset-[#090b10] disabled:opacity-50 disabled:pointer-events-none active:scale-[0.98]';
     
     const sizes = {
-      sm: 'px-3 py-1.5 text-xs rounded-[6px] gap-1.5 min-h-[32px]',
-      md: 'px-5 py-2.5 text-sm rounded-[10px] gap-2 min-h-[44px]',
-      lg: 'px-8 py-4 text-base rounded-[16px] gap-3 min-h-[52px]'
+      sm: 'px-3 py-1.5 text-xs rounded-lg gap-1.5 min-h-[32px]',
+      md: 'px-4 py-2 text-sm rounded-xl gap-2 min-h-[40px]',
+      lg: 'px-6 py-3 text-base rounded-xl gap-2.5 min-h-[48px]'
     };
 
     const variants = {
-      primary: 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-lg shadow-indigo-600/15 border border-indigo-500/30 focus-visible:ring-indigo-500',
-      secondary: 'bg-zinc-900 hover:bg-zinc-800 text-zinc-100 border border-zinc-800/80 focus-visible:ring-zinc-600',
-      outline: 'bg-transparent hover:bg-zinc-900 text-zinc-200 border border-zinc-800 focus-visible:ring-zinc-600',
-      ghost: 'bg-transparent hover:bg-zinc-900/60 text-zinc-400 hover:text-zinc-100 focus-visible:ring-zinc-700',
-      danger: 'bg-red-600 hover:bg-red-500 text-white shadow-lg shadow-red-600/15 border border-red-500/30 focus-visible:ring-red-500',
-      cyan: 'bg-cyan-600 hover:bg-cyan-500 text-white shadow-lg shadow-cyan-600/15 border border-cyan-500/30 focus-visible:ring-cyan-500'
+      primary: 'bg-indigo-600 hover:bg-indigo-500 text-white border border-indigo-400/30 shadow-sm shadow-indigo-600/20',
+      secondary: 'bg-[#181c2b] hover:bg-[#20263a] text-zinc-100 border border-white/[0.08]',
+      outline: 'bg-transparent hover:bg-white/[0.06] text-zinc-200 border border-white/[0.12]',
+      ghost: 'bg-transparent hover:bg-white/[0.06] text-zinc-400 hover:text-zinc-100',
+      danger: 'bg-rose-600 hover:bg-rose-500 text-white border border-rose-400/30 shadow-sm',
+      cyan: 'bg-cyan-600 hover:bg-cyan-500 text-white border border-cyan-400/30 shadow-sm'
     };
 
     return (
@@ -65,23 +65,23 @@ export const Card: React.FC<CardProps> = ({
   const paddings = {
     none: 'p-0',
     sm: 'p-4',
-    md: 'p-6',
-    lg: 'p-8'
+    md: 'p-5 sm:p-6',
+    lg: 'p-6 sm:p-8'
   };
 
   const borders = {
-    subtle: 'border-zinc-800/80 bg-zinc-900/60 shadow-[0_4px_24px_rgba(0,0,0,0.4)]',
-    indigo: 'border-indigo-500/20 bg-zinc-900/80 shadow-[0_4px_24px_rgba(79,70,229,0.08)]',
-    danger: 'border-red-500/20 bg-zinc-900/80 shadow-[0_4px_24px_rgba(239,68,68,0.08)]'
+    subtle: 'border-white/[0.06] bg-[#11151f] shadow-lg shadow-black/40',
+    indigo: 'border-indigo-500/30 bg-[#121624] shadow-lg shadow-black/40',
+    danger: 'border-rose-500/30 bg-[#171216] shadow-lg shadow-black/40'
   };
 
   return (
     <div
       className={`
-        rounded-[16px] border backdrop-blur-md transition-all duration-300
+        rounded-2xl border transition-all duration-200
         ${borders[borderVariant]}
         ${paddings[padding]}
-        ${interactive ? 'hover:border-indigo-500/40 hover:-translate-y-1 hover:shadow-[0_12px_32px_rgba(79,70,229,0.12)] cursor-pointer group' : ''}
+        ${interactive ? 'hover:border-white/[0.15] hover:bg-[#151a27] hover:-translate-y-0.5 cursor-pointer group' : ''}
         ${className}
       `}
       {...props}
@@ -149,20 +149,20 @@ interface BadgeProps extends React.HTMLAttributes<HTMLSpanElement> {
 
 export const Badge: React.FC<BadgeProps> = ({ className = '', variant = 'primary', children, ...props }) => {
   const variants = {
-    primary: 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20',
-    secondary: 'bg-zinc-800 text-zinc-400 border-zinc-700',
-    success: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
-    warning: 'bg-amber-500/10 text-amber-400 border-amber-500/20',
-    danger: 'bg-red-500/10 text-red-400 border-red-500/20',
-    cyan: 'bg-cyan-500/10 text-cyan-400 border-cyan-500/20',
-    amber: 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20'
+    primary: 'bg-indigo-500/15 text-indigo-300 border-indigo-500/25',
+    secondary: 'bg-white/[0.05] text-zinc-300 border-white/[0.08]',
+    success: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/25',
+    warning: 'bg-amber-500/15 text-amber-300 border-amber-500/25',
+    danger: 'bg-rose-500/15 text-rose-300 border-rose-500/25',
+    cyan: 'bg-cyan-500/15 text-cyan-300 border-cyan-500/25',
+    amber: 'bg-amber-500/15 text-amber-300 border-amber-500/25'
   };
 
   return (
     <span
       className={`
-        inline-flex items-center px-2.5 py-0.5 rounded-[6px] text-[10px] font-mono font-bold
-        uppercase border tracking-widest ${variants[variant]} ${className}
+        inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium
+        border ${variants[variant]} ${className}
       `}
       {...props}
     >
@@ -210,7 +210,7 @@ export const Modal: React.FC<ModalProps> = ({
   return (
     <AnimatePresence>
       {isOpen && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-3 sm:p-4">
           {/* Backdrop Click closes menu */}
           <motion.div
             initial={{ opacity: 0 }}
@@ -221,19 +221,19 @@ export const Modal: React.FC<ModalProps> = ({
           />
           
           <motion.div
-            initial={{ scale: 0.95, opacity: 0, y: 15 }}
+            initial={{ scale: 0.96, opacity: 0, y: 10 }}
             animate={{ scale: 1, opacity: 1, y: 0 }}
-            exit={{ scale: 0.95, opacity: 0, y: 15 }}
-            transition={{ type: 'spring', damping: 25, stiffness: 350 }}
+            exit={{ scale: 0.96, opacity: 0, y: 10 }}
+            transition={{ type: 'spring', damping: 26, stiffness: 350 }}
             className={`
-              relative w-full ${sizes[size]} bg-zinc-900 border border-zinc-800 rounded-[16px] 
-              shadow-2xl shadow-black/80 flex flex-col max-h-[85vh] overflow-hidden z-10
+              relative w-full ${sizes[size]} bg-[#11151f] border border-white/[0.08] rounded-2xl
+              shadow-2xl shadow-black/90 flex flex-col max-h-[88vh] overflow-hidden z-10
             `}
           >
             {/* Modal Header */}
-            <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-800/80">
+            <div className="flex items-center justify-between px-5 sm:px-6 py-4 border-b border-white/[0.06] bg-[#0d1017]">
               {title ? (
-                <h3 className="font-display font-black text-sm md:text-base tracking-widest text-white uppercase truncate">
+                <h3 className="font-semibold text-base text-white truncate">
                   {title}
                 </h3>
               ) : (
@@ -241,7 +241,7 @@ export const Modal: React.FC<ModalProps> = ({
               )}
               <button
                 onClick={onClose}
-                className="p-1.5 text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 rounded-[6px] transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                className="w-8 h-8 rounded-full flex items-center justify-center text-zinc-400 hover:text-white hover:bg-white/[0.06] transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer"
                 aria-label="Tutup"
               >
                 <X size={16} />

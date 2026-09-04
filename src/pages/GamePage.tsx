@@ -380,9 +380,9 @@ export default function GamePage({ games, profile, dailyMissions, onScoreUpdate,
           {/* Clean Focused Canvas Stage */}
           <div className="flex-1 w-full max-w-5xl flex items-center justify-center relative min-h-0 py-1 sm:py-2">
             <div 
-              className="relative w-full h-full max-h-full flex items-center justify-center bg-zinc-950/95 border border-zinc-800 rounded-2xl md:rounded-3xl shadow-2xl overflow-hidden transition-all duration-300"
+              className="relative w-full h-full max-h-full flex items-center justify-center bg-[#090b10] border border-white/[0.08] rounded-2xl md:rounded-3xl shadow-xl overflow-hidden transition-all duration-300"
               style={{
-                boxShadow: `0 0 30px ${currentAmbient.color}15, inset 0 0 15px rgba(0,0,0,0.9)`,
+                boxShadow: `0 4px 24px rgba(0,0,0,0.6)`,
                 aspectRatio: gameLayoutConfig.aspectRatio,
               }}
             >
@@ -390,10 +390,10 @@ export default function GamePage({ games, profile, dailyMissions, onScoreUpdate,
                 <GameErrorBoundary gameTitle={activeGame.title} onReset={handleRestart}>
                   <Suspense
                     fallback={
-                      <div className="w-full h-full flex flex-col items-center justify-center p-8 text-center bg-zinc-950">
-                        <RefreshCw size={28} className="animate-spin text-indigo-400 mb-3" />
-                        <span className="font-display font-black text-xs uppercase tracking-widest text-zinc-300">
-                          MEMUAT MODUL {activeGame.title.toUpperCase()}...
+                      <div className="w-full h-full flex flex-col items-center justify-center p-8 text-center bg-[#090b10]">
+                        <RefreshCw size={26} className="animate-spin text-indigo-400 mb-3" />
+                        <span className="font-medium text-xs text-zinc-300">
+                          Memuat {activeGame.title}...
                         </span>
                       </div>
                     }
@@ -408,36 +408,36 @@ export default function GamePage({ games, profile, dailyMissions, onScoreUpdate,
                 </GameErrorBoundary>
               ) : (
                 <div className="text-center p-8">
-                  <Sparkles size={32} className="text-amber-400 mx-auto mb-2 animate-spin" />
-                  <h3 className="font-display font-black text-sm uppercase text-white">MODUL GAME SEDANG DIKEMBANGKAN</h3>
+                  <Sparkles size={32} className="text-amber-400 mx-auto mb-2" />
+                  <h3 className="font-semibold text-sm text-white">Modul Game Sedang Dikembangkan</h3>
                 </div>
               )}
             </div>
           </div>
 
           {/* Compact HUD Bar beneath Canvas */}
-          <div className="w-full max-w-5xl mt-2 flex-none bg-zinc-950/80 border border-zinc-800/80 p-2.5 rounded-2xl flex flex-wrap items-center justify-between gap-3 font-sans">
+          <div className="w-full max-w-5xl mt-2 flex-none bg-[#0d1017]/90 backdrop-blur-md border border-white/[0.06] p-2.5 rounded-2xl flex flex-wrap items-center justify-between gap-3 font-sans shadow-sm">
             {/* Left: Score & Controls Badges */}
             <div className="flex items-center gap-3">
-              <div className="flex items-center gap-1.5 px-3 py-1 bg-amber-500/10 border border-amber-500/20 text-amber-400 rounded-xl font-mono text-xs font-bold">
-                <Trophy size={14} />
+              <div className="flex items-center gap-1.5 px-3 py-1 bg-amber-500/10 border border-amber-500/20 text-amber-300 rounded-xl text-xs font-semibold">
+                <Trophy size={14} className="text-amber-400" />
                 <span>Rekor: {activeGame.highScore.toLocaleString()} pts</span>
               </div>
 
               {competitiveInfo && (
-                <div className="hidden sm:flex items-center gap-1 px-2.5 py-1 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 rounded-xl font-mono text-xs font-bold">
-                  <Shield size={13} />
+                <div className="hidden sm:flex items-center gap-1 px-2.5 py-1 bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 rounded-xl text-xs font-semibold">
+                  <Shield size={13} className="text-emerald-400" />
                   <span>Rating: {competitiveInfo.rating} ({competitiveInfo.tier})</span>
                 </div>
               )}
 
               {controls.keys && controls.keys.length > 0 && (
                 <div className="hidden md:flex items-center gap-1">
-                  <span className="text-[10px] font-mono text-zinc-500 uppercase font-bold mr-1">Kontrol:</span>
+                  <span className="text-[11px] text-zinc-400 font-medium mr-1">Kontrol:</span>
                   {controls.keys.map((k, idx) => (
                     <span
                       key={idx}
-                      className="px-2 py-0.5 bg-zinc-900 border border-zinc-800 rounded text-[11px] font-mono font-bold text-zinc-300"
+                      className="px-2 py-0.5 bg-white/[0.06] border border-white/[0.08] rounded-md text-[11px] font-medium text-zinc-300"
                     >
                       {k}
                     </span>
@@ -450,7 +450,7 @@ export default function GamePage({ games, profile, dailyMissions, onScoreUpdate,
             <div className="flex items-center gap-2">
               <button
                 onClick={() => setIsFocusMode((prev) => !prev)}
-                className="px-3 py-1 bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-xs font-mono font-bold text-zinc-300 hover:text-white rounded-xl transition flex items-center gap-1.5 cursor-pointer"
+                className="px-3 py-1 bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.08] text-xs font-medium text-zinc-300 hover:text-white rounded-xl transition flex items-center gap-1.5 cursor-pointer"
                 title="Toggle Focus / Theater Mode (F)"
               >
                 <Maximize2 size={13} className="text-indigo-400" />
@@ -459,15 +459,15 @@ export default function GamePage({ games, profile, dailyMissions, onScoreUpdate,
 
               <button
                 onClick={() => setIsTutorialOpen(true)}
-                className="px-3 py-1 bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-xs font-mono font-bold text-indigo-400 hover:text-indigo-300 rounded-xl transition flex items-center gap-1.5 cursor-pointer"
+                className="px-3 py-1 bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.08] text-xs font-medium text-zinc-300 hover:text-white rounded-xl transition flex items-center gap-1.5 cursor-pointer"
               >
-                <HelpCircle size={13} />
+                <HelpCircle size={13} className="text-indigo-400" />
                 <span>Cara Bermain</span>
               </button>
 
               <button
                 onClick={() => setShowNavDrawer((prev) => !prev)}
-                className="px-3 py-1 bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-xs font-mono font-bold text-zinc-300 hover:text-white rounded-xl transition flex items-center gap-1.5 cursor-pointer"
+                className="px-3 py-1 bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.08] text-xs font-medium text-zinc-300 hover:text-white rounded-xl transition flex items-center gap-1.5 cursor-pointer"
               >
                 <Navigation size={13} className="text-amber-400" />
                 <span>{showNavDrawer ? 'Tutup' : 'Ganti Game'}</span>

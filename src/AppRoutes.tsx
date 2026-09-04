@@ -1,10 +1,11 @@
 import React, { Suspense } from 'react';
-import { Routes, Route, useNavigate } from 'react-router-dom';
+import { Routes, Route } from 'react-router-dom';
 import { useGameContext } from './contexts/GameContext';
 import { PlayerProfile, GameStats, Achievement, RecentlyPlayedEntry } from './types';
 import { useToast } from './utils/ToastContext';
+import { AdminRoute } from './components/AdminRoute';
 
-// Pages
+// Lazy Loaded Pages
 const Home = React.lazy(() => import('./pages/Home'));
 const GamesPage = React.lazy(() => import('./pages/GamesPage'));
 const ChallengesPage = React.lazy(() => import('./pages/ChallengesPage'));
@@ -31,12 +32,10 @@ export function AppRoutes() {
     handleScoreUpdate,
     handleGameOver,
     handleResetStats,
+    masteries
   } = useGameContext();
 
-  const navigate = useNavigate();
-  const { masteries } = useGameContext();
   const { showToast } = useToast();
-
   const totalPlays = games.reduce((acc, g) => acc + g.plays, 0);
 
   const handleLogout = () => {
@@ -63,17 +62,32 @@ export function AppRoutes() {
       </div>
     }>
       <Routes>
-        <Route path="/" element={<Home profile={profile} games={games} onSelectGame={handleSelectGame} recentlyPlayed={recentlyPlayed} dailyMissions={dailyMissions} achievements={achievements} totalPlays={totalPlays} onClearRecentlyPlayed={clearRecentlyPlayed} onUpdateProfile={handleUpdateProfile} />} />
+        <Route 
+          path="/" 
+          element={
+            <Home 
+              profile={profile} 
+              games={games} 
+              onSelectGame={handleSelectGame} 
+              recentlyPlayed={recentlyPlayed} 
+              dailyMissions={dailyMissions} 
+              achievements={achievements} 
+              totalPlays={totalPlays} 
+              onClearRecentlyPlayed={clearRecentlyPlayed} 
+              onUpdateProfile={handleUpdateProfile} 
+            />
+          } 
+        />
         <Route path="/games" element={<GamesPage games={games} onSelectGame={handleSelectGame} />} />
         <Route path="/challenges" element={<ChallengesPage dailyMissions={dailyMissions} profile={profile} games={games} onUpdateProfile={handleUpdateProfile} />} />
         <Route path="/leaderboard" element={<LeaderboardPage games={games} currentUsername={profile.name} />} />
         <Route path="/profile" element={
           <ProfilePage 
-             profile={profile} 
-             onUpdateProfile={handleUpdateProfile} 
-             onResetStats={handleResetStats} 
-             achievements={achievements} 
-             games={games}
+            profile={profile} 
+            onUpdateProfile={handleUpdateProfile} 
+            onResetStats={handleResetStats} 
+            achievements={achievements} 
+            games={games}
             recentlyPlayed={recentlyPlayed}
             totalPlays={totalPlays}
             onLogout={handleLogout}
@@ -93,7 +107,7 @@ export function AppRoutes() {
               profile={profile}
               dailyMissions={dailyMissions}
               onScoreUpdate={handleScoreUpdate}
-              onGameOver={handleGameOver as any} // signature differs slightly
+              onGameOver={handleGameOver}
             />
           } 
         />
@@ -103,7 +117,16 @@ export function AppRoutes() {
           path="/shop"
           element={<Shop profile={profile} onUpdateProfile={handleUpdateProfile} />}
         />
-        <Route path="/admin" element={<AdminDashboard />} />
+        
+        {/* Protected Server-Authoritative Admin Route */}
+        <Route 
+          path="/admin" 
+          element={
+            <AdminRoute>
+              <AdminDashboard />
+            </AdminRoute>
+          } 
+        />
       </Routes>
     </Suspense>
   );

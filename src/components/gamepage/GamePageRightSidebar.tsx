@@ -44,49 +44,40 @@ export const GamePageRightSidebar: React.FC<GamePageRightSidebarProps> = ({
     >
       <div className="flex flex-col h-full overflow-hidden" id="sidebar-panel-container">
         {/* Sidebar Nav Tabs */}
-        <div className="flex-none flex border-b border-zinc-800 bg-zinc-950 p-1.5 gap-1 select-none">
+        <div className="flex-none flex border-b border-white/[0.06] bg-[#0d1017] p-1.5 gap-1 select-none">
           <button
             onClick={() => { audio.playCoin(); setActiveTab('chat'); }}
-            className={`flex-1 py-2 px-2.5 rounded-lg flex items-center justify-center gap-1.5 text-[10px] sm:text-xs font-black font-display uppercase tracking-widest transition-all duration-200 cursor-pointer ${
+            className={`flex-1 py-1.5 px-2.5 rounded-lg flex items-center justify-center gap-1.5 text-xs font-medium transition-all duration-150 cursor-pointer ${
               activeTab === 'chat'
-                ? 'bg-zinc-800 text-white shadow-inner'
-                : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-900/60'
+                ? 'bg-white/[0.08] text-white shadow-sm'
+                : 'text-zinc-400 hover:text-zinc-200 hover:bg-white/[0.04]'
             }`}
-            style={{ 
-              borderBottom: activeTab === 'chat' ? `2px solid ${currentAmbient.color}` : '2px solid transparent' 
-            }}
           >
-            <MessageSquare size={13} style={{ color: activeTab === 'chat' ? currentAmbient.color : undefined }} />
+            <MessageSquare size={13} className={activeTab === 'chat' ? 'text-indigo-400' : 'text-zinc-500'} />
             Obrolan
           </button>
 
           <button
             onClick={() => { audio.playCoin(); setActiveTab('leaderboard'); }}
-            className={`flex-1 py-2 px-2.5 rounded-lg flex items-center justify-center gap-1.5 text-[10px] sm:text-xs font-black font-display uppercase tracking-widest transition-all duration-200 cursor-pointer ${
+            className={`flex-1 py-1.5 px-2.5 rounded-lg flex items-center justify-center gap-1.5 text-xs font-medium transition-all duration-150 cursor-pointer ${
               activeTab === 'leaderboard'
-                ? 'bg-zinc-800 text-white shadow-inner'
-                : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-900/60'
+                ? 'bg-white/[0.08] text-white shadow-sm'
+                : 'text-zinc-400 hover:text-zinc-200 hover:bg-white/[0.04]'
             }`}
-            style={{ 
-              borderBottom: activeTab === 'leaderboard' ? `2px solid ${currentAmbient.color}` : '2px solid transparent' 
-            }}
           >
-            <Trophy size={13} style={{ color: activeTab === 'leaderboard' ? currentAmbient.color : undefined }} />
+            <Trophy size={13} className={activeTab === 'leaderboard' ? 'text-amber-400' : 'text-zinc-500'} />
             Papan Skor
           </button>
 
           <button
             onClick={() => { audio.playCoin(); setActiveTab('quests'); }}
-            className={`flex-1 py-2 px-2.5 rounded-lg flex items-center justify-center gap-1.5 text-[10px] sm:text-xs font-black font-display uppercase tracking-widest transition-all duration-200 cursor-pointer ${
+            className={`flex-1 py-1.5 px-2.5 rounded-lg flex items-center justify-center gap-1.5 text-xs font-medium transition-all duration-150 cursor-pointer ${
               activeTab === 'quests'
-                ? 'bg-zinc-800 text-white shadow-inner'
-                : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-900/60'
+                ? 'bg-white/[0.08] text-white shadow-sm'
+                : 'text-zinc-400 hover:text-zinc-200 hover:bg-white/[0.04]'
             }`}
-            style={{ 
-              borderBottom: activeTab === 'quests' ? `2px solid ${currentAmbient.color}` : '2px solid transparent' 
-            }}
           >
-            <Target size={13} style={{ color: activeTab === 'quests' ? currentAmbient.color : undefined }} />
+            <Target size={13} className={activeTab === 'quests' ? 'text-emerald-400' : 'text-zinc-500'} />
             Misi
           </button>
         </div>

@@ -6,29 +6,68 @@
  * tuning variables are centralized here to avoid hardcoded fragmentation.
  */
 
-export const BALANCE_VERSION = "2.5.0";
+import { CanonicalGameId, CANONICAL_GAME_IDS, toCanonicalGameId } from './canonicalGames';
+
+/**
+ * ZiGame Central Balancing & Economy Configuration
+ * Balance Version: 2.0.0
+ * 
+ * All economy rates, progression curves, seasons, events, and challenge
+ * tuning variables are centralized here to avoid hardcoded fragmentation.
+ */
+
+export const BALANCE_VERSION = "2.0.0";
 
 export interface GameBalanceConfig {
   baseCoinMultiplier: number;
   baseXpMultiplier: number;
   maxScoreCeiling: number;
+  maxScorePerSec: number;
+  minDurationMs: number;
   idealPlayDurationSec: number;
   masteryDifficultyWeight: number;
 }
 
 export const GAME_BALANCE_CONFIG: Record<string, GameBalanceConfig> = {
-  'snake': { baseCoinMultiplier: 0.1, baseXpMultiplier: 0.15, maxScoreCeiling: 50000, idealPlayDurationSec: 60, masteryDifficultyWeight: 1.0 },
-  'cyber-clicker': { baseCoinMultiplier: 0.005, baseXpMultiplier: 0.01, maxScoreCeiling: 1000000, idealPlayDurationSec: 45, masteryDifficultyWeight: 0.8 },
-  'brick-breaker': { baseCoinMultiplier: 0.08, baseXpMultiplier: 0.12, maxScoreCeiling: 200000, idealPlayDurationSec: 90, masteryDifficultyWeight: 1.2 },
-  'space-defender': { baseCoinMultiplier: 0.05, baseXpMultiplier: 0.1, maxScoreCeiling: 300000, idealPlayDurationSec: 120, masteryDifficultyWeight: 1.3 },
-  'neon-2048': { baseCoinMultiplier: 0.04, baseXpMultiplier: 0.08, maxScoreCeiling: 500000, idealPlayDurationSec: 180, masteryDifficultyWeight: 1.1 },
-  'flappy-pixel': { baseCoinMultiplier: 0.5, baseXpMultiplier: 0.8, maxScoreCeiling: 10000, idealPlayDurationSec: 30, masteryDifficultyWeight: 1.4 },
-  'memory-matrix': { baseCoinMultiplier: 0.15, baseXpMultiplier: 0.2, maxScoreCeiling: 50000, idealPlayDurationSec: 60, masteryDifficultyWeight: 1.0 },
-  'minesweeper': { baseCoinMultiplier: 0.2, baseXpMultiplier: 0.25, maxScoreCeiling: 30000, idealPlayDurationSec: 75, masteryDifficultyWeight: 1.2 },
-  'tetris': { baseCoinMultiplier: 0.06, baseXpMultiplier: 0.1, maxScoreCeiling: 400000, idealPlayDurationSec: 150, masteryDifficultyWeight: 1.25 },
-  'jumprope': { baseCoinMultiplier: 0.3, baseXpMultiplier: 0.5, maxScoreCeiling: 15000, idealPlayDurationSec: 40, masteryDifficultyWeight: 1.1 },
-  'default': { baseCoinMultiplier: 0.1, baseXpMultiplier: 0.15, maxScoreCeiling: 250000, idealPlayDurationSec: 60, masteryDifficultyWeight: 1.0 }
+  'snake': { baseCoinMultiplier: 0.1, baseXpMultiplier: 0.15, maxScoreCeiling: 50000, maxScorePerSec: 150, minDurationMs: 2000, idealPlayDurationSec: 60, masteryDifficultyWeight: 1.0 },
+  'cyber-clicker': { baseCoinMultiplier: 0.005, baseXpMultiplier: 0.01, maxScoreCeiling: 1000000, maxScorePerSec: 300, minDurationMs: 1000, idealPlayDurationSec: 45, masteryDifficultyWeight: 0.8 },
+  'brick-breaker': { baseCoinMultiplier: 0.08, baseXpMultiplier: 0.12, maxScoreCeiling: 200000, maxScorePerSec: 300, minDurationMs: 3000, idealPlayDurationSec: 90, masteryDifficultyWeight: 1.2 },
+  'space-defender': { baseCoinMultiplier: 0.05, baseXpMultiplier: 0.1, maxScoreCeiling: 300000, maxScorePerSec: 500, minDurationMs: 3000, idealPlayDurationSec: 120, masteryDifficultyWeight: 1.3 },
+  'neon-2048': { baseCoinMultiplier: 0.04, baseXpMultiplier: 0.08, maxScoreCeiling: 500000, maxScorePerSec: 400, minDurationMs: 5000, idealPlayDurationSec: 180, masteryDifficultyWeight: 1.1 },
+  'flappy-pixel': { baseCoinMultiplier: 0.5, baseXpMultiplier: 0.8, maxScoreCeiling: 10000, maxScorePerSec: 50, minDurationMs: 2000, idealPlayDurationSec: 30, masteryDifficultyWeight: 1.4 },
+  'memory-grid': { baseCoinMultiplier: 0.15, baseXpMultiplier: 0.2, maxScoreCeiling: 50000, maxScorePerSec: 200, minDurationMs: 2000, idealPlayDurationSec: 60, masteryDifficultyWeight: 1.0 },
+  'cyber-runner': { baseCoinMultiplier: 0.1, baseXpMultiplier: 0.15, maxScoreCeiling: 100000, maxScorePerSec: 250, minDurationMs: 2000, idealPlayDurationSec: 60, masteryDifficultyWeight: 1.2 },
+  'neon-pong': { baseCoinMultiplier: 0.1, baseXpMultiplier: 0.15, maxScoreCeiling: 50000, maxScorePerSec: 150, minDurationMs: 2000, idealPlayDurationSec: 60, masteryDifficultyWeight: 1.0 },
+  'neon-stacker': { baseCoinMultiplier: 0.12, baseXpMultiplier: 0.18, maxScoreCeiling: 50000, maxScorePerSec: 200, minDurationMs: 2000, idealPlayDurationSec: 60, masteryDifficultyWeight: 1.1 },
+  'vaporwave-racer': { baseCoinMultiplier: 0.15, baseXpMultiplier: 0.2, maxScoreCeiling: 150000, maxScorePerSec: 350, minDurationMs: 2000, idealPlayDurationSec: 60, masteryDifficultyWeight: 1.3 },
+  'lock-breaker': { baseCoinMultiplier: 0.2, baseXpMultiplier: 0.25, maxScoreCeiling: 30000, maxScorePerSec: 100, minDurationMs: 2000, idealPlayDurationSec: 45, masteryDifficultyWeight: 0.9 },
+  'sine-rider': { baseCoinMultiplier: 0.12, baseXpMultiplier: 0.18, maxScoreCeiling: 80000, maxScorePerSec: 200, minDurationMs: 2000, idealPlayDurationSec: 60, masteryDifficultyWeight: 1.1 },
+  'cosmic-dodge': { baseCoinMultiplier: 0.15, baseXpMultiplier: 0.2, maxScoreCeiling: 100000, maxScorePerSec: 250, minDurationMs: 2000, idealPlayDurationSec: 60, masteryDifficultyWeight: 1.2 },
+  'laser-grid': { baseCoinMultiplier: 0.15, baseXpMultiplier: 0.2, maxScoreCeiling: 60000, maxScorePerSec: 150, minDurationMs: 2000, idealPlayDurationSec: 60, masteryDifficultyWeight: 1.1 },
+  'cyber-simon': { baseCoinMultiplier: 0.2, baseXpMultiplier: 0.3, maxScoreCeiling: 40000, maxScorePerSec: 100, minDurationMs: 2000, idealPlayDurationSec: 60, masteryDifficultyWeight: 1.0 },
+  'plinko-neo': { baseCoinMultiplier: 0.08, baseXpMultiplier: 0.12, maxScoreCeiling: 200000, maxScorePerSec: 400, minDurationMs: 2000, idealPlayDurationSec: 60, masteryDifficultyWeight: 0.9 },
+  'cosmic-asteroid': { baseCoinMultiplier: 0.1, baseXpMultiplier: 0.15, maxScoreCeiling: 120000, maxScorePerSec: 300, minDurationMs: 2000, idealPlayDurationSec: 60, masteryDifficultyWeight: 1.2 },
+  'cyber-slasher': { baseCoinMultiplier: 0.1, baseXpMultiplier: 0.15, maxScoreCeiling: 150000, maxScorePerSec: 350, minDurationMs: 2000, idealPlayDurationSec: 60, masteryDifficultyWeight: 1.1 },
+  'block-match': { baseCoinMultiplier: 0.08, baseXpMultiplier: 0.12, maxScoreCeiling: 250000, maxScorePerSec: 350, minDurationMs: 2000, idealPlayDurationSec: 60, masteryDifficultyWeight: 1.0 },
+  'cyber-typer': { baseCoinMultiplier: 0.1, baseXpMultiplier: 0.15, maxScoreCeiling: 80000, maxScorePerSec: 200, minDurationMs: 2000, idealPlayDurationSec: 60, masteryDifficultyWeight: 1.2 },
+  'maze-runner': { baseCoinMultiplier: 0.2, baseXpMultiplier: 0.25, maxScoreCeiling: 50000, maxScorePerSec: 150, minDurationMs: 2000, idealPlayDurationSec: 60, masteryDifficultyWeight: 1.0 },
+  'memory-path': { baseCoinMultiplier: 0.15, baseXpMultiplier: 0.2, maxScoreCeiling: 50000, maxScorePerSec: 200, minDurationMs: 2000, idealPlayDurationSec: 60, masteryDifficultyWeight: 1.0 },
+  'rhythm-tap': { baseCoinMultiplier: 0.1, baseXpMultiplier: 0.15, maxScoreCeiling: 100000, maxScorePerSec: 250, minDurationMs: 2000, idealPlayDurationSec: 60, masteryDifficultyWeight: 1.2 },
+  'pixel-golf': { baseCoinMultiplier: 0.15, baseXpMultiplier: 0.2, maxScoreCeiling: 50000, maxScorePerSec: 150, minDurationMs: 2000, idealPlayDurationSec: 60, masteryDifficultyWeight: 1.0 },
+  'pixel-dino': { baseCoinMultiplier: 0.1, baseXpMultiplier: 0.15, maxScoreCeiling: 80000, maxScorePerSec: 200, minDurationMs: 2000, idealPlayDurationSec: 60, masteryDifficultyWeight: 1.1 },
+  'cyber-tetris': { baseCoinMultiplier: 0.06, baseXpMultiplier: 0.1, maxScoreCeiling: 400000, maxScorePerSec: 300, minDurationMs: 3000, idealPlayDurationSec: 150, masteryDifficultyWeight: 1.25 },
+  'archery-neo': { baseCoinMultiplier: 0.1, baseXpMultiplier: 0.15, maxScoreCeiling: 100000, maxScorePerSec: 250, minDurationMs: 2000, idealPlayDurationSec: 60, masteryDifficultyWeight: 1.1 },
+  'cyber-mines': { baseCoinMultiplier: 0.2, baseXpMultiplier: 0.25, maxScoreCeiling: 30000, maxScorePerSec: 150, minDurationMs: 2000, idealPlayDurationSec: 75, masteryDifficultyWeight: 1.2 },
+  'whack-a-drone': { baseCoinMultiplier: 0.1, baseXpMultiplier: 0.15, maxScoreCeiling: 80000, maxScorePerSec: 200, minDurationMs: 2000, idealPlayDurationSec: 60, masteryDifficultyWeight: 1.0 },
+  'jump-rope': { baseCoinMultiplier: 0.3, baseXpMultiplier: 0.5, maxScoreCeiling: 15000, maxScorePerSec: 100, minDurationMs: 1500, idealPlayDurationSec: 40, masteryDifficultyWeight: 1.1 },
+  'neon-drift': { baseCoinMultiplier: 0.15, baseXpMultiplier: 0.2, maxScoreCeiling: 120000, maxScorePerSec: 300, minDurationMs: 2000, idealPlayDurationSec: 60, masteryDifficultyWeight: 1.2 },
+  'default': { baseCoinMultiplier: 0.1, baseXpMultiplier: 0.15, maxScoreCeiling: 250000, maxScorePerSec: 350, minDurationMs: 1500, idealPlayDurationSec: 60, masteryDifficultyWeight: 1.0 }
 };
+
+export function getGameBalanceConfig(gameId: string): GameBalanceConfig {
+  const canonicalId = toCanonicalGameId(gameId);
+  return GAME_BALANCE_CONFIG[canonicalId] || GAME_BALANCE_CONFIG['default'];
+}
 
 export const PROGRESSION_CONFIG = {
   // Mastery level formula: level = floor(sqrt(xp / 100)) + 1

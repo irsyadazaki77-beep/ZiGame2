@@ -27,7 +27,8 @@ function getDeviceId(): string {
 }
 
 /**
- * Field-based merge resolver ensuring zero data loss across multi-device / offline sync
+ * Field-based merge resolver ensuring non-destructive synchronization across devices.
+ * Server authoritative economy balance is respected without client Math.max overrides.
  */
 export function resolveCloudConflict(
   local: {
@@ -45,10 +46,9 @@ export function resolveCloudConflict(
   missions: DailyMission[];
   recentlyPlayed: RecentlyPlayedEntry[];
 } {
-  // 1. Coins & Profile: preserve maximum earnings and union of unlocks
   const cloudProfile = cloud.profile || ({} as Partial<PlayerProfile>);
-  const mergedCoins = Math.max(local.profile.coins || 0, cloudProfile.coins || 0);
 
+  // Cosmetic unlocks: union of sets
   const mergedAvatars = Array.from(new Set([
     ...(local.profile.unlockedAvatars || ['🎮', '🕹️', '👾', '🚀', '🦊', '🐱', '🐶', '🐼']),
     ...(cloudProfile.unlockedAvatars || [])
@@ -59,16 +59,19 @@ export function resolveCloudConflict(
     ...(cloudProfile.unlockedThemes || [])
   ]));
 
+  // Coins: prefer cloud authoritative if present, otherwise local
+  const resolvedCoins = typeof cloudProfile.coins === 'number' ? cloudProfile.coins : (local.profile.coins || 100);
+
   const mergedProfile: PlayerProfile = {
     ...cloudProfile,
     ...local.profile,
     name: local.profile.name || cloudProfile.name || 'GUEST',
-    coins: mergedCoins,
+    coins: resolvedCoins,
     unlockedAvatars: mergedAvatars,
     unlockedThemes: mergedThemes
   };
 
-  // 2. Games: max high score & max total plays
+  // 2. Games: highest verified highscore & max total plays
   const cloudGames = cloud.games || [];
   const mergedGames = local.games.map(localG => {
     const cloudG = cloudGames.find(cg => cg.id === localG.id);
@@ -191,4 +194,3 @@ export const fetchCloudData = async (): Promise<any | null> => {
     return null;
   }
 };
-

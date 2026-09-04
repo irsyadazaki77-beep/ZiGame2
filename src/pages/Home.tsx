@@ -1,14 +1,14 @@
 import React, { useMemo, useState, useEffect } from 'react';
 import { motion } from 'motion/react';
-import { Play, Flame, ArrowUpRight, Trophy, Sparkles, Compass, Target, ArrowRight, Zap, Shield, HelpCircle, Gamepad2 } from 'lucide-react';
+import { Play, Sparkles, Target, ArrowRight, Zap, Trophy, Star } from 'lucide-react';
 import { GameStats, DailyMission, Achievement, PlayerProfile, RecentlyPlayedEntry } from '../types';
 import { challengeService } from '../services/challengeService';
-import { getRecommendedGames, getTrendingGames, getHiddenGems } from '../utils/recommendationEngine';
+import { getRecommendedGames, getTrendingGames } from '../utils/recommendationEngine';
 import { audio } from '../utils/audio';
-import { formatNumber } from "../utils/format";
 import { useNavigate } from 'react-router-dom';
 import { NewPlayerOnboardingModal } from '../components/onboarding/NewPlayerOnboardingModal';
 import { GAME_QUALITY_MAP } from '../config/qualityTiers';
+import GameCard from '../components/GameCard';
 
 interface HomeProps {
   games: GameStats[];
@@ -45,7 +45,27 @@ export default function Home({
     } catch {}
   }, [totalPlays, recentlyPlayed]);
 
-  // Get active challenges to highlight the most relevant daily challenge
+  // Favorites state for GameCards
+  const [favorites, setFavorites] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem('arcade_favorite_games');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  const toggleFavorite = (e: React.MouseEvent, gameId: string) => {
+    e.stopPropagation();
+    audio.playCoin();
+    const updated = favorites.includes(gameId)
+      ? favorites.filter(id => id !== gameId)
+      : [...favorites, gameId];
+    setFavorites(updated);
+    localStorage.setItem('arcade_favorite_games', JSON.stringify(updated));
+  };
+
+  // Active challenges
   const activeChallenges = useMemo(() => {
     return challengeService.generateChallengesIfOutdated(games);
   }, [games]);
@@ -54,22 +74,27 @@ export default function Home({
     return activeChallenges.find(c => c.frequency === 'daily' && !c.claimed) || activeChallenges[0];
   }, [activeChallenges]);
 
-  // Recommended, trending, hidden gems
-  const recommendedGames = useMemo(() => getRecommendedGames(games, profile, recentlyPlayed), [games, profile, recentlyPlayed]);
-  const trendingGames = useMemo(() => getTrendingGames(games), [games]);
-  const hiddenGems = useMemo(() => getHiddenGems(games), [games]);
+  // Shelves computation
+  const flagshipGames = useMemo(() => {
+    const list = games.filter(g => GAME_QUALITY_MAP[g.id]?.tier === 'flagship');
+    return list.length > 0 ? list.slice(0, 4) : games.slice(0, 4);
+  }, [games]);
 
-  // Curated Discovery Shelves
+  const recommendedGames = useMemo(() => {
+    return getRecommendedGames(games, profile, recentlyPlayed).slice(0, 4);
+  }, [games, profile, recentlyPlayed]);
+
   const quickPlayGames = useMemo(() => {
     return games.filter(g => GAME_QUALITY_MAP[g.id]?.estimatedDuration === 'quick').slice(0, 4);
   }, [games]);
 
-  const highSkillGames = useMemo(() => {
-    return games.filter(g => GAME_QUALITY_MAP[g.id]?.competitiveSupported).slice(0, 4);
+  const topRatedGames = useMemo(() => {
+    return [...games].sort((a, b) => (b.plays || 0) - (a.plays || 0)).slice(0, 4);
   }, [games]);
 
-  const flagshipGames = useMemo(() => {
-    return games.filter(g => GAME_QUALITY_MAP[g.id]?.tier === 'flagship').slice(0, 4);
+  // Spotlight game (either Tetris, Snake, Space, or the highest play game)
+  const spotlightGame = useMemo(() => {
+    return games.find(g => g.id === 'tetris') || games.find(g => g.id === 'snake') || games[0];
   }, [games]);
 
   // Continue playing (the last played game)
@@ -78,11 +103,11 @@ export default function Home({
 
   return (
     <motion.div
-      initial={{ opacity: 0, y: 8 }}
+      initial={{ opacity: 0, y: 6 }}
       animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: -8 }}
-      transition={{ duration: 0.2 }}
-      className="space-y-6 max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-5 sm:py-7"
+      exit={{ opacity: 0, y: -6 }}
+      transition={{ duration: 0.18 }}
+      className="space-y-8 max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-5 sm:py-7"
     >
       {/* First-Run Onboarding Modal */}
       {showOnboarding && (
@@ -102,104 +127,136 @@ export default function Home({
         />
       )}
 
-      {/* 1. Hero Feature Banner */}
-      <section className="relative rounded-3xl overflow-hidden border border-white/[0.06] bg-[#0d111a] p-6 sm:p-8 flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
-        <div className="space-y-2 relative z-10 max-w-xl">
-          <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 text-[11px] font-mono font-semibold uppercase tracking-wider">
-            <Sparkles size={12} />
-            Lobi Utama ZiGame
+      {/* 1. Editorial Spotlight Hero Banner */}
+      {spotlightGame && (
+        <section className="relative rounded-3xl overflow-hidden border border-white/[0.08] bg-[#11151f] shadow-2xl shadow-black/60">
+          <div className="absolute inset-0">
+            <img
+              src={spotlightGame.coverImage}
+              alt={spotlightGame.title}
+              className="w-full h-full object-cover object-center opacity-30 blur-sm scale-105"
+            />
+            <div className="absolute inset-0 bg-gradient-to-r from-[#090b10] via-[#090b10]/85 to-transparent" />
+            <div className="absolute inset-0 bg-gradient-to-t from-[#090b10] via-transparent to-transparent" />
           </div>
-          <h1 className="text-2xl sm:text-3xl font-black text-white tracking-wide font-display">
-            Halo, {profile.name}
-          </h1>
-          <p className="text-zinc-400 text-xs sm:text-sm leading-relaxed font-sans">
-            {lastPlayedGame ? `Lanjutkan progres bermain ${lastPlayedGame.title} atau jelajahi koleksi game arkade seru hari ini.` : 'Selamat datang di ZiGame. Pilih game arkade favoritmu dan mulai kumpulkan skor tertinggi!'}
-          </p>
-        </div>
 
-        {/* Quick Stats Pill Header */}
-        <div className="flex flex-row md:flex-col items-center md:items-end justify-between w-full md:w-auto gap-3 pt-2 md:pt-0 border-t md:border-t-0 border-white/[0.06] shrink-0">
-          <div className="bg-[#131824] border border-white/[0.06] px-4 py-2.5 rounded-2xl flex items-center gap-3">
-            <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-            <div className="text-left">
-              <span className="text-[10px] font-mono uppercase text-zinc-400 block font-bold">Koleksi Aktif</span>
-              <span className="text-xs font-mono font-bold text-white">{games.length} Permainan Siap Main</span>
+          <div className="relative z-10 p-6 sm:p-10 flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
+            <div className="max-w-xl space-y-3">
+              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/[0.06] border border-white/[0.08] text-indigo-300 text-xs font-medium">
+                <Sparkles size={13} className="text-indigo-400" />
+                <span>Pilihan Utama Hari Ini</span>
+              </div>
+
+              <h1 className="text-3xl sm:text-4xl font-extrabold text-white tracking-tight">
+                {spotlightGame.title}
+              </h1>
+
+              <p className="text-zinc-300 text-sm sm:text-base leading-relaxed font-normal">
+                {spotlightGame.description}
+              </p>
+
+              <div className="flex items-center gap-3 pt-2">
+                <button
+                  onClick={() => { audio.playCoin(); onSelectGame(spotlightGame.id); }}
+                  className="px-6 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-sm shadow-md shadow-indigo-600/30 transition flex items-center gap-2 cursor-pointer active:scale-98"
+                >
+                  <Play size={16} fill="currentColor" />
+                  Main Sekarang
+                </button>
+                <button
+                  onClick={() => { audio.playCoin(); navigate('/games'); }}
+                  className="px-5 py-3 rounded-xl bg-white/[0.06] hover:bg-white/[0.1] border border-white/[0.08] text-zinc-200 hover:text-white font-semibold text-sm transition cursor-pointer"
+                >
+                  Jelajahi Semua
+                </button>
+              </div>
+            </div>
+
+            {/* Quick Stats Pill */}
+            <div className="hidden lg:flex flex-col items-end gap-2 shrink-0">
+              <div className="bg-black/50 backdrop-blur-md border border-white/[0.08] p-4 rounded-2xl space-y-2 min-w-[200px]">
+                <div className="flex items-center justify-between text-xs text-zinc-400">
+                  <span>Tingkat Kesulitan</span>
+                  <span className="font-semibold text-zinc-200">{spotlightGame.difficulty || 'Medium'}</span>
+                </div>
+                <div className="flex items-center justify-between text-xs text-zinc-400">
+                  <span>Dimainkan</span>
+                  <span className="font-semibold text-zinc-200">{(spotlightGame.plays || 0).toLocaleString()} kali</span>
+                </div>
+                <div className="flex items-center justify-between text-xs text-zinc-400 pt-1 border-t border-white/[0.06]">
+                  <span>Skor Tertinggi</span>
+                  <span className="font-semibold text-amber-400">{(spotlightGame.highScore || 0).toLocaleString()} pts</span>
+                </div>
+              </div>
             </div>
           </div>
-          <button
-            onClick={() => setShowOnboarding(true)}
-            className="text-[11px] font-mono text-zinc-400 hover:text-indigo-400 flex items-center gap-1 transition cursor-pointer"
-          >
-            <HelpCircle size={12} />
-            <span>Panduan Pemain Baru</span>
-          </button>
-        </div>
-      </section>
+        </section>
+      )}
 
-      {/* 2. Highlight Row: Continue Playing & Daily Mission */}
+      {/* 2. Lanjutkan Bermain & Tantangan Harian (Dual Row) */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
-        {/* Continue Playing / Quick Launch */}
+        {/* Lanjutkan Bermain */}
         <div className="lg:col-span-7 flex flex-col">
           {lastPlayedGame ? (
-            <div className="bg-[#0f131c] border border-white/[0.06] hover:border-indigo-500/30 p-5 sm:p-6 rounded-3xl flex-1 flex flex-col justify-between transition-colors relative group">
-              <div className="space-y-3.5">
+            <div className="bg-[#11151f] border border-white/[0.06] hover:border-white/[0.12] p-5 sm:p-6 rounded-2xl flex-1 flex flex-col justify-between transition-colors relative">
+              <div className="space-y-3">
                 <div className="flex items-center justify-between">
-                  <span className="text-[11px] font-mono font-bold text-indigo-400 uppercase tracking-wider">
+                  <span className="text-xs font-semibold text-indigo-400 flex items-center gap-1.5">
                     Lanjutkan Bermain
                   </span>
-                  <span className="text-[10px] font-mono text-zinc-400 uppercase">
+                  <span className="text-xs text-zinc-400">
                     {lastPlayedGame.genre}
                   </span>
                 </div>
-                
+
                 <div className="flex items-center gap-4">
-                  <div className="w-14 h-14 bg-zinc-900 border border-white/[0.08] rounded-2xl flex items-center justify-center text-3xl shadow-inner shrink-0">
+                  <div className="w-12 h-12 bg-[#181c2b] border border-white/[0.08] rounded-xl flex items-center justify-center text-2xl shrink-0">
                     {lastPlayedGame.icon}
                   </div>
                   <div className="min-w-0">
-                    <h3 className="font-display font-bold text-base sm:text-lg text-white tracking-wide truncate">
+                    <h3 className="font-semibold text-base text-white truncate">
                       {lastPlayedGame.title}
                     </h3>
-                    <p className="text-xs text-zinc-400 font-sans line-clamp-1 mt-0.5">
+                    <p className="text-xs text-zinc-400 line-clamp-1 mt-0.5">
                       {lastPlayedGame.description}
                     </p>
                   </div>
                 </div>
 
-                <div className="flex items-center gap-4 text-[11px] font-mono text-zinc-400 pt-1">
-                  <div>Skor Terakhir: <span className="text-amber-400 font-bold">{lastPlayedGameEntry.lastScore !== undefined ? lastPlayedGameEntry.lastScore : lastPlayedGame.highScore}</span></div>
+                <div className="flex items-center gap-3 text-xs text-zinc-400 pt-1">
+                  <div>Skor Terakhir: <span className="text-amber-400 font-semibold">{lastPlayedGameEntry.lastScore !== undefined ? lastPlayedGameEntry.lastScore : lastPlayedGame.highScore}</span></div>
                   <div className="text-zinc-600">•</div>
-                  <div>Rekor Terbaik: <span className="text-white font-bold">{lastPlayedGame.highScore}</span></div>
+                  <div>Rekor: <span className="text-zinc-200 font-semibold">{lastPlayedGame.highScore}</span></div>
                 </div>
               </div>
 
-              <div className="pt-5 flex items-center gap-2.5">
+              <div className="pt-4 flex items-center gap-2.5">
                 <button
                   onClick={() => { audio.playCoin(); onSelectGame(lastPlayedGame.id); }}
-                  className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs rounded-xl flex items-center gap-2 transition-colors cursor-pointer shadow-sm shadow-indigo-600/20"
+                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs rounded-xl flex items-center gap-2 transition cursor-pointer"
                 >
-                  <Play size={13} fill="currentColor" /> Main Sekarang
+                  <Play size={13} fill="currentColor" /> Lanjutkan Sesi
                 </button>
                 <button
                   onClick={() => { audio.playCoin(); navigate('/games'); }}
-                  className="px-4 py-2.5 bg-[#151a26] hover:bg-[#1a2130] border border-white/[0.06] text-zinc-300 hover:text-white font-semibold text-xs rounded-xl transition-colors cursor-pointer"
+                  className="px-3.5 py-2 bg-white/[0.05] hover:bg-white/[0.08] border border-white/[0.06] text-zinc-300 font-semibold text-xs rounded-xl transition cursor-pointer"
                 >
-                  Pilih Game Lain
+                  Pilih Lainnya
                 </button>
               </div>
             </div>
           ) : (
-            <div className="bg-[#0f131c] border border-white/[0.06] p-6 rounded-3xl text-center space-y-3 flex-1 flex flex-col justify-center items-center">
-              <div className="w-12 h-12 rounded-2xl bg-[#151a26] border border-white/[0.06] flex items-center justify-center text-2xl">
+            <div className="bg-[#11151f] border border-white/[0.06] p-6 rounded-2xl text-center space-y-3 flex-1 flex flex-col justify-center items-center">
+              <div className="w-11 h-11 rounded-xl bg-white/[0.04] border border-white/[0.06] flex items-center justify-center text-xl">
                 🎮
               </div>
               <div>
-                <h4 className="text-sm font-bold text-white">Mulai Petualangan Pertamamu</h4>
-                <p className="text-xs text-zinc-400 mt-1 max-w-xs">Jelajahi perpustakaan game dan catat rekor skor pertamamu!</p>
+                <h4 className="text-sm font-semibold text-white">Mulai Permainan Pertama Anda</h4>
+                <p className="text-xs text-zinc-400 mt-0.5">Pilih game dari perpustakaan dan ciptakan rekor skor perdana Anda!</p>
               </div>
               <button
                 onClick={() => { audio.playCoin(); navigate('/games'); }}
-                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs rounded-xl transition-colors cursor-pointer"
+                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs rounded-xl transition cursor-pointer"
               >
                 Buka Perpustakaan Game
               </button>
@@ -207,27 +264,27 @@ export default function Home({
           )}
         </div>
 
-        {/* Daily Challenge Card */}
+        {/* Daily Challenge */}
         <div className="lg:col-span-5 flex flex-col">
           {dailyChallengeToHighlight ? (
-            <div className="bg-[#0f131c] border border-white/[0.06] p-5 sm:p-6 rounded-3xl flex-1 flex flex-col justify-between">
+            <div className="bg-[#11151f] border border-white/[0.06] p-5 sm:p-6 rounded-2xl flex-1 flex flex-col justify-between">
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
-                  <span className="text-[11px] font-mono font-bold text-amber-400 uppercase tracking-wider flex items-center gap-1.5">
-                    <Target size={13} />
+                  <span className="text-xs font-semibold text-amber-400 flex items-center gap-1.5">
+                    <Target size={14} />
                     Tantangan Harian
                   </span>
-                  <span className="text-[10px] font-mono text-zinc-400 uppercase">
-                    Hadiah: {dailyChallengeToHighlight.rewardCoins}🪙
+                  <span className="text-xs text-zinc-400">
+                    +{dailyChallengeToHighlight.rewardCoins} koin
                   </span>
                 </div>
 
                 <div className="flex items-start gap-3">
-                  <span className="text-2xl w-11 h-11 bg-zinc-900 border border-white/[0.06] rounded-xl flex items-center justify-center shrink-0">
+                  <span className="text-2xl w-10 h-10 bg-[#181c2b] border border-white/[0.06] rounded-xl flex items-center justify-center shrink-0">
                     {dailyChallengeToHighlight.icon}
                   </span>
                   <div>
-                    <h4 className="text-sm font-bold text-white">
+                    <h4 className="text-sm font-semibold text-white">
                       {dailyChallengeToHighlight.title}
                     </h4>
                     <p className="text-xs text-zinc-400 mt-0.5 line-clamp-2 leading-relaxed">
@@ -238,7 +295,7 @@ export default function Home({
 
                 {/* Progress bar */}
                 <div className="space-y-1.5 pt-1">
-                  <div className="flex justify-between text-[10px] font-mono text-zinc-400">
+                  <div className="flex justify-between text-[11px] text-zinc-400">
                     <span>Progres: {dailyChallengeToHighlight.progress} / {dailyChallengeToHighlight.target}</span>
                     <span>{Math.round((dailyChallengeToHighlight.progress / dailyChallengeToHighlight.target) * 100)}%</span>
                   </div>
@@ -255,14 +312,14 @@ export default function Home({
                 {dailyChallengeToHighlight.gameId ? (
                   <button
                     onClick={() => { audio.playCoin(); onSelectGame(dailyChallengeToHighlight.gameId!); }}
-                    className="px-4 py-2 bg-amber-400 hover:bg-amber-300 text-zinc-950 font-bold text-xs rounded-xl transition-colors cursor-pointer"
+                    className="px-4 py-2 bg-amber-400 hover:bg-amber-300 text-zinc-950 font-bold text-xs rounded-xl transition cursor-pointer"
                   >
                     Mulai Misi
                   </button>
                 ) : (
                   <button
                     onClick={() => { audio.playCoin(); navigate('/challenges'); }}
-                    className="px-4 py-2 bg-[#151a26] hover:bg-[#1a2130] border border-white/[0.06] text-zinc-300 font-semibold text-xs rounded-xl transition-colors cursor-pointer"
+                    className="px-4 py-2 bg-white/[0.05] hover:bg-white/[0.08] border border-white/[0.06] text-zinc-300 font-semibold text-xs rounded-xl transition cursor-pointer"
                   >
                     Lihat Semua Tantangan
                   </button>
@@ -270,218 +327,103 @@ export default function Home({
               </div>
             </div>
           ) : (
-            <div className="bg-[#0f131c] border border-white/[0.06] p-6 rounded-3xl text-center space-y-2 flex-1 flex flex-col justify-center items-center">
+            <div className="bg-[#11151f] border border-white/[0.06] p-6 rounded-2xl text-center space-y-2 flex-1 flex flex-col justify-center items-center">
               <span className="text-2xl">🏆</span>
-              <h4 className="text-sm font-bold text-white">Semua Tantangan Selesai</h4>
-              <p className="text-xs text-zinc-400">Kembali lagi besok untuk misi dan hadiah baru!</p>
+              <h4 className="text-sm font-semibold text-white">Semua Tantangan Selesai</h4>
+              <p className="text-xs text-zinc-400">Kembali lagi besok untuk misi dan hadiah koin baru!</p>
             </div>
           )}
         </div>
       </div>
 
-      {/* 3. Curated Recommendations Grid */}
-      <section className="space-y-4 pt-2">
+      {/* 3. Flagship Games Shelf (Featured High Quality Games) */}
+      <section className="space-y-4">
         <div className="flex justify-between items-center">
           <div>
-            <h2 className="font-display font-bold text-base sm:text-lg text-white tracking-wide flex items-center gap-2">
-              <Flame className="text-orange-500 w-4 h-4" />
-              Rekomendasi Pilihan
+            <h2 className="text-lg font-bold text-white tracking-tight flex items-center gap-2">
+              <Trophy className="text-amber-400 w-4 h-4" />
+              Game Unggulan (Flagship)
             </h2>
-            <p className="text-xs text-zinc-400 font-sans mt-0.5">
-              Pilihan game yang paling disukai komunitas
+            <p className="text-xs text-zinc-400 mt-0.5">
+              Koleksi permainan terbaik dengan kontrol presisi, audio haptik, dan performa 60 FPS
             </p>
           </div>
           <button
             onClick={() => { audio.playCoin(); navigate('/games'); }}
-            className="text-xs font-mono text-indigo-400 hover:text-indigo-300 font-semibold transition-colors flex items-center gap-1 cursor-pointer"
+            className="text-xs text-indigo-400 hover:text-indigo-300 font-medium transition flex items-center gap-1 cursor-pointer"
           >
-            Lihat Semua <ArrowRight size={13} />
+            Lihat Katalog <ArrowRight size={13} />
           </button>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
-          {recommendedGames.slice(0, 3).map((game) => (
-            <div
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
+          {flagshipGames.map((game) => (
+            <GameCard
               key={game.id}
+              game={game}
+              isFavorite={favorites.includes(game.id)}
+              onToggleFavorite={toggleFavorite}
               onClick={() => onSelectGame(game.id)}
-              className="p-5 bg-[#0f131c] hover:bg-[#151a26] border border-white/[0.06] hover:border-indigo-500/30 rounded-2xl flex flex-col justify-between gap-4 cursor-pointer group transition-all duration-150"
-            >
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <div className="w-12 h-12 bg-zinc-900 border border-white/[0.06] rounded-xl flex items-center justify-center text-2xl shrink-0 shadow-inner">
-                    {game.icon}
-                  </div>
-                  <span className="text-[10px] font-mono px-2 py-0.5 bg-white/[0.04] text-zinc-400 rounded-md border border-white/[0.04] uppercase">
-                    {game.genre}
-                  </span>
-                </div>
-
-                <div className="space-y-1">
-                  <h3 className="font-display font-bold text-sm text-white group-hover:text-indigo-400 transition-colors">
-                    {game.title}
-                  </h3>
-                  <p className="text-xs text-zinc-400 font-sans line-clamp-2 leading-relaxed">
-                    {game.description}
-                  </p>
-                </div>
-              </div>
-
-              <div className="flex items-center justify-between pt-3 border-t border-white/[0.04] text-[11px] font-mono text-zinc-400">
-                <span>{game.plays} kali dimainkan</span>
-                <span className="text-zinc-300 font-bold">Rekor: {game.highScore}</span>
-              </div>
-            </div>
+            />
           ))}
         </div>
       </section>
 
-      {/* 4. Discovery Section: Play for 5 Minutes */}
+      {/* 4. Rekomendasi Pilihan Komunitas Shelf */}
+      <section className="space-y-4">
+        <div className="flex justify-between items-center">
+          <div>
+            <h2 className="text-lg font-bold text-white tracking-tight flex items-center gap-2">
+              <Star className="text-indigo-400 w-4 h-4" />
+              Rekomendasi untuk Anda
+            </h2>
+            <p className="text-xs text-zinc-400 mt-0.5">
+              Disesuaikan dengan preferensi dan gaya bermain Anda
+            </p>
+          </div>
+          <button
+            onClick={() => { audio.playCoin(); navigate('/games'); }}
+            className="text-xs text-indigo-400 hover:text-indigo-300 font-medium transition flex items-center gap-1 cursor-pointer"
+          >
+            Semua Game <ArrowRight size={13} />
+          </button>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
+          {recommendedGames.map((game) => (
+            <GameCard
+              key={game.id}
+              game={game}
+              isFavorite={favorites.includes(game.id)}
+              onToggleFavorite={toggleFavorite}
+              onClick={() => onSelectGame(game.id)}
+            />
+          ))}
+        </div>
+      </section>
+
+      {/* 5. Main 5 Menit (Quick Play) */}
       {quickPlayGames.length > 0 && (
-        <section className="space-y-3 pt-2">
+        <section className="space-y-3">
           <div className="flex items-center justify-between">
-            <h3 className="font-display font-bold text-sm sm:text-base text-white flex items-center gap-2">
+            <h3 className="text-base font-bold text-white flex items-center gap-2">
               <Zap className="text-amber-400 w-4 h-4" />
               Main 5 Menit (Quick Play)
             </h3>
-            <span className="text-[11px] font-mono text-zinc-400">Sesi Kilat & Ringan</span>
+            <span className="text-xs text-zinc-400">Sesi kilat &amp; ringan (&lt; 3 menit)</span>
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             {quickPlayGames.map(game => (
               <div
                 key={game.id}
                 onClick={() => onSelectGame(game.id)}
-                className="p-3.5 bg-[#0f131c] hover:bg-[#151a26] border border-white/[0.06] hover:border-amber-500/30 rounded-2xl cursor-pointer group transition-all"
+                className="p-3.5 bg-[#11151f] hover:bg-[#161c2c] border border-white/[0.06] hover:border-white/[0.12] rounded-xl cursor-pointer group transition-all"
               >
                 <div className="text-2xl mb-2">{game.icon}</div>
-                <div className="font-bold text-xs text-white group-hover:text-amber-400 truncate">{game.title}</div>
-                <div className="text-[10px] font-mono text-zinc-400 mt-0.5">&lt; 3 menit</div>
+                <div className="font-semibold text-xs text-zinc-200 group-hover:text-white truncate">{game.title}</div>
+                <div className="text-[11px] text-zinc-400 mt-0.5">{game.genre || 'Arcade'}</div>
               </div>
             ))}
-          </div>
-        </section>
-      )}
-
-      {/* 5. Discovery Section: High-Skill Competitive Arcade */}
-      {highSkillGames.length > 0 && (
-        <section className="space-y-3 pt-2">
-          <div className="flex items-center justify-between">
-            <h3 className="font-display font-bold text-sm sm:text-base text-white flex items-center gap-2">
-              <Shield className="text-indigo-400 w-4 h-4" />
-              High-Skill Competitive Arcade
-            </h3>
-            <span className="text-[11px] font-mono text-zinc-400">Skill Rating (MMR) Aktif</span>
-          </div>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            {highSkillGames.map(game => (
-              <div
-                key={game.id}
-                onClick={() => onSelectGame(game.id)}
-                className="p-3.5 bg-[#0f131c] hover:bg-[#151a26] border border-white/[0.06] hover:border-indigo-500/30 rounded-2xl cursor-pointer group transition-all"
-              >
-                <div className="text-2xl mb-2">{game.icon}</div>
-                <div className="font-bold text-xs text-white group-hover:text-indigo-400 truncate">{game.title}</div>
-                <div className="text-[10px] font-mono text-indigo-300/80 mt-0.5">Rating &amp; Tiers</div>
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
-
-      {/* 6. Trending and Hidden Gems Split Row */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
-        {/* Trending */}
-        <section className="bg-[#0f131c] border border-white/[0.06] p-5 rounded-2xl space-y-3">
-          <div className="flex items-center justify-between">
-            <h3 className="font-display font-bold text-sm text-white flex items-center gap-2">
-              <Sparkles className="text-indigo-400 w-4 h-4" />
-              Sedang Tren
-            </h3>
-            <span className="text-[10px] font-mono text-zinc-400 uppercase font-bold">Popularitas</span>
-          </div>
-
-          <div className="space-y-1.5">
-            {trendingGames.slice(0, 4).map(game => (
-              <div 
-                key={game.id} 
-                onClick={() => onSelectGame(game.id)} 
-                className="flex items-center justify-between p-2.5 hover:bg-white/[0.03] rounded-xl cursor-pointer group transition-colors"
-              >
-                <div className="flex items-center gap-3">
-                  <span className="text-xl w-8 h-8 rounded-lg bg-zinc-900 border border-white/[0.04] flex items-center justify-center">
-                    {game.icon}
-                  </span>
-                  <div>
-                    <div className="font-semibold text-xs text-zinc-200 group-hover:text-indigo-400 transition-colors">
-                      {game.title}
-                    </div>
-                    <div className="text-[10px] text-zinc-400 font-mono">{formatNumber(game.plays)} main</div>
-                  </div>
-                </div>
-                <ArrowUpRight className="w-4 h-4 text-zinc-600 group-hover:text-indigo-400 transition-colors" />
-              </div>
-            ))}
-          </div>
-        </section>
-
-        {/* Hidden Gems */}
-        <section className="bg-[#0f131c] border border-white/[0.06] p-5 rounded-2xl space-y-3">
-          <div className="flex items-center justify-between">
-            <h3 className="font-display font-bold text-sm text-white flex items-center gap-2">
-              <Compass className="text-emerald-400 w-4 h-4" />
-              Rekomendasi Spesial
-            </h3>
-            <span className="text-[10px] font-mono text-zinc-400 uppercase font-bold">Pilihan Editor</span>
-          </div>
-
-          <div className="space-y-1.5">
-            {hiddenGems.slice(0, 4).map(game => (
-              <div 
-                key={game.id} 
-                onClick={() => onSelectGame(game.id)} 
-                className="flex items-center justify-between p-2.5 hover:bg-white/[0.03] rounded-xl cursor-pointer group transition-colors"
-              >
-                <div className="flex items-center gap-3">
-                  <span className="text-xl w-8 h-8 rounded-lg bg-zinc-900 border border-white/[0.04] flex items-center justify-center">
-                    {game.icon}
-                  </span>
-                  <div>
-                    <div className="font-semibold text-xs text-zinc-200 group-hover:text-emerald-400 transition-colors">
-                      {game.title}
-                    </div>
-                    <div className="text-[10px] text-zinc-400 font-mono">{game.genre}</div>
-                  </div>
-                </div>
-                <ArrowUpRight className="w-4 h-4 text-zinc-600 group-hover:text-emerald-400 transition-colors" />
-              </div>
-            ))}
-          </div>
-        </section>
-      </div>
-
-      {/* 7. Recently Played History row */}
-      {recentlyPlayed.length > 1 && (
-        <section className="bg-[#0f131c] border border-white/[0.06] p-5 rounded-2xl space-y-3">
-          <div className="flex items-center justify-between">
-            <span className="text-[11px] font-mono text-zinc-400 uppercase font-bold tracking-wider">
-              Riwayat Bermain
-            </span>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            {recentlyPlayed.slice(1, 6).map(entry => {
-              const gameObj = games.find(g => g.id === entry.gameId);
-              if (!gameObj) return null;
-              return (
-                <div
-                  key={entry.gameId}
-                  onClick={() => onSelectGame(gameObj.id)}
-                  className="px-3 py-1.5 bg-[#151a26] hover:bg-[#1a2130] border border-white/[0.06] hover:border-white/10 rounded-xl text-xs font-mono text-zinc-300 hover:text-white flex items-center gap-2 cursor-pointer transition-colors select-none"
-                >
-                  <span>{gameObj.icon}</span>
-                  <span className="font-semibold">{gameObj.title}</span>
-                  <span className="text-[10px] text-zinc-400 font-bold">({entry.lastScore !== undefined ? entry.lastScore : gameObj.highScore} pts)</span>
-                </div>
-              );
-            })}
           </div>
         </section>
       )}

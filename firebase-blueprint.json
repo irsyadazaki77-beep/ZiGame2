@@ -26,12 +26,46 @@
         "missions": { "type": "array" },
         "recentlyPlayed": { "type": "array" }
       }
+    },
+    "UserEconomy": {
+      "title": "UserEconomy",
+      "description": "Server-authoritative coin balances.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "coins": { "type": "number" },
+        "totalEarned": { "type": "number" },
+        "totalSpent": { "type": "number" },
+        "lastUpdated": { "type": "number" }
+      }
+    },
+    "LeaderboardEntry": {
+      "title": "LeaderboardEntry",
+      "description": "Global verified game leaderboard scores.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "playerName": { "type": "string" },
+        "playerAvatar": { "type": "string" },
+        "score": { "type": "number" },
+        "submittedAt": { "type": "string" },
+        "gameId": { "type": "string" },
+        "masteryLevel": { "type": "number" }
+      }
     }
   },
   "firestore": {
     "/users/{userId}": {
       "schema": { "$ref": "#/entities/User" },
-      "description": "Stores all user save data."
+      "description": "Stores user profile and sync state."
+    },
+    "/userEconomy/{userId}": {
+      "schema": { "$ref": "#/entities/UserEconomy" },
+      "description": "Server-authoritative user balances."
+    },
+    "/leaderboards/{gameId}/entries/{userId}": {
+      "schema": { "$ref": "#/entities/LeaderboardEntry" },
+      "description": "Authoritative game leaderboards."
     }
   }
 }

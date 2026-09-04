@@ -749,22 +749,22 @@ export default function BrickBreakerGame({ onGameOver, onScoreUpdate, highScore 
   };
 
   return (
-    <div className="relative flex flex-col h-full w-full min-h-0 items-center justify-center overflow-hidden p-2 bg-zinc-950">
-      {/* HUD Bar inside the flex layout to prevent overlap */}
-      <div className="w-full flex-none flex justify-between items-center mb-2 px-2 font-mono text-xs">
-        <div className="text-pink-400 font-bold uppercase tracking-wider">
-          LEVEL: <span className="text-white">{level}</span>
+    <div className="relative flex flex-col h-full w-full min-h-0 items-center justify-center overflow-hidden p-2 bg-[#090b10]">
+      {/* Clean HUD Bar */}
+      <div className="w-full flex-none flex justify-between items-center mb-2 px-3 text-xs">
+        <div className="text-zinc-400 font-medium">
+          Level: <span className="text-indigo-400 font-semibold">{level}</span>
         </div>
-        <div className="text-red-400 font-bold uppercase tracking-wider">
-          NYAWA: <span className="text-white">{'❤️'.repeat(Math.max(0, lives))}</span>
+        <div className="text-zinc-400 font-medium">
+          Nyawa: <span className="text-rose-400 font-semibold">{'❤️'.repeat(Math.max(0, lives))}</span>
         </div>
-        <div className="text-yellow-400 font-bold uppercase tracking-wider">
-          SKOR: <span className="text-white">{score}</span>
+        <div className="text-zinc-400 font-medium">
+          Skor: <span className="text-white font-bold">{score}</span>
         </div>
       </div>
 
       {/* Canvas Wrapper */}
-      <div className="relative flex-1 min-h-0 w-full flex items-center justify-center bg-black rounded-xl border border-zinc-800 shadow-[0_0_20px_rgba(0,0,0,0.5)] overflow-hidden">
+      <div className="relative flex-1 min-h-0 w-full flex items-center justify-center bg-[#090b10] rounded-2xl border border-white/[0.08] shadow-inner overflow-hidden">
         <canvas
           ref={canvasRef}
           width={400}
@@ -775,9 +775,10 @@ export default function BrickBreakerGame({ onGameOver, onScoreUpdate, highScore 
         <GameOverlay
           gameState={getGameState()}
           score={scoreRef.current}
+          highScore={highScore}
           onStart={startGame}
           onRestart={startGame}
-          instructions="Pantulkan bola menggunakan papan neon Anda untuk menghancurkan semua balok neon. Tangkap kekuatan gem yang jatuh!"
+          instructions="Pantulkan bola menggunakan papan untuk menghancurkan barisan balok. Tangkap permata kekuatan yang jatuh!"
         />
 
         {/* Interactive touch zones on canvas sides for mobile controls */}

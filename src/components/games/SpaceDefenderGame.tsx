@@ -771,55 +771,53 @@ export default function SpaceDefenderGame({ onGameOver, onScoreUpdate, highScore
   };
 
   return (
-    <div className="relative flex flex-col h-full w-full min-h-0 items-center justify-center overflow-hidden p-2 bg-zinc-950">
-      {/* HUD Bar inside the flex layout to prevent overlap */}
-      <div className="w-full flex-none flex justify-between items-center mb-2 px-2 font-mono text-xs">
-        <div className="text-indigo-400 font-bold uppercase tracking-wider">
-          GELOMBANG: <span className="text-white">{wave}</span>
+    <div className="relative flex flex-col h-full w-full min-h-0 items-center justify-center overflow-hidden p-2 bg-[#090b10]">
+      {/* Clean HUD Bar */}
+      <div className="w-full flex-none flex justify-between items-center mb-2 px-3 text-xs">
+        <div className="text-zinc-400 font-medium">
+          Gelombang: <span className="text-indigo-400 font-semibold">{wave}</span>
         </div>
-        <div className="text-red-400 font-bold uppercase tracking-wider">
-          NYAWA: <span className="text-white">{'❤️'.repeat(Math.max(0, lives))}</span>
+        <div className="text-zinc-400 font-medium">
+          Nyawa: <span className="text-rose-400 font-semibold">{'❤️'.repeat(Math.max(0, lives))}</span>
         </div>
-        <div className="text-yellow-400 font-bold uppercase tracking-wider">
-          SKOR: <span className="text-white">{score}</span>
+        <div className="text-zinc-400 font-medium">
+          Skor: <span className="text-white font-bold">{score}</span>
         </div>
       </div>
 
       {/* Canvas Wrapper */}
       <div 
         ref={containerRef}
-        className="relative flex-1 min-h-0 w-full flex items-center justify-center bg-[#05050c] rounded-xl border border-zinc-800 shadow-[0_0_20px_rgba(0,0,0,0.5)] overflow-hidden"
+        className="relative flex-1 min-h-0 w-full flex items-center justify-center bg-[#090b10] rounded-2xl border border-white/[0.08] shadow-inner overflow-hidden"
       >
         <canvas
           ref={canvasRef}
           width={WIDTH}
           height={HEIGHT}
-          className="max-w-full max-h-full object-contain block bg-zinc-950"
+          className="max-w-full max-h-full object-contain block bg-[#090b10]"
         />
-
-        {/* CRT scanlines */}
-        <div className="pointer-events-none absolute inset-0 bg-scanlines mix-blend-overlay opacity-15"></div>
 
         {/* Space wave transition banner */}
         {isPlaying && particlesRef.current.some(p => p.color === '#a855f7' && p.decay === 0.025) && (
-          <div className="absolute inset-x-0 top-1/3 text-center pointer-events-none ">
-            <div className="text-purple-400 font-display font-black text-xl tracking-wider drop-shadow-md">
-              GELOMBANG {wave}
+          <div className="absolute inset-x-0 top-1/3 text-center pointer-events-none animate-in fade-in duration-200">
+            <div className="text-indigo-300 font-bold text-lg tracking-tight">
+              Gelombang {wave}
             </div>
-            <p className="text-zinc-500 text-xs font-mono mt-1">ALIENS BERTAMBAH CEPAT!</p>
+            <p className="text-zinc-400 text-xs mt-0.5">Kecepatan alien bertambah!</p>
           </div>
         )}
 
         <GameOverlay
           gameState={getGameState()}
           score={score}
+          highScore={highScore}
           onStart={startGame}
           onRestart={startGame}
-          instructions="Kemudikan pesawat dengan panah/WASD dan tekan SPASI untuk menembak. Hancurkan alien!"
+          instructions="Kemudikan pesawat tempur dengan tombol panah/WASD dan tekan SPASI untuk menembak armada alien!"
         />
       </div>
 
-      {/* Mobile Controls outside the canvas wrapper so it doesn't overlap */}
+      {/* Mobile Controls outside canvas */}
       {isPlaying && (
         <div className="flex-none mt-2 w-full">
           <MobileControls onDirection={handleDirection} onAction={handleAction} actionLabel="TEMBAK" />
