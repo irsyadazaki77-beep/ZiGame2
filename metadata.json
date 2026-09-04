@@ -1,0 +1,6 @@
+{
+  "name": "ZIGAME",
+  "description": "Kumpulan game arkade retro-cyber modern dengan UI/UX premium responsif, dioptimalkan untuk desktop dan mobile dengan audio synthesizer, papan lobi dinamis, dan sistem skor lokal terpadu.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

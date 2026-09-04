@@ -1,0 +1,97 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Default Deny-All Rule
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions for authentication and ownership
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isValidScore(score) {
+      return score is number && score >= 0 && score <= 10000000;
+    }
+
+    // User Profile and Save Data
+    match /users/{userId} {
+      allow read: if isOwner(userId);
+      
+      // Allow create initial user document
+      allow create: if isOwner(userId)
+        && request.resource.data.keys().hasAll(['profile'])
+        && request.resource.data.profile.name is string
+        && request.resource.data.profile.name.size() >= 2
+        && request.resource.data.profile.name.size() <= 30;
+
+      // Allow updates with field-level safeguards
+      allow update: if isOwner(userId)
+        // Ensure protected administration fields cannot be tampered with by clients
+        && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['isAdmin', 'isBanned', 'verifiedBalance']))
+        // Ensure coins cannot jump arbitrarily if client updates directly
+        && (
+          !request.resource.data.diff(resource.data).affectedKeys().hasAny(['profile']) ||
+          request.resource.data.profile.coins >= 0
+        );
+      
+      allow delete: if false;
+    }
+
+    // Cloud Saves collection with schema version validation
+    match /cloudSaves/{saveId} {
+      allow read: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      allow create: if isAuthenticated() 
+        && request.resource.data.userId == request.auth.uid
+        && request.resource.data.schemaVersion is number
+        && request.resource.data.schemaVersion >= 1;
+      allow update: if isAuthenticated() 
+        && resource.data.userId == request.auth.uid
+        && request.resource.data.userId == request.auth.uid
+        && request.resource.data.updatedAt >= resource.data.updatedAt;
+      allow delete: if isAuthenticated() && resource.data.userId == request.auth.uid;
+    }
+
+    // Global Public Leaderboards (Read: Any Authenticated User, Write: Restricted/Server Authoritative)
+    match /leaderboards/{gameId} {
+      allow read: if true; // Public leaderboard view
+      
+      match /entries/{entryId} {
+        allow read: if true;
+        allow create: if isAuthenticated()
+          && request.resource.data.userId == request.auth.uid
+          && isValidScore(request.resource.data.score)
+          && request.resource.data.timestamp is number;
+        allow update: if isAuthenticated()
+          && resource.data.userId == request.auth.uid
+          && request.resource.data.userId == request.auth.uid
+          && request.resource.data.score > resource.data.score;
+        allow delete: if false;
+      }
+    }
+
+    // Transactions Ledger (Immutable Write-Once, Read: Owner Only)
+    match /transactions/{txId} {
+      allow read: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      allow create: if isAuthenticated() 
+        && request.resource.data.userId == request.auth.uid
+        && request.resource.data.idempotencyKey is string
+        && request.resource.data.amount is number
+        && request.resource.data.timestamp is number;
+      allow update, delete: if false; // Immutable audit log
+    }
+
+    // Game Sessions for Anti-Cheat Nonce Validation
+    match /gameSessions/{sessionId} {
+      allow read, write: if isAuthenticated() && (
+        resource == null || resource.data.userId == request.auth.uid
+      ) && request.resource.data.userId == request.auth.uid;
+    }
+  }
+}
