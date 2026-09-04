@@ -1,11 +1,15 @@
 import React, { useState, useEffect, useRef, useCallback, Suspense } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { GameStats, PlayerProfile, DailyMission } from '../types';
+import { GameStats, PlayerProfile, DailyMission, ShareResultData } from '../types';
 
 import { GAME_LAYOUTS, DEFAULT_GAME_LAYOUT } from '../config/gameLayouts';
 import { GAME_REGISTRY } from '../config/gameRegistry';
 import { audio } from '../utils/audio';
 import { scoreService } from '../services/scoreService';
+import { saveStateService } from '../services/saveStateService';
+import { competitiveService } from '../services/competitiveService';
+import { telemetryService } from '../services/telemetryService';
+import { inputManager } from '../services/inputService';
 
 import { GamePageHeader } from '../components/gamepage/GamePageHeader';
 import { GamePageRightSidebar } from '../components/gamepage/GamePageRightSidebar';
@@ -13,9 +17,10 @@ import { BossModeSpreadsheet } from '../components/gamepage/BossModeSpreadsheet'
 import { MobileTouchControls } from '../components/gamepage/MobileTouchControls';
 import { GamePageMobileNav } from '../components/gamepage/GamePageMobileNav';
 import { GameErrorBoundary } from '../components/gameplay/GameErrorBoundary';
-import { GameTutorialModal } from '../components/gamepage/GameTutorialModal';
+import { UnifiedTutorialModal } from '../components/gamepage/UnifiedTutorialModal';
+import { ShareResultModal } from '../components/gamepage/ShareResultModal';
 import { GameNavigationDrawer } from '../components/gamepage/GameNavigationDrawer';
-import { RefreshCw, Sparkles, Trophy, HelpCircle, Navigation, X } from "lucide-react";
+import { RefreshCw, Sparkles, Trophy, HelpCircle, Navigation, X, Maximize2, Minimize2, Share2, Shield, Play, RotateCcw } from 'lucide-react';
 
 interface GamePageProps {
   games: GameStats[];
@@ -28,15 +33,15 @@ interface GamePageProps {
 export type GameControlType = 'directional' | 'directional-action' | 'tap' | 'action' | 'keyboard' | 'none';
 
 const GAME_CONTROLS_MAP: Record<string, { keys: string[]; mouse?: string; tips: string; controlType: GameControlType }> = {
-  snake: { keys: ['⬆️', '⬇️', '⬅️', '➡️'], tips: 'Kendalikan ular siber di arena grid siber. Kumpulkan siber-kapsul neon tanpa menabrak ekor Anda sendiri atau batas grid luar.', controlType: 'directional' },
-  brick: { keys: ['⬅️', '➡️'], mouse: 'Gerakan Mouse', tips: 'Pantulkan bola plasma untuk menghancurkan barisan balok pertahanan grid siber.', controlType: 'directional' },
+  snake: { keys: ['⬆️', '⬇️', '⬅️', '➡️', 'SPASI'], tips: 'Kendalikan ular siber di arena grid siber. Kumpulkan siber-kapsul neon tanpa menabrak ekor Anda sendiri atau batas grid luar.', controlType: 'directional' },
+  brick: { keys: ['⬅️', '➡️', 'SPASI'], mouse: 'Gerakan Mouse', tips: 'Pantulkan bola plasma untuk menghancurkan barisan balok pertahanan grid siber.', controlType: 'directional' },
   flappy: { keys: ['SPASI'], mouse: 'Klik Kiri', tips: 'Jaga ketinggian sayap piksel agar tidak menabrak tiang-tiang gerbang neon.', controlType: 'action' },
   space: { keys: ['⬅️', '➡️', 'SPASI'], tips: 'Hancurkan gelombang armada alien penyerang luar angkasa sebelum menabrak baris bawah!', controlType: 'directional-action' },
   memory: { keys: [], mouse: 'Klik Kotak Grid', tips: 'Ingat pola kotak-kotak biru yang menyala, lalu klik ulang sesuai urutan yang tepat.', controlType: 'tap' },
-  runner: { keys: ['SPASI'], mouse: 'Klik Kiri', tips: 'Lompati rintangan laser siber berkecepatan tinggi demi bertahan sedalam mungkin.', controlType: 'action' },
+  runner: { keys: ['SPASI', '⬇️'], mouse: 'Klik Kiri', tips: 'Lompati rintangan laser siber berkecepatan tinggi demi bertahan sedalam mungkin.', controlType: 'action' },
   pong: { keys: ['⬆️', '⬇️'], mouse: 'Gerakkan Mouse', tips: 'Pantulkan bola neon melewati pertahanan musuh AI berkecepatan dinamis.', controlType: 'directional' },
   stacker: { keys: ['SPASI'], mouse: 'Klik Layar', tips: 'Tumpuk lapisan balok siber tepat di atas balok sebelumnya untuk menyusun menara neon!', controlType: 'action' },
-  racer: { keys: ['⬅️', '➡️'], tips: 'Hindari rintangan mobil siber lain di lintasan Synthwave Miami retro.', controlType: 'directional' },
+  racer: { keys: ['⬅️', '➡️', '⬆️', '⬇️'], tips: 'Hindari rintangan mobil siber lain di lintasan Synthwave Miami retro.', controlType: 'directional' },
   lockbreaker: { keys: [], mouse: 'Klik Kiri saat Pas', tips: 'Tekan tombol kunci tepat saat jarum pemutar berada di zona target hijau neon!', controlType: 'tap' },
   sinerider: { keys: ['⬆️', '⬇️'], tips: 'Sesuaikan frekuensi gelombang sinus agar cocok dengan target rintangan garis siber.', controlType: 'directional' },
   cosmicdodge: { keys: ['⬆️', '⬇️', '⬅️', '➡️'], mouse: 'Klik/Sentuh Layar', tips: 'Hindari meteor dan rintangan asteroid kosmis yang bertebaran di luar angkasa.', controlType: 'directional' },
@@ -53,10 +58,10 @@ const GAME_CONTROLS_MAP: Record<string, { keys: string[]; mouse?: string; tips: 
   rhythm: { keys: ['D', 'F', 'J', 'K'], tips: 'Ketuk tombol D, F, J, K tepat saat lingkaran not musik siber sejajar dengan baris target bagian bawah.', controlType: 'keyboard' },
   puttgolf: { keys: [], mouse: 'Tarik & Lepas Bola (Slingshot)', tips: 'Tarik bola hijau neon untuk mengatur kekuatan dan sudut tembakan, lalu lepas untuk memasukkannya ke lubang hitam siber.', controlType: 'tap' },
   dinorun: { keys: ['SPASI', '⬇️'], tips: 'Melompati rintangan laser bawah dan merunduk di bawah rintangan drone terbang untuk bertahan hidup selama mungkin.', controlType: 'directional-action' },
-  tetris: { keys: ['⬅️', '➡️', '⬆️', '⬇️'], tips: 'Susun balok neon yang jatuh untuk melengkapi baris horizontal penuh. Setiap baris lengkap akan hancur dan menambah skor.', controlType: 'directional' },
+  tetris: { keys: ['⬅️', '➡️', '⬆️', '⬇️', 'SPASI'], tips: 'Susun balok neon yang jatuh untuk melengkapi baris horizontal penuh. Setiap baris lengkap akan hancur dan menambah skor.', controlType: 'directional' },
   archery: { keys: [], mouse: 'Goyang Arah / Klik Tembak', tips: 'Arahkan meriam laser siber di bawah, lalu klik layar untuk meluncurkan panah laser penghancur balon gelembung udara.', controlType: 'tap' },
   mines: { keys: [], mouse: 'Klik Kiri Buka / Klik Kanan Bendera', tips: 'Buka semua kotak yang aman. Gunakan angka untuk mengetahui jumlah ranjau di sekitarnya. Jangan sampai meledak!', controlType: 'tap' },
-  "2048": { keys: ['⬆️', '⬇️', '⬅️', '➡️'], tips: 'Gabungkan balok angka yang sama untuk membentuk angka yang lebih besar hingga 2048.', controlType: 'directional' },
+  '2048': { keys: ['⬆️', '⬇️', '⬅️', '➡️'], tips: 'Gabungkan balok angka yang sama untuk membentuk angka yang lebih besar hingga 2048.', controlType: 'directional' },
   whack: { keys: [], mouse: 'Klik Target', tips: 'Pukul drone secepat mungkin. Hindari bom dan incar drone emas untuk skor maksimal.', controlType: 'tap' },
   jumprope: { keys: ['SPASI'], mouse: 'Klik/Sentuh Layar', tips: 'Lompati tali laser siber dengan tepat waktu.', controlType: 'action' },
   neondrift: { keys: ['⬅️', '➡️'], mouse: 'Sentuh Kiri/Kanan Layar', tips: 'Hindari blok neon yang berjatuhan. Bertahan selama mungkin!', controlType: 'directional' }
@@ -76,6 +81,7 @@ export default function GamePage({ games, profile, dailyMissions, onScoreUpdate,
 
   const [isMuted, setIsMuted] = useState(() => audio.getMuteState());
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [isFocusMode, setIsFocusMode] = useState(false);
   const [key, setKey] = useState(0);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -96,6 +102,9 @@ export default function GamePage({ games, profile, dailyMissions, onScoreUpdate,
   // Onboarding tutorial state & inter-game drawer
   const [isTutorialOpen, setIsTutorialOpen] = useState(false);
   const [showNavDrawer, setShowNavDrawer] = useState(false);
+  const [shareResultData, setShareResultData] = useState<ShareResultData | null>(null);
+  const [hasExistingSave, setHasExistingSave] = useState(false);
+
   const [recentlyPlayed, setRecentlyPlayed] = useState<string[]>(() => {
     try {
       const saved = localStorage.getItem('zigame_recently_played');
@@ -109,16 +118,17 @@ export default function GamePage({ games, profile, dailyMissions, onScoreUpdate,
   const registryItem = gameId ? GAME_REGISTRY[gameId] : null;
   const currentSessionIdRef = useRef<string | undefined>(undefined);
 
-  // Fetch session on restart
+  // Fetch session on restart and record telemetry
   useEffect(() => {
     if (activeGame) {
+      telemetryService.recordGameStart(activeGame.id, inputManager.getActiveSource());
       scoreService.startSession(activeGame.id, profile.name).then((res) => {
         currentSessionIdRef.current = res.sessionId;
       });
     }
   }, [activeGame, key, profile.name]);
 
-  // Track recently played and check tutorial status on gameId change
+  // Check save-state and tutorial status on gameId change
   useEffect(() => {
     if (!gameId) return;
 
@@ -130,6 +140,8 @@ export default function GamePage({ games, profile, dailyMissions, onScoreUpdate,
       } catch (e) {}
       return updated;
     });
+
+    setHasExistingSave(saveStateService.hasSaveState(gameId));
 
     try {
       const isDisabled = localStorage.getItem(`tutorial_disabled_${gameId}`) === 'true';
@@ -151,7 +163,7 @@ export default function GamePage({ games, profile, dailyMissions, onScoreUpdate,
     };
   }, [isBgmOn, isMuted, isBossMode]);
 
-  // Keyboard shortcut listener ('B' for Boss Mode)
+  // Keyboard shortcut listener ('B' for Boss Mode, 'F' for Focus Mode)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
@@ -159,6 +171,9 @@ export default function GamePage({ games, profile, dailyMissions, onScoreUpdate,
       }
       if (e.key === 'b' || e.key === 'B') {
         setIsBossMode(prev => !prev);
+      }
+      if (e.key === 'f' || e.key === 'F') {
+        setIsFocusMode(prev => !prev);
       }
     };
     window.addEventListener('keydown', handleKeyDown);
@@ -173,7 +188,34 @@ export default function GamePage({ games, profile, dailyMissions, onScoreUpdate,
   const handleRestart = useCallback(() => {
     audio.playCoin();
     setKey((prev) => prev + 1);
+    setShareResultData(null);
   }, []);
+
+  const handleWrappedGameOver = useCallback((score: number) => {
+    if (!activeGame) return;
+    audio.playGameOver();
+    telemetryService.recordGameOver(activeGame.id, score, undefined, inputManager.getActiveSource());
+    onGameOver(activeGame.id, score, currentSessionIdRef.current);
+
+    // Record competitive rating if supported
+    const competitiveResult = competitiveService.recordMatchScore(activeGame.id, score);
+
+    // Prepare share result modal data
+    const isPb = score > (activeGame.highScore || 0);
+    const masteryData = profile.mastery?.[activeGame.id] || { level: 1, xp: 0 };
+    setShareResultData({
+      gameId: activeGame.id,
+      gameTitle: activeGame.title,
+      gameIcon: activeGame.icon,
+      score,
+      highScore: Math.max(activeGame.highScore || 0, score),
+      isPersonalBest: isPb,
+      masteryLevel: masteryData.level,
+      masteryXpGained: Math.max(10, Math.floor(score * 0.1)),
+      competitiveTier: competitiveResult.tier,
+      timestamp: Date.now()
+    });
+  }, [activeGame, onGameOver, profile.mastery]);
 
   const toggleFullscreen = useCallback(() => {
     if (!containerRef.current) return;
@@ -217,6 +259,7 @@ export default function GamePage({ games, profile, dailyMissions, onScoreUpdate,
 
   const gameLayoutConfig = (gameId && GAME_LAYOUTS[gameId]) || DEFAULT_GAME_LAYOUT;
   const GameComponent = registryItem?.component || null;
+  const competitiveInfo = competitiveService.getRating(activeGame.id);
 
   return (
     <div 
@@ -227,49 +270,60 @@ export default function GamePage({ games, profile, dailyMissions, onScoreUpdate,
       {/* Boss Mode Overlay Screen */}
       {isBossMode && <BossModeSpreadsheet onExit={() => setIsBossMode(false)} />}
 
-      {/* Tutorial Onboarding Modal */}
+      {/* Unified Tutorial Modal */}
       {isTutorialOpen && (
-        <GameTutorialModal
+        <UnifiedTutorialModal
           game={activeGame}
-          controls={controls}
           onClose={() => setIsTutorialOpen(false)}
           onStartGame={handleRestart}
         />
       )}
 
-      {/* Simplified Header Navigation */}
-      <GamePageHeader
-        activeGame={activeGame}
-        currentAmbient={currentAmbient}
-        backgroundAmbients={BACKGROUND_AMBIENTS}
-        bgAmbient={bgAmbient}
-        setBgAmbient={setBgAmbient}
-        isCrtFilter={isCrtFilter}
-        setIsCrtFilter={setIsCrtFilter}
-        onRestart={handleRestart}
-        isMuted={isMuted}
-        onToggleMute={handleToggleMute}
-        isBgmOn={isBgmOn}
-        setIsBgmOn={setIsBgmOn}
-        isFullscreen={isFullscreen}
-        toggleFullscreen={toggleFullscreen}
-        isSidebarOpen={isSidebarOpen}
-        setIsSidebarOpen={setIsSidebarOpen}
-        onNavigateHome={() => navigate('/')}
-        onOpenTutorial={() => setIsTutorialOpen(true)}
-      />
+      {/* Shareable Result Card Modal */}
+      {shareResultData && (
+        <ShareResultModal
+          data={shareResultData}
+          onClose={() => setShareResultData(null)}
+        />
+      )}
 
-      {/* Mobile Top Nav Tabs */}
-      <GamePageMobileNav
-        mobileTab={mobileTab}
-        setMobileTab={setMobileTab}
-      />
+      {/* Simplified Header Navigation (Hidden in Focus Mode) */}
+      {!isFocusMode && (
+        <GamePageHeader
+          activeGame={activeGame}
+          currentAmbient={currentAmbient}
+          backgroundAmbients={BACKGROUND_AMBIENTS}
+          bgAmbient={bgAmbient}
+          setBgAmbient={setBgAmbient}
+          isCrtFilter={isCrtFilter}
+          setIsCrtFilter={setIsCrtFilter}
+          onRestart={handleRestart}
+          isMuted={isMuted}
+          onToggleMute={handleToggleMute}
+          isBgmOn={isBgmOn}
+          setIsBgmOn={setIsBgmOn}
+          isFullscreen={isFullscreen}
+          toggleFullscreen={toggleFullscreen}
+          isSidebarOpen={isSidebarOpen}
+          setIsSidebarOpen={setIsSidebarOpen}
+          onNavigateHome={() => navigate('/')}
+          onOpenTutorial={() => setIsTutorialOpen(true)}
+        />
+      )}
+
+      {/* Mobile Top Nav Tabs (Hidden in Focus Mode) */}
+      {!isFocusMode && (
+        <GamePageMobileNav
+          mobileTab={mobileTab}
+          setMobileTab={setMobileTab}
+        />
+      )}
 
       {/* Main Single-Focus Hero Stage Layout */}
       <div className="flex-1 flex min-h-0 w-full overflow-hidden relative" id="gamepage-viewport-columns">
         {/* Center Stage: The Hero Game Viewport */}
         <div 
-          className={`flex-1 flex flex-col h-full min-h-0 min-w-0 p-3 md:p-5 overflow-y-auto relative items-center justify-between ${
+          className={`flex-1 flex flex-col h-full min-h-0 min-w-0 p-2 sm:p-3 md:p-5 overflow-y-auto relative items-center justify-between ${
             mobileTab === 'game' ? 'flex' : 'hidden lg:flex'
           }`}
           id="center-game-viewport"
@@ -279,8 +333,52 @@ export default function GamePage({ games, profile, dailyMissions, onScoreUpdate,
             <div className="absolute inset-0 bg-scanlines pointer-events-none z-30 opacity-20" />
           )}
 
-          {/* Clean Focused Canvas Stage (occupies ~80% of width) */}
-          <div className="flex-1 w-full max-w-5xl flex items-center justify-center relative min-h-0 py-2">
+          {/* Floating Focus Mode Banner */}
+          {isFocusMode && (
+            <div className="w-full max-w-5xl flex items-center justify-between px-3 py-1.5 bg-zinc-950/80 border border-white/[0.08] rounded-xl mb-2 text-xs font-mono">
+              <div className="flex items-center gap-2 text-indigo-400 font-bold">
+                <span className="w-2 h-2 rounded-full bg-indigo-500 animate-pulse" />
+                <span>FOCUS THEATER MODE AKTIF</span>
+              </div>
+              <button
+                onClick={() => setIsFocusMode(false)}
+                className="px-2 py-0.5 bg-white/[0.08] hover:bg-white/[0.15] text-zinc-300 rounded text-[10px] flex items-center gap-1 cursor-pointer transition"
+              >
+                <Minimize2 size={12} /> Keluar (F)
+              </button>
+            </div>
+          )}
+
+          {/* Save-State Restore Prompt Banner */}
+          {hasExistingSave && (
+            <div className="w-full max-w-5xl mb-2 p-2.5 bg-indigo-950/40 border border-indigo-500/30 rounded-2xl flex items-center justify-between gap-3 text-xs font-sans">
+              <div className="flex items-center gap-2 text-indigo-200">
+                <RotateCcw size={14} className="text-indigo-400" />
+                <span>Ditemukan progres permainan yang tersimpan dari sesi sebelumnya.</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => {
+                    saveStateService.clearState(activeGame.id);
+                    setHasExistingSave(false);
+                    handleRestart();
+                  }}
+                  className="px-2.5 py-1 text-[11px] font-mono text-zinc-400 hover:text-white transition cursor-pointer"
+                >
+                  Mulai Baru
+                </button>
+                <button
+                  onClick={() => setHasExistingSave(false)}
+                  className="px-3 py-1 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-[11px] font-mono font-bold transition cursor-pointer"
+                >
+                  Lanjutkan
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Clean Focused Canvas Stage */}
+          <div className="flex-1 w-full max-w-5xl flex items-center justify-center relative min-h-0 py-1 sm:py-2">
             <div 
               className="relative w-full h-full max-h-full flex items-center justify-center bg-zinc-950/95 border border-zinc-800 rounded-2xl md:rounded-3xl shadow-2xl overflow-hidden transition-all duration-300"
               style={{
@@ -302,7 +400,7 @@ export default function GamePage({ games, profile, dailyMissions, onScoreUpdate,
                   >
                     <GameComponent
                       key={key}
-                      onGameOver={(score: number) => onGameOver(activeGame.id, score, currentSessionIdRef.current)}
+                      onGameOver={handleWrappedGameOver}
                       onScoreUpdate={(score: number) => onScoreUpdate(activeGame.id, score)}
                       highScore={activeGame.highScore}
                     />
@@ -318,7 +416,7 @@ export default function GamePage({ games, profile, dailyMissions, onScoreUpdate,
           </div>
 
           {/* Compact HUD Bar beneath Canvas */}
-          <div className="w-full max-w-5xl mt-3 flex-none bg-zinc-950/80 border border-zinc-800/80 p-2.5 rounded-2xl flex flex-wrap items-center justify-between gap-3 font-sans">
+          <div className="w-full max-w-5xl mt-2 flex-none bg-zinc-950/80 border border-zinc-800/80 p-2.5 rounded-2xl flex flex-wrap items-center justify-between gap-3 font-sans">
             {/* Left: Score & Controls Badges */}
             <div className="flex items-center gap-3">
               <div className="flex items-center gap-1.5 px-3 py-1 bg-amber-500/10 border border-amber-500/20 text-amber-400 rounded-xl font-mono text-xs font-bold">
@@ -326,8 +424,15 @@ export default function GamePage({ games, profile, dailyMissions, onScoreUpdate,
                 <span>Rekor: {activeGame.highScore.toLocaleString()} pts</span>
               </div>
 
+              {competitiveInfo && (
+                <div className="hidden sm:flex items-center gap-1 px-2.5 py-1 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 rounded-xl font-mono text-xs font-bold">
+                  <Shield size={13} />
+                  <span>Rating: {competitiveInfo.rating} ({competitiveInfo.tier})</span>
+                </div>
+              )}
+
               {controls.keys && controls.keys.length > 0 && (
-                <div className="hidden sm:flex items-center gap-1">
+                <div className="hidden md:flex items-center gap-1">
                   <span className="text-[10px] font-mono text-zinc-500 uppercase font-bold mr-1">Kontrol:</span>
                   {controls.keys.map((k, idx) => (
                     <span
@@ -344,6 +449,15 @@ export default function GamePage({ games, profile, dailyMissions, onScoreUpdate,
             {/* Right: Quick Action Modals */}
             <div className="flex items-center gap-2">
               <button
+                onClick={() => setIsFocusMode((prev) => !prev)}
+                className="px-3 py-1 bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-xs font-mono font-bold text-zinc-300 hover:text-white rounded-xl transition flex items-center gap-1.5 cursor-pointer"
+                title="Toggle Focus / Theater Mode (F)"
+              >
+                <Maximize2 size={13} className="text-indigo-400" />
+                <span className="hidden sm:inline">{isFocusMode ? 'Normal View' : 'Focus Mode'}</span>
+              </button>
+
+              <button
                 onClick={() => setIsTutorialOpen(true)}
                 className="px-3 py-1 bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-xs font-mono font-bold text-indigo-400 hover:text-indigo-300 rounded-xl transition flex items-center gap-1.5 cursor-pointer"
               >
@@ -356,7 +470,7 @@ export default function GamePage({ games, profile, dailyMissions, onScoreUpdate,
                 className="px-3 py-1 bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-xs font-mono font-bold text-zinc-300 hover:text-white rounded-xl transition flex items-center gap-1.5 cursor-pointer"
               >
                 <Navigation size={13} className="text-amber-400" />
-                <span>{showNavDrawer ? 'Tutup Game Lain' : 'Jelajahi Game Lain'}</span>
+                <span>{showNavDrawer ? 'Tutup' : 'Ganti Game'}</span>
               </button>
             </div>
           </div>
@@ -386,7 +500,7 @@ export default function GamePage({ games, profile, dailyMissions, onScoreUpdate,
         </div>
 
         {/* Right Community & Leaderboard Sidebar (Drawer toggleable) */}
-        {(isSidebarOpen || mobileTab === 'community') && (
+        {!isFocusMode && (isSidebarOpen || mobileTab === 'community') && (
           <GamePageRightSidebar
             activeGame={activeGame}
             profile={profile}

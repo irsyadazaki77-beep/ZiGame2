@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { motion } from 'motion/react';
 import { GameStats } from '../types';
-import { Search, Gamepad2, SlidersHorizontal, Star, Flame, Trophy, Award } from 'lucide-react';
+import { Search, Gamepad2, SlidersHorizontal, Star, Flame, Trophy, Award, Smartphone, Zap, Clock, Shield, Sparkles, Filter, X } from 'lucide-react';
 import GameCard from '../components/GameCard';
 import { Button, SearchInput, Select, EmptyState } from '../components/UI';
 import { audio } from '../utils/audio';
+import { GAME_QUALITY_MAP } from '../config/qualityTiers';
 
 interface GamesPageProps {
   games: GameStats[];
@@ -16,6 +17,9 @@ export default function GamesPage({ games, onSelectGame }: GamesPageProps) {
   const [categoryTab, setCategoryTab] = useState<'all' | 'classic' | 'action' | 'puzzle' | 'reflex' | 'fav'>('all');
   const [sortOption, setSortOption] = useState<'popular' | 'highScore' | 'title' | 'newest'>('popular');
   const [difficultyFilter, setDifficultyFilter] = useState<'all' | 'Easy' | 'Medium' | 'Hard'>('all');
+  const [inputFilter, setInputFilter] = useState<'all' | 'gamepad' | 'mobile' | 'keyboard'>('all');
+  const [durationFilter, setDurationFilter] = useState<'all' | 'quick' | 'standard' | 'deep'>('all');
+  const [tierFilter, setTierFilter] = useState<'all' | 'flagship' | 'competitive'>('all');
   const [showFilters, setShowFilters] = useState(false);
 
   useEffect(() => {
@@ -44,9 +48,9 @@ export default function GamesPage({ games, onSelectGame }: GamesPageProps) {
   const getCategoryFromGenre = (genre?: string) => {
     if (!genre) return 'action';
     const g = genre.toLowerCase();
-    if (g.includes('classic')) return 'classic';
-    if (g.includes('action') || g.includes('shooter') || g.includes('endless')) return 'action';
-    if (g.includes('puzzle')) return 'puzzle';
+    if (g.includes('classic') || g.includes('retro')) return 'classic';
+    if (g.includes('action') || g.includes('shooter') || g.includes('endless') || g.includes('arcade')) return 'action';
+    if (g.includes('puzzle') || g.includes('logic') || g.includes('math')) return 'puzzle';
     return 'reflex';
   };
 
@@ -66,10 +70,18 @@ export default function GamesPage({ games, onSelectGame }: GamesPageProps) {
     const list = games.filter(g => {
       const matchesSearch = isFuzzyMatch(g.title, g.description, searchQuery);
       const isFav = favorites.includes(g.id);
+      const quality = GAME_QUALITY_MAP[g.id];
 
       if (categoryTab === 'fav' && !isFav) return false;
       if (categoryTab !== 'all' && categoryTab !== 'fav' && getCategoryFromGenre(g.genre) !== categoryTab) return false;
       if (difficultyFilter !== 'all' && g.difficulty !== difficultyFilter) return false;
+
+      if (inputFilter === 'gamepad' && !quality?.gamepadOptimized) return false;
+      if (inputFilter === 'mobile' && !quality?.mobileOptimized) return false;
+
+      if (durationFilter !== 'all' && quality?.estimatedDuration !== durationFilter) return false;
+      if (tierFilter === 'flagship' && quality?.tier !== 'flagship') return false;
+      if (tierFilter === 'competitive' && !quality?.competitiveSupported) return false;
 
       return matchesSearch;
     });
@@ -88,7 +100,7 @@ export default function GamesPage({ games, onSelectGame }: GamesPageProps) {
       }
       return 0;
     });
-  }, [games, searchQuery, categoryTab, sortOption, difficultyFilter, favorites]);
+  }, [games, searchQuery, categoryTab, sortOption, difficultyFilter, inputFilter, durationFilter, tierFilter, favorites]);
 
   const categories = [
     { value: 'all', label: 'Semua' },
@@ -98,6 +110,19 @@ export default function GamesPage({ games, onSelectGame }: GamesPageProps) {
     { value: 'reflex', label: 'Refleks' },
     { value: 'fav', label: 'Favorit' }
   ];
+
+  const hasActiveCustomFilters = inputFilter !== 'all' || durationFilter !== 'all' || tierFilter !== 'all' || difficultyFilter !== 'all';
+
+  const resetAllFilters = () => {
+    audio.playCoin();
+    setSearchQuery('');
+    setCategoryTab('all');
+    setDifficultyFilter('all');
+    setInputFilter('all');
+    setDurationFilter('all');
+    setTierFilter('all');
+    setSortOption('popular');
+  };
 
   return (
     <motion.div
@@ -112,11 +137,59 @@ export default function GamesPage({ games, onSelectGame }: GamesPageProps) {
         <div>
           <h1 className="text-xl sm:text-2xl font-black tracking-wider text-white uppercase font-display flex items-center gap-2.5">
             <Gamepad2 className="text-indigo-500 w-5 h-5 sm:w-6 sm:h-6" />
-            Eksplorasi Game
+            Eksplorasi Arkade
           </h1>
           <p className="text-xs text-zinc-400 mt-1 uppercase tracking-widest font-mono">
-            Temukan dan mainkan 30+ game arkade cyber premium
+            {games.length} Koleksi Permainan Cyber Siap Main • Filter & Discovery Cerdas
           </p>
+        </div>
+
+        {/* Quick Discovery Presets */}
+        <div className="flex flex-wrap items-center gap-1.5">
+          <button
+            onClick={() => {
+              audio.playHit();
+              setDurationFilter(durationFilter === 'quick' ? 'all' : 'quick');
+            }}
+            className={`px-3 py-1 rounded-full text-[11px] font-mono font-bold flex items-center gap-1 transition cursor-pointer border ${
+              durationFilter === 'quick'
+                ? 'bg-amber-500/20 border-amber-500/50 text-amber-300'
+                : 'bg-white/[0.03] border-white/[0.06] text-zinc-400 hover:text-white'
+            }`}
+          >
+            <Zap size={11} className="text-amber-400" />
+            <span>5-Menit Kilat</span>
+          </button>
+
+          <button
+            onClick={() => {
+              audio.playHit();
+              setInputFilter(inputFilter === 'gamepad' ? 'all' : 'gamepad');
+            }}
+            className={`px-3 py-1 rounded-full text-[11px] font-mono font-bold flex items-center gap-1 transition cursor-pointer border ${
+              inputFilter === 'gamepad'
+                ? 'bg-indigo-500/20 border-indigo-500/50 text-indigo-300'
+                : 'bg-white/[0.03] border-white/[0.06] text-zinc-400 hover:text-white'
+            }`}
+          >
+            <Gamepad2 size={11} className="text-indigo-400" />
+            <span>Gamepad Ready</span>
+          </button>
+
+          <button
+            onClick={() => {
+              audio.playHit();
+              setTierFilter(tierFilter === 'flagship' ? 'all' : 'flagship');
+            }}
+            className={`px-3 py-1 rounded-full text-[11px] font-mono font-bold flex items-center gap-1 transition cursor-pointer border ${
+              tierFilter === 'flagship'
+                ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-300'
+                : 'bg-white/[0.03] border-white/[0.06] text-zinc-400 hover:text-white'
+            }`}
+          >
+            <Sparkles size={11} className="text-emerald-400" />
+            <span>Flagship Tier</span>
+          </button>
         </div>
       </div>
 
@@ -128,39 +201,54 @@ export default function GamesPage({ games, onSelectGame }: GamesPageProps) {
             <SearchInput
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Cari nama game atau genre..."
+              placeholder="Cari nama game, genre, atau mekanisme..."
               className="w-full"
             />
           </div>
           <Button
-            variant={showFilters ? "primary" : "secondary"}
+            variant={showFilters || hasActiveCustomFilters ? "primary" : "secondary"}
             size="sm"
             onClick={() => { audio.playCoin(); setShowFilters(!showFilters); }}
-            className="flex items-center gap-2 !min-h-[38px] px-3.5 rounded-full"
+            className="flex items-center gap-2 !min-h-[38px] px-3.5 rounded-full relative"
           >
             <SlidersHorizontal size={14} />
-            <span className="hidden sm:inline text-xs font-mono">Filter</span>
+            <span className="hidden sm:inline text-xs font-mono">Filter Lanjutan</span>
+            {hasActiveCustomFilters && (
+              <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
+            )}
           </Button>
         </div>
 
         {/* Categories Tab Row */}
-        <div className="flex gap-1 overflow-x-auto pb-1.5 scrollbar-thin scrollbar-thumb-zinc-800 scrollbar-track-transparent">
-          {categories.map((cat) => {
-            const isActive = categoryTab === cat.value;
-            return (
-              <button
-                key={cat.value}
-                onClick={() => { audio.playHit(); setCategoryTab(cat.value as any); }}
-                className={`px-3.5 py-1.5 rounded-full text-xs font-mono font-bold uppercase transition-all duration-200 shrink-0 border cursor-pointer select-none ${
-                  isActive
-                    ? 'bg-indigo-600/15 border-indigo-500/40 text-indigo-400 shadow-sm shadow-indigo-600/5'
-                    : 'bg-[#121622] border-white/[0.04] text-zinc-400 hover:text-zinc-200 hover:border-white/[0.08]'
-                }`}
-              >
-                {cat.label}
-              </button>
-            );
-          })}
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex gap-1 overflow-x-auto pb-1.5 scrollbar-thin scrollbar-thumb-zinc-800 scrollbar-track-transparent">
+            {categories.map((cat) => {
+              const isActive = categoryTab === cat.value;
+              return (
+                <button
+                  key={cat.value}
+                  onClick={() => { audio.playHit(); setCategoryTab(cat.value as any); }}
+                  className={`px-3.5 py-1.5 rounded-full text-xs font-mono font-bold uppercase transition-all duration-200 shrink-0 border cursor-pointer select-none ${
+                    isActive
+                      ? 'bg-indigo-600/15 border-indigo-500/40 text-indigo-400 shadow-sm shadow-indigo-600/5'
+                      : 'bg-[#121622] border-white/[0.04] text-zinc-400 hover:text-zinc-200 hover:border-white/[0.08]'
+                  }`}
+                >
+                  {cat.label}
+                </button>
+              );
+            })}
+          </div>
+
+          {hasActiveCustomFilters && (
+            <button
+              onClick={resetAllFilters}
+              className="text-[11px] font-mono text-zinc-400 hover:text-rose-400 flex items-center gap-1 shrink-0 px-2.5 py-1 bg-white/[0.03] hover:bg-rose-500/10 rounded-full transition cursor-pointer"
+            >
+              <X size={12} />
+              <span>Reset</span>
+            </button>
+          )}
         </div>
 
         {/* Collapsible Filter Panel */}
@@ -168,7 +256,7 @@ export default function GamesPage({ games, onSelectGame }: GamesPageProps) {
           <motion.div
             initial={{ opacity: 0, height: 0 }}
             animate={{ opacity: 1, height: 'auto' }}
-            className="p-4 bg-[#121622] border border-white/[0.06] rounded-2xl grid grid-cols-1 sm:grid-cols-2 gap-4"
+            className="p-4 bg-[#121622] border border-white/[0.06] rounded-2xl grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4"
           >
             <Select
               label="Tingkat Kesulitan"
@@ -179,6 +267,27 @@ export default function GamesPage({ games, onSelectGame }: GamesPageProps) {
                 { value: 'Easy', label: 'Mudah' },
                 { value: 'Medium', label: 'Sedang' },
                 { value: 'Hard', label: 'Sulit' }
+              ]}
+            />
+            <Select
+              label="Perangkat / Kontrol"
+              value={inputFilter}
+              onChange={(e) => setInputFilter(e.target.value as any)}
+              options={[
+                { value: 'all', label: 'Semua Kontrol' },
+                { value: 'gamepad', label: 'Gamepad API' },
+                { value: 'mobile', label: 'Mobile / Touch' }
+              ]}
+            />
+            <Select
+              label="Estimasi Durasi"
+              value={durationFilter}
+              onChange={(e) => setDurationFilter(e.target.value as any)}
+              options={[
+                { value: 'all', label: 'Semua Durasi' },
+                { value: 'quick', label: '< 3 Menit (Quick Play)' },
+                { value: 'standard', label: '3-5 Menit (Standard)' },
+                { value: 'deep', label: '5+ Menit (Deep Run)' }
               ]}
             />
             <Select
@@ -218,13 +327,7 @@ export default function GamesPage({ games, onSelectGame }: GamesPageProps) {
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => {
-                    audio.playCoin();
-                    setSearchQuery('');
-                    setCategoryTab('all');
-                    setDifficultyFilter('all');
-                    setSortOption('popular');
-                  }}
+                  onClick={resetAllFilters}
                   className="rounded-full"
                 >
                   Reset Filter

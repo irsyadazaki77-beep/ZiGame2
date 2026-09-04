@@ -1,7 +1,7 @@
 import React from 'react';
 import { Play, RotateCcw, Trophy, Sparkles, Home, Gamepad2, Medal, Zap } from 'lucide-react';
 
-export type GameState = 'ready' | 'countdown' | 'playing' | 'paused' | 'gameover' | 'levelcomplete';
+export type GameState = 'initialize' | 'ready' | 'countdown' | 'playing' | 'paused' | 'gameover' | 'levelcomplete' | 'restart' | string;
 
 export interface GameOverlayProps {
   gameState: GameState;

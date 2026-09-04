@@ -6,6 +6,8 @@ class RetroAudio {
   private sfxVolume: number = 0.7;
   private bgmInterval: any = null;
   private isBgmPlaying: boolean = false;
+  private masterGain: GainNode | null = null;
+  private activeNodes: Set<AudioNode> = new Set();
 
   constructor() {
     try {
@@ -31,11 +33,27 @@ class RetroAudio {
       const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
       if (AudioCtx) {
         this.ctx = new AudioCtx();
+        this.masterGain = this.ctx.createGain();
+        this.masterGain.gain.setValueAtTime(this.isMuted ? 0 : 1, this.ctx.currentTime);
+        this.masterGain.connect(this.ctx.destination);
       }
     }
     if (this.ctx && this.ctx.state === 'suspended') {
       this.ctx.resume();
     }
+  }
+
+  public stopAllSounds() {
+    this.stopBGM();
+    this.activeNodes.forEach((node) => {
+      try {
+        if ('stop' in node && typeof (node as any).stop === 'function') {
+          (node as any).stop();
+        }
+        node.disconnect();
+      } catch {}
+    });
+    this.activeNodes.clear();
   }
 
   toggleMute(): boolean {

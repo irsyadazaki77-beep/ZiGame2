@@ -1,21 +1,41 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
+import { GameLifecycleState } from '../types';
+import { performanceService } from '../services/performanceService';
 
-export type GameEngineState = 'ready' | 'countdown' | 'playing' | 'paused' | 'gameover';
+export type GameEngineState = GameLifecycleState;
 
 export interface UseGameEngineOptions {
   onScoreUpdate?: (score: number) => void;
   onGameOver?: (finalScore: number) => void;
+  onPause?: () => void;
+  onResume?: () => void;
+  onRestart?: () => void;
   maxDpr?: number;
 }
 
-export function useGameEngine({ onScoreUpdate, onGameOver, maxDpr = 1.5 }: UseGameEngineOptions = {}) {
+export function useGameEngine({
+  onScoreUpdate,
+  onGameOver,
+  onPause,
+  onResume,
+  onRestart,
+  maxDpr
+}: UseGameEngineOptions = {}) {
   const [gameState, setGameState] = useState<GameEngineState>('ready');
   const [countdown, setCountdown] = useState<number>(3);
   const [score, setScore] = useState<number>(0);
+  const [perfSettings, setPerfSettings] = useState(() => performanceService.getSettings());
 
   const gameStateRef = useRef<GameEngineState>(gameState);
   const animFrameRef = useRef<number | null>(null);
   const lastTimestampRef = useRef<number>(0);
+
+  // Sync performance settings
+  useEffect(() => {
+    return performanceService.subscribe((settings) => {
+      setPerfSettings(settings);
+    });
+  }, []);
 
   // Keep ref updated
   useEffect(() => {
@@ -27,12 +47,14 @@ export function useGameEngine({ onScoreUpdate, onGameOver, maxDpr = 1.5 }: UseGa
     const handleVisibilityChange = () => {
       if (document.hidden && gameStateRef.current === 'playing') {
         setGameState('paused');
+        if (onPause) onPause();
       }
     };
 
     const handleBlur = () => {
       if (gameStateRef.current === 'playing') {
         setGameState('paused');
+        if (onPause) onPause();
       }
     };
 
@@ -43,7 +65,7 @@ export function useGameEngine({ onScoreUpdate, onGameOver, maxDpr = 1.5 }: UseGa
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       window.removeEventListener('blur', handleBlur);
     };
-  }, []);
+  }, [onPause]);
 
   // Safe requestAnimationFrame loop manager
   const stopLoop = useCallback(() => {
@@ -109,6 +131,30 @@ export function useGameEngine({ onScoreUpdate, onGameOver, maxDpr = 1.5 }: UseGa
     });
   }, [onScoreUpdate]);
 
+  const pauseGame = useCallback(() => {
+    if (gameStateRef.current === 'playing') {
+      setGameState('paused');
+      stopLoop();
+      if (onPause) onPause();
+    }
+  }, [onPause, stopLoop]);
+
+  const resumeGame = useCallback(() => {
+    if (gameStateRef.current === 'paused') {
+      setGameState('playing');
+      lastTimestampRef.current = performance.now();
+      if (onResume) onResume();
+    }
+  }, [onResume]);
+
+  const togglePause = useCallback(() => {
+    if (gameStateRef.current === 'playing') {
+      pauseGame();
+    } else if (gameStateRef.current === 'paused') {
+      resumeGame();
+    }
+  }, [pauseGame, resumeGame]);
+
   // Game over trigger helper
   const triggerGameOver = useCallback((finalScore?: number) => {
     stopLoop();
@@ -118,6 +164,14 @@ export function useGameEngine({ onScoreUpdate, onGameOver, maxDpr = 1.5 }: UseGa
       onGameOver(s);
     }
   }, [onGameOver, score, stopLoop]);
+
+  // Restart trigger
+  const triggerRestart = useCallback(() => {
+    stopLoop();
+    setScore(0);
+    setGameState('ready');
+    if (onRestart) onRestart();
+  }, [onRestart, stopLoop]);
 
   // Start with countdown
   const startWithCountdown = useCallback((onCountdownEnd?: () => void) => {
@@ -138,19 +192,20 @@ export function useGameEngine({ onScoreUpdate, onGameOver, maxDpr = 1.5 }: UseGa
     }, 1000);
   }, []);
 
-  // DPR capping canvas initializer
+  // DPR capping canvas initializer with adaptive performance profile
   const setupCanvasContext = useCallback((canvas: HTMLCanvasElement | null, width: number, height: number) => {
     if (!canvas) return null;
     const ctx = canvas.getContext('2d');
     if (!ctx) return null;
 
-    const dpr = Math.min(window.devicePixelRatio || 1, maxDpr);
-    canvas.width = width * dpr;
-    canvas.height = height * dpr;
+    const targetCap = maxDpr !== undefined ? maxDpr : perfSettings.dprCap;
+    const dpr = Math.min(window.devicePixelRatio || 1, targetCap);
+    canvas.width = Math.floor(width * dpr);
+    canvas.height = Math.floor(height * dpr);
     ctx.scale(dpr, dpr);
 
     return ctx;
-  }, [maxDpr]);
+  }, [maxDpr, perfSettings.dprCap]);
 
   return {
     gameState,
@@ -161,10 +216,15 @@ export function useGameEngine({ onScoreUpdate, onGameOver, maxDpr = 1.5 }: UseGa
     setScore,
     updateScore,
     addScore,
+    pauseGame,
+    resumeGame,
+    togglePause,
     triggerGameOver,
+    triggerRestart,
     startWithCountdown,
     startLoop,
     stopLoop,
     setupCanvasContext,
+    perfSettings
   };
 }

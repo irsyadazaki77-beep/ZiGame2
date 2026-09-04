@@ -474,26 +474,21 @@ export default function ProfilePage({
       className="space-y-6 max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-4 sm:py-6"
     >
       {/* Player Identity Header Card */}
-      <div className="bg-[#0f1322] border border-white/[0.05] rounded-3xl p-5 sm:p-6 flex flex-col md:flex-row items-center justify-between gap-5 relative overflow-hidden shadow-lg shadow-indigo-950/5">
-        <div 
-          className="absolute -right-32 -bottom-32 w-64 h-64 rounded-full filter blur-[100px] opacity-10"
-          style={{ backgroundColor: profile.colorTheme }}
-        />
-        
+      <div className="bg-[#0f131c] border border-white/[0.06] rounded-3xl p-5 sm:p-6 flex flex-col md:flex-row items-center justify-between gap-5 relative overflow-hidden">
         {/* Avatar & Identitas */}
         <div className="flex flex-col sm:flex-row items-center gap-4 text-center sm:text-left z-10 w-full md:w-auto">
           <div 
-            className="w-18 h-18 rounded-2xl bg-[#070911] border-2 flex items-center justify-center text-4xl shadow-md shrink-0"
-            style={{ borderColor: profile.colorTheme }}
+            className="w-16 h-16 rounded-2xl bg-zinc-900 border-2 flex items-center justify-center text-3xl shadow-inner shrink-0"
+            style={{ borderColor: profile.colorTheme || '#6366f1' }}
           >
             {profile.avatar}
           </div>
-          <div className="space-y-1 min-w-0">
+          <div className="space-y-1.5 min-w-0">
             <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2">
               <h1 className="text-xl sm:text-2xl font-black text-white uppercase tracking-wider font-display truncate">
                 {profile.name}
               </h1>
-              <span className={`text-[9px] font-mono font-black uppercase px-2 py-0.5 rounded-full ${playerRank.color} ${playerRank.bg}`}>
+              <span className={`text-[10px] font-mono font-bold uppercase px-2.5 py-0.5 rounded-full ${playerRank.color} ${playerRank.bg}`}>
                 LVL {profile.level || 1}
               </span>
             </div>
@@ -501,55 +496,42 @@ export default function ProfilePage({
               {loggedInUser ? `@${loggedInUser}` : 'AKUN TAMU'} • {playerRank.title}
             </p>
             {/* Level Progress bar */}
-            <div className="w-full sm:w-60">
-              <div className="flex justify-between text-[10px] font-mono text-zinc-500 uppercase pb-1">
-                <span>XP: {profile.xp % 100}/100</span>
-                <span>LEVEL {profile.level || 1}</span>
+            <div className="w-full sm:w-64 pt-0.5">
+              <div className="flex justify-between text-[10px] font-mono text-zinc-400 pb-1">
+                <span>{profile.xp || 0} Total XP</span>
+                <span>{profile.xp % 100} / 100 XP ke Level {(profile.level || 1) + 1}</span>
               </div>
-              <div className="h-1.5 w-full bg-white/[0.04] rounded-full overflow-hidden border border-white/[0.03]">
+              <div className="h-1.5 w-full bg-black/40 rounded-full overflow-hidden">
                 <div 
-                  className="h-full bg-gradient-to-r from-indigo-500 to-purple-500 rounded-full transition-all duration-300"
-                  style={{ width: `${profile.xp % 100}%` }}
+                  className="h-full bg-indigo-500 rounded-full transition-all duration-300"
+                  style={{ width: `${Math.min(100, (profile.xp % 100))}%` }}
                 />
               </div>
             </div>
           </div>
         </div>
 
-        {/* Dynamic Action Buttons or Profile Currency Indicators */}
-        
-        {/* Dynamic Action Buttons or Profile Currency Indicators */}
-        <div className="flex items-center gap-2 sm:gap-3 z-10 shrink-0 w-full sm:w-auto justify-center sm:justify-end flex-wrap">
-          <div className="px-3 sm:px-4 py-2 bg-[#121626] border border-white/[0.05] rounded-2xl font-mono text-center flex flex-col items-center">
-            <span className="block text-[9px] sm:text-[10px] text-zinc-500 uppercase font-black">LEVEL {profile.level || 1}</span>
-            <div className="w-20 h-1.5 bg-black/50 rounded-full mt-1 overflow-hidden relative">
-              <div 
-                className="absolute top-0 left-0 h-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.5)]" 
-                style={{ width: `${Math.min(100, (((profile.xp || 0) % 100) / 100) * 100)}%` }} 
-              />
-            </div>
-            <span className="block text-[8px] text-zinc-600 mt-1">{profile.xp || 0} XP</span>
-          </div>
-          
-          <div className="px-3 sm:px-4 py-2 bg-[#121626] border border-white/[0.05] rounded-2xl font-mono text-center">
-            <span className="block text-[9px] sm:text-[10px] text-zinc-500 uppercase font-black">SALDO COIN</span>
-            <span className="text-sm font-black text-amber-400">🪙 {formatNumber(profile.coins)}</span>
+        {/* Dynamic Action Buttons & Currency Header */}
+        <div className="flex items-center gap-3 z-10 shrink-0 w-full sm:w-auto justify-center sm:justify-end flex-wrap">
+          <div className="px-4 py-2.5 bg-[#151a26] border border-white/[0.06] rounded-2xl font-mono text-center">
+            <span className="block text-[10px] text-zinc-400 uppercase font-bold">Saldo Koin</span>
+            <span className="text-sm font-bold text-amber-400">🪙 {formatNumber(profile.coins)}</span>
           </div>
 
           {loggedInUser ? (
             <button
               onClick={handleLogoutClick}
-              className="flex items-center gap-1.5 font-mono text-xs text-zinc-400 hover:text-red-400 border border-white/[0.05] hover:border-red-500/30 px-3.5 py-2 hover:bg-red-500/5 transition min-h-[40px] rounded-2xl cursor-pointer"
+              className="flex items-center gap-1.5 font-mono text-xs text-zinc-300 hover:text-red-400 border border-white/[0.06] hover:border-red-500/30 px-4 py-2.5 bg-[#151a26] hover:bg-red-500/10 transition-colors rounded-2xl cursor-pointer"
             >
-              <LogOut size={13} /> KELUAR
+              <LogOut size={13} /> Keluar
             </button>
           ) : (
             activeTab !== 'auth' && (
               <button
                 onClick={() => { audio.playCoin(); setActiveTab('auth'); }}
-                className="bg-indigo-600 hover:bg-indigo-500 text-white px-3.5 py-2 font-mono text-xs uppercase font-black tracking-wider min-h-[40px] rounded-2xl cursor-pointer transition"
+                className="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2.5 font-mono text-xs font-bold tracking-wide rounded-2xl cursor-pointer transition-colors shadow-sm shadow-indigo-600/20"
               >
-                HUBUNGKAN AKUN
+                Hubungkan Akun
               </button>
             )
           )}

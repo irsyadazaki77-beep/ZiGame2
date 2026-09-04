@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { Gamepad2, Trophy, Target, Award, User, Sparkles } from 'lucide-react';
+import { Gamepad2, Trophy, Target, Award, User, Sparkles, Store, Shield } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useGameContext } from '../../contexts/GameContext';
 import { formatNumber } from '../../utils/format';
@@ -12,11 +12,12 @@ export function MainLayout({ children }: { children: React.ReactNode }) {
   const isGamePage = location.pathname.startsWith('/game/');
 
   const navItems = [
-    { path: '/', label: 'HOME', icon: Gamepad2 },
-    { path: '/games', label: 'GAMES', icon: Trophy },
-    { path: '/challenges', label: 'CHALLENGES', icon: Target },
-    { path: '/leaderboard', label: 'LEADERBOARD', icon: Award },
-    { path: '/profile', label: 'PROFILE', icon: User },
+    { path: '/', label: 'Beranda', icon: Gamepad2 },
+    { path: '/games', label: 'Eksplorasi', icon: Trophy },
+    { path: '/challenges', label: 'Tantangan', icon: Target },
+    { path: '/leaderboard', label: 'Peringkat', icon: Award },
+    { path: '/shop', label: 'Toko', icon: Store },
+    { path: '/profile', label: 'Profil', icon: User },
   ];
 
   const { profile } = useGameContext();
@@ -26,7 +27,7 @@ export function MainLayout({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const updateTime = () => {
       const now = new Date();
-      setSystemTime(now.toLocaleTimeString('id-ID', { hour12: false }));
+      setSystemTime(now.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }));
     };
     updateTime();
     const clockInterval = setInterval(updateTime, 1000);
@@ -60,7 +61,7 @@ export function MainLayout({ children }: { children: React.ReactNode }) {
   }, []);
 
   return (
-    <div className="flex flex-col lg:flex-row min-h-screen bg-[#06080F] text-zinc-100 font-sans antialiased overflow-hidden selection:bg-indigo-500/30">
+    <div className="flex flex-col lg:flex-row min-h-screen bg-[#080a0f] text-zinc-100 font-sans antialiased overflow-hidden selection:bg-indigo-500/30">
       
       {/* Session Autolock Warning */}
       <AnimatePresence>
@@ -69,10 +70,10 @@ export function MainLayout({ children }: { children: React.ReactNode }) {
             initial={{ opacity: 0, y: -20, x: '-50%' }}
             animate={{ opacity: 1, y: 0, x: '-50%' }}
             exit={{ opacity: 0, y: -20, x: '-50%' }}
-            className="fixed top-4 left-1/2 z-50 bg-red-950/90 border border-red-500/50 text-red-200 px-6 py-3 rounded-xl shadow-2xl backdrop-blur-md flex items-center gap-3"
+            className="fixed top-4 left-1/2 z-50 bg-red-950/90 border border-red-500/40 text-red-200 px-5 py-2.5 rounded-xl shadow-2xl backdrop-blur-md flex items-center gap-3 text-sm font-medium"
           >
             <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
-            <div className="text-sm font-medium">Sesi tidak aktif. Mengunci otomatis demi keamanan...</div>
+            <div>Sesi tidak aktif. Mengunci otomatis demi keamanan...</div>
           </motion.div>
         )}
       </AnimatePresence>
@@ -80,61 +81,56 @@ export function MainLayout({ children }: { children: React.ReactNode }) {
       {/* Main Content Area */}
       <div className={`flex-1 flex flex-col h-[100dvh] relative ${isGamePage ? 'lg:pl-0 pb-0' : 'lg:pl-64 pb-20 lg:pb-0'}`}>
         
-        {/* Top Navbar */}
+        {/* Top Navbar for mobile & desktop context bar */}
         {!isGamePage && (
-          <header className="sticky top-0 z-40 bg-[#06080F]/80 backdrop-blur-xl border-b border-white/[0.04] p-4 h-16 flex items-center justify-between shadow-sm">
-            <div className="flex items-center gap-4">
-              <div className="lg:hidden flex items-center gap-2">
-                <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-indigo-600 to-fuchsia-600 flex items-center justify-center shadow-lg shadow-indigo-500/20">
-                  <Sparkles className="w-4 h-4 text-white" />
+          <header className="sticky top-0 z-40 bg-[#080a0f]/85 backdrop-blur-xl border-b border-white/[0.06] px-4 sm:px-6 h-16 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="lg:hidden flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-indigo-600 flex items-center justify-center shadow-md shadow-indigo-600/20">
+                  <Gamepad2 className="w-4 h-4 text-white" />
                 </div>
-                <span className="font-bold tracking-tight text-white">NEONPLAY</span>
+                <span className="font-display font-black tracking-wider text-base text-white">ZIGAME</span>
+              </div>
+              <div className="hidden lg:flex items-center gap-2 text-xs text-zinc-400 font-medium">
+                <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block" />
+                <span className="font-mono text-zinc-400">Platform Online</span>
+                <span className="text-zinc-600">•</span>
+                <span className="text-zinc-400 font-mono">{systemTime}</span>
               </div>
             </div>
 
-            {/* Desktop Navigation */}
-            <nav className="hidden lg:flex items-center gap-1 bg-[#121622] border border-white/[0.06] p-1 rounded-xl shadow-inner">
-              {navItems.map((item) => {
-                const isActive = location.pathname === item.path;
-                const Icon = item.icon;
-                return (
-                  <button
-                    key={item.path}
-                    onClick={() => navigate(item.path)}
-                    className={`relative flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold tracking-wide transition-all duration-300 ${
-                      isActive ? 'text-white' : 'text-zinc-500 hover:text-zinc-300 hover:bg-white/[0.02]'
-                    }`}
-                  >
-                    {isActive && (
-                      <motion.div
-                        layoutId="nav-pill"
-                        className="absolute inset-0 bg-white/[0.06] rounded-lg border border-white/10"
-                        transition={{ type: "spring", bounce: 0.2, duration: 0.6 }}
-                      />
-                    )}
-                    <Icon className="w-4 h-4 relative z-10" />
-                    <span className="relative z-10">{item.label}</span>
-                  </button>
-                );
-              })}
-            </nav>
+            {/* Top Right Quick Stats / Profile Header */}
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => navigate('/shop')}
+                className="flex items-center gap-2 px-3 py-1.5 bg-[#121622] hover:bg-[#181e2e] border border-white/[0.06] rounded-full transition-colors cursor-pointer"
+                title="Buka Toko Kosmetik"
+              >
+                <span className="text-xs">🪙</span>
+                <span className="text-xs font-mono font-bold text-amber-400">
+                  {formatNumber(profile.coins)}
+                </span>
+              </button>
 
-            <div className="flex items-center gap-4">
-              {/* Header Profile / Economy */}
-              <div className="flex items-center gap-3 bg-[#121622] border border-white/[0.04] rounded-full p-1.5 pr-4 shadow-sm">
-                <div className="flex items-center justify-center w-8 h-8 rounded-full bg-gradient-to-tr from-amber-500 to-orange-600 shadow-inner">
-                  <span className="text-sm font-bold text-white shadow-sm">
-                    {profile.avatar}
+              <button
+                onClick={() => navigate('/profile')}
+                className="flex items-center gap-2.5 bg-[#121622] hover:bg-[#181e2e] border border-white/[0.06] rounded-full p-1 pr-3 transition-colors cursor-pointer group"
+              >
+                <div 
+                  className="flex items-center justify-center w-7 h-7 rounded-full bg-zinc-800 text-sm shadow-inner"
+                  style={{ border: `1.5px solid ${profile.colorTheme || '#6366f1'}` }}
+                >
+                  {profile.avatar}
+                </div>
+                <div className="flex flex-col text-left hidden sm:flex">
+                  <span className="text-xs font-bold text-zinc-200 group-hover:text-white truncate max-w-[100px] leading-tight">
+                    {profile.name}
+                  </span>
+                  <span className="text-[10px] font-mono text-zinc-400 leading-tight">
+                    LVL {profile.level || 1}
                   </span>
                 </div>
-                <div className="flex flex-col hidden sm:flex">
-                  <span className="text-xs font-bold text-zinc-100 truncate max-w-[100px]">{profile.name}</span>
-                  <div className="flex items-center gap-1 text-[10px] font-mono text-amber-400">
-                    <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
-                    {formatNumber(profile.coins)} COINS
-                  </div>
-                </div>
-              </div>
+              </button>
             </div>
           </header>
         )}
@@ -147,18 +143,25 @@ export function MainLayout({ children }: { children: React.ReactNode }) {
 
       {/* Desktop Sidebar (Left) */}
       {!isGamePage && (
-        <aside className="hidden lg:flex flex-col w-64 h-screen fixed left-0 top-0 bg-[#0A0D14] border-r border-white/[0.04] z-50">
-          <div className="p-6">
-            <div className="flex items-center gap-3 mb-10">
-              <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-indigo-600 to-fuchsia-600 flex items-center justify-center shadow-lg shadow-indigo-500/20 ring-1 ring-white/10">
-                <Sparkles className="w-5 h-5 text-white" />
+        <aside className="hidden lg:flex flex-col w-64 h-screen fixed left-0 top-0 bg-[#0a0d14] border-r border-white/[0.06] z-50">
+          <div className="p-5 flex flex-col h-full">
+            {/* Logo */}
+            <div className="flex items-center gap-3 mb-8 px-2">
+              <div className="w-9 h-9 rounded-xl bg-indigo-600 flex items-center justify-center shadow-lg shadow-indigo-600/20 ring-1 ring-white/10">
+                <Gamepad2 className="w-5 h-5 text-white" />
               </div>
-              <span className="font-extrabold tracking-tight text-xl text-transparent bg-clip-text bg-gradient-to-r from-white to-zinc-400">
-                NEONPLAY
-              </span>
+              <div>
+                <div className="font-display font-black tracking-wider text-lg text-white leading-none">
+                  ZIGAME
+                </div>
+                <span className="text-[10px] font-mono text-zinc-400 tracking-widest uppercase">
+                  GAMING PLATFORM
+                </span>
+              </div>
             </div>
 
-            <div className="space-y-1.5">
+            {/* Navigation List */}
+            <div className="space-y-1">
               {navItems.map((item) => {
                 const isActive = location.pathname === item.path;
                 const Icon = item.icon;
@@ -166,35 +169,50 @@ export function MainLayout({ children }: { children: React.ReactNode }) {
                   <button
                     key={item.path}
                     onClick={() => navigate(item.path)}
-                    className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-bold tracking-wide transition-all duration-300 ${
+                    className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold tracking-wide transition-all duration-150 cursor-pointer ${
                       isActive 
-                        ? 'bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 shadow-[0_0_15px_rgba(99,102,241,0.1)]' 
-                        : 'text-zinc-500 hover:text-zinc-300 hover:bg-white/[0.02]'
+                        ? 'bg-indigo-600 text-white font-bold shadow-md shadow-indigo-600/20' 
+                        : 'text-zinc-400 hover:text-zinc-100 hover:bg-white/[0.04]'
                     }`}
                   >
-                    <Icon className={`w-5 h-5 ${isActive ? 'text-indigo-400' : ''}`} />
-                    {item.label}
+                    <Icon className={`w-4 h-4 ${isActive ? 'text-white' : 'text-zinc-400'}`} />
+                    <span>{item.label}</span>
                   </button>
                 );
               })}
             </div>
-          </div>
 
-          <div className="mt-auto p-6 space-y-4">
-            <button 
-              onClick={() => navigate('/shop')}
-              className="w-full relative overflow-hidden group rounded-xl p-4 border border-fuchsia-500/20 bg-gradient-to-br from-fuchsia-950/40 to-indigo-950/40 hover:from-fuchsia-900/40 hover:to-indigo-900/40 transition-colors"
-            >
-              <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/5 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-1000" />
-              <div className="flex items-center justify-between mb-1 relative z-10">
-                <span className="text-xs font-bold text-fuchsia-400 uppercase tracking-wider">NEON STORE</span>
-                <Sparkles className="w-4 h-4 text-fuchsia-400" />
+            {/* User Level Card & Quick Access Footer */}
+            <div className="mt-auto pt-6 space-y-3">
+              {/* Level Progress Widget */}
+              <div 
+                onClick={() => navigate('/profile')}
+                className="bg-[#121622] hover:bg-[#161c2c] border border-white/[0.06] rounded-2xl p-3.5 transition-colors cursor-pointer group"
+              >
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-[11px] font-mono font-bold text-zinc-300 group-hover:text-white">
+                    LEVEL {profile.level || 1}
+                  </span>
+                  <span className="text-[10px] font-mono text-indigo-400">
+                    {profile.xp || 0} XP
+                  </span>
+                </div>
+                <div className="w-full h-1.5 bg-black/40 rounded-full overflow-hidden">
+                  <div 
+                    className="h-full bg-indigo-500 rounded-full transition-all duration-300"
+                    style={{ width: `${Math.min(100, (((profile.xp || 0) % 100) / 100) * 100)}%` }}
+                  />
+                </div>
               </div>
-              <div className="text-sm font-medium text-zinc-300 relative z-10">Beli Avatar & Tema</div>
-            </button>
-            <div className="flex items-center justify-between text-[10px] font-mono text-zinc-600 px-2">
-              <span>SYS.TIME</span>
-              <span className="text-zinc-400">{systemTime}</span>
+
+              {/* Version & Security Tag */}
+              <div className="flex items-center justify-between px-2 text-[10px] font-mono text-zinc-400">
+                <span className="flex items-center gap-1">
+                  <Shield size={11} className="text-emerald-500" />
+                  Anti-Cheat v2
+                </span>
+                <span>v2.6</span>
+              </div>
             </div>
           </div>
         </aside>
@@ -202,7 +220,7 @@ export function MainLayout({ children }: { children: React.ReactNode }) {
 
       {/* Mobile Bottom Navigation */}
       {!isGamePage && (
-        <div className="lg:hidden fixed bottom-0 left-0 right-0 h-20 bg-[#0A0D14]/90 backdrop-blur-xl border-t border-white/[0.04] z-50 px-2 flex items-center justify-around pb-safe">
+        <div className="lg:hidden fixed bottom-0 left-0 right-0 h-16 bg-[#0a0d14]/95 backdrop-blur-xl border-t border-white/[0.06] z-50 px-2 flex items-center justify-around pb-safe">
           {navItems.map((item) => {
             const isActive = location.pathname === item.path;
             const Icon = item.icon;
@@ -210,29 +228,22 @@ export function MainLayout({ children }: { children: React.ReactNode }) {
               <button
                 key={item.path}
                 onClick={() => navigate(item.path)}
-                className="relative flex flex-col items-center justify-center w-16 h-14"
+                className="relative flex flex-col items-center justify-center flex-1 h-full py-1 cursor-pointer"
               >
-                <div className={`relative flex items-center justify-center transition-transform duration-300 ${isActive ? '-translate-y-1' : ''}`}>
-                  {isActive && (
-                    <motion.div
-                      layoutId="mobile-nav-glow"
-                      className="absolute inset-0 bg-indigo-500/20 rounded-full blur-md"
-                      transition={{ type: "spring", bounce: 0.2, duration: 0.6 }}
-                    />
-                  )}
-                  <Icon className={`w-6 h-6 relative z-10 transition-colors duration-300 ${
-                    isActive ? 'text-indigo-400' : 'text-zinc-600'
+                <div className={`relative flex items-center justify-center transition-all duration-200 ${isActive ? '-translate-y-0.5' : ''}`}>
+                  <Icon className={`w-5 h-5 transition-colors duration-200 ${
+                    isActive ? 'text-indigo-400' : 'text-zinc-500'
                   }`} />
                 </div>
-                <span className={`text-[9px] font-bold mt-1 tracking-wide transition-colors duration-300 ${
-                  isActive ? 'text-indigo-400' : 'text-zinc-600'
+                <span className={`text-[10px] font-medium mt-0.5 transition-colors duration-200 ${
+                  isActive ? 'text-indigo-400 font-bold' : 'text-zinc-500'
                 }`}>
                   {item.label}
                 </span>
                 {isActive && (
                   <motion.div 
                     layoutId="mobile-nav-indicator"
-                    className="absolute -bottom-1 w-1 h-1 rounded-full bg-indigo-500" 
+                    className="absolute bottom-1 w-1 h-1 rounded-full bg-indigo-400" 
                   />
                 )}
               </button>

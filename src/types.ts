@@ -21,6 +21,7 @@ export interface PlayerProfile {
   isPublicProfile?: boolean;
   totalPlaytimeSec?: number;
   socialPrivacy?: SocialPrivacySettings;
+  mastery?: Record<string, GameMastery>;
 
   settings?: {
     reducedMotion?: boolean;
@@ -38,6 +39,161 @@ export interface SocialPrivacySettings {
 }
 
 export type GraphicsQuality = 'low' | 'medium' | 'high';
+export type PerformanceTier = 'low' | 'medium' | 'high';
+
+export interface PerformanceSettings {
+  tier: PerformanceTier;
+  targetFps: number;
+  particlesMultiplier: number;
+  enableGlow: boolean;
+  enableBlur: boolean;
+  enableShadows: boolean;
+  dprCap: number;
+  batterySaver: boolean;
+  autoDetect: boolean;
+}
+
+export type GameQualityTier = 'flagship' | 'core' | 'experimental' | 'legacy';
+
+export type InputSource = 'keyboard' | 'touch' | 'mouse' | 'gamepad';
+
+export interface GamepadState {
+  connected: boolean;
+  id: string;
+  index: number;
+  buttons: Record<string, boolean>;
+  axes: {
+    leftStickX: number;
+    leftStickY: number;
+    rightStickX: number;
+    rightStickY: number;
+  };
+}
+
+export type InputAction =
+  | 'UP'
+  | 'DOWN'
+  | 'LEFT'
+  | 'RIGHT'
+  | 'PRIMARY'
+  | 'SECONDARY'
+  | 'PAUSE'
+  | 'RESTART';
+
+export interface InputMappingConfig {
+  keys: {
+    up?: string[];
+    down?: string[];
+    left?: string[];
+    right?: string[];
+    primary?: string[];
+    secondary?: string[];
+    pause?: string[];
+    restart?: string[];
+  };
+  gamepad: {
+    primaryButton?: number;
+    secondaryButton?: number;
+    pauseButton?: number;
+    restartButton?: number;
+  };
+  supportsTouch: boolean;
+  supportsGamepad: boolean;
+  supportsMouse: boolean;
+}
+
+export type GameLifecycleState =
+  | 'initialize'
+  | 'ready'
+  | 'countdown'
+  | 'playing'
+  | 'paused'
+  | 'gameover'
+  | 'restart'
+  | 'dispose';
+
+export interface GameSaveState<T = any> {
+  gameId: string;
+  gameVersion: string;
+  balanceVersion: string;
+  score: number;
+  timestamp: number;
+  data: T;
+  checksum: string;
+}
+
+export interface GhostPoint {
+  t: number; // time in ms from start
+  x?: number;
+  y?: number;
+  a?: string; // action
+  s?: number; // score snapshot
+}
+
+export interface GhostRunData {
+  gameId: string;
+  score: number;
+  durationMs: number;
+  recordedAt: number;
+  points: GhostPoint[];
+  gameVersion: string;
+}
+
+export type CompetitiveTier =
+  | 'Bronze'
+  | 'Silver'
+  | 'Gold'
+  | 'Platinum'
+  | 'Diamond'
+  | 'Cyber Master';
+
+export interface CompetitiveRating {
+  gameId: string;
+  rating: number; // Elo / CSR (starts ~1000)
+  tier: CompetitiveTier;
+  peakRating: number;
+  matchesPlayed: number;
+  wins: number;
+  losses: number;
+  lastUpdated: number;
+}
+
+export interface FeatureFlags {
+  gamepadSupport: boolean;
+  ghostMode: boolean;
+  saveState: boolean;
+  batterySaver: boolean;
+  competitiveRating: boolean;
+  telemetry: boolean;
+  theaterMode: boolean;
+  publicProfiles: boolean;
+  soundNormalization: boolean;
+  newDiscovery: boolean;
+  onboardingWizard: boolean;
+}
+
+export interface ShareResultData {
+  gameId: string;
+  gameTitle: string;
+  gameIcon: string;
+  score: number;
+  highScore: number;
+  isPersonalBest: boolean;
+  masteryXpGained: number;
+  masteryLevel: number;
+  competitiveRatingChange?: number;
+  competitiveTier?: CompetitiveTier;
+  timestamp: number;
+}
+
+export interface OnboardingPreferences {
+  completed: boolean;
+  favoriteGenres: string[];
+  playStyle: 'casual' | 'competitive' | 'completionist';
+  preferredInput: InputSource;
+  recommendedGameIds: string[];
+  completedAt?: number;
+}
 
 export interface GameStats {
   id: string;
