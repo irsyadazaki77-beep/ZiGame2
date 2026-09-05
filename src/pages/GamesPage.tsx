@@ -306,7 +306,7 @@ export default function GamesPage({ games, onSelectGame }: GamesPageProps) {
       </div>
 
       {/* Game Grid Container */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4 pt-2">
+      <div className="grid grid-cols-1 min-[420px]:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-3.5 sm:gap-4 pt-1">
         {filteredGames.length > 0 ? (
           filteredGames.map((game) => (
             <GameCard

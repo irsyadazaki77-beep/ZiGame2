@@ -12,6 +12,7 @@ service cloud.firestore {
     function incoming() { return request.resource.data; }
     function existing() { return resource.data; }
     function isSignedIn() { return request.auth != null; }
+    function isAdmin() { return isSignedIn() && request.auth.token.admin == true; }
 
     function isValidUser(data) {
       return data.keys().hasAll(['profile'])
@@ -42,7 +43,7 @@ service cloud.firestore {
         && isValidUser(incoming())
         // Client cannot tamper with administrative / sensitive fields
         && (!incoming().diff(existing()).affectedKeys().hasAny(['isAdmin', 'isBanned', 'verifiedBalance', 'role']))
-        // IMMUTABLE FIELD: Coins must not change during client-direct updates (must use /api endpoints)
+        // IMMUTABLE FIELD: Coins must not change during client-direct updates (must use server /api endpoints)
         && (
           !('profile' in incoming()) || 
           !('coins' in incoming().profile) ||
@@ -59,6 +60,17 @@ service cloud.firestore {
     match /userEconomy/{userId} {
       allow read: if isSignedIn() && request.auth.uid == userId && isValidId(userId);
       allow write: if false;
+    }
+
+    // User Inventory (Read: Owner, Write: Server Admin Only)
+    match /userInventory/{userId} {
+      allow read: if isSignedIn() && request.auth.uid == userId && isValidId(userId);
+      allow write: if false;
+
+      match /items/{itemId} {
+        allow read: if isSignedIn() && request.auth.uid == userId && isValidId(itemId);
+        allow write: if false;
+      }
     }
 
     // Spin Cooldowns (Read: Owner, Write: Server Admin Only)
@@ -89,27 +101,33 @@ service cloud.firestore {
       allow delete: if isSignedIn() && existing().userId == request.auth.uid && isValidId(saveId);
     }
 
-    // Global Public Leaderboards (Read: Public, Write: Server Authoritative ONLY)
+    // Global Leaderboards (Read: Authenticated Users, Write: Server Authoritative ONLY)
     match /leaderboards/{gameId} {
-      allow read: if true;
+      allow read: if isSignedIn() && isValidId(gameId);
       
       match /entries/{entryId} {
-        allow read: if true;
+        allow read: if isSignedIn() && isValidId(entryId);
         allow write: if false;
       }
     }
 
-    // Game Sessions for Anti-Cheat Nonce Validation (Server Admin Only)
+    // Game Sessions for Anti-Cheat Nonce Validation (Server Admin Only via Admin SDK)
     match /gameSessions/{sessionId} {
       allow read, write: if false;
     }
 
-    // Suspicious Score Audit Logs (Server Admin Only)
+    // Suspicious Score Audit Logs (Server Admin Only via Admin SDK)
     match /suspiciousScores/{scoreId} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    // Rate Limits (Server Admin Only via Admin SDK)
+    match /rateLimits/{limitId} {
       allow read, write: if false;
     }
 
-    // Processed Actions for Idempotency (Server Admin Only)
+    // Processed Actions for Idempotency (Server Admin Only via Admin SDK)
     match /processedActions/{actionKey} {
       allow read, write: if false;
     }

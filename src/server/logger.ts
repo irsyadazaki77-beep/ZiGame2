@@ -20,6 +20,7 @@ export interface StructuredLogEntry {
   category: SecurityEventCategory | string;
   message: string;
   timestamp: string;
+  requestId?: string;
   userId?: string;
   ip?: string;
   metadata?: Record<string, any>;
@@ -40,7 +41,11 @@ function sanitizeMetadata(data: Record<string, any> | undefined): Record<string,
       lower.includes('secret') ||
       lower.includes('credential') ||
       lower.includes('key') ||
-      lower.includes('auth')
+      lower.includes('auth') ||
+      lower.includes('bearer') ||
+      lower.includes('cookie') ||
+      lower.includes('certificate') ||
+      lower.includes('private')
     ) {
       sanitized[key] = '[REDACTED]';
     } else if (typeof value === 'object' && value !== null) {
@@ -60,7 +65,9 @@ export const serverLogger = {
       timestamp: new Date().toISOString()
     };
 
-    const formatted = `[${fullEntry.timestamp}] [${fullEntry.level}] [${fullEntry.category}] ${fullEntry.message}` +
+    const formatted = `[${fullEntry.timestamp}] [${fullEntry.level}] [${fullEntry.category}]` +
+      (fullEntry.requestId ? ` [req:${fullEntry.requestId}]` : '') +
+      ` ${fullEntry.message}` +
       (fullEntry.userId ? ` (uid: ${fullEntry.userId})` : '') +
       (fullEntry.ip ? ` (ip: ${fullEntry.ip})` : '') +
       (fullEntry.metadata ? ` | meta: ${JSON.stringify(fullEntry.metadata)}` : '') +
@@ -75,20 +82,20 @@ export const serverLogger = {
     }
   },
 
-  info(category: string, message: string, metadata?: Record<string, any>, userId?: string, ip?: string) {
-    this.log({ level: 'INFO', category, message, metadata, userId, ip });
+  info(category: string, message: string, metadata?: Record<string, any>, userId?: string, ip?: string, requestId?: string) {
+    this.log({ level: 'INFO', category, message, metadata, userId, ip, requestId });
   },
 
-  warn(category: string, message: string, metadata?: Record<string, any>, userId?: string, ip?: string) {
-    this.log({ level: 'WARN', category, message, metadata, userId, ip });
+  warn(category: string, message: string, metadata?: Record<string, any>, userId?: string, ip?: string, requestId?: string) {
+    this.log({ level: 'WARN', category, message, metadata, userId, ip, requestId });
   },
 
-  error(category: string, message: string, err?: unknown, metadata?: Record<string, any>, userId?: string, ip?: string) {
+  error(category: string, message: string, err?: unknown, metadata?: Record<string, any>, userId?: string, ip?: string, requestId?: string) {
     const errorMsg = err instanceof Error ? err.stack || err.message : String(err || '');
-    this.log({ level: 'ERROR', category, message, error: errorMsg, metadata, userId, ip });
+    this.log({ level: 'ERROR', category, message, error: errorMsg, metadata, userId, ip, requestId });
   },
 
-  security(category: SecurityEventCategory, message: string, metadata?: Record<string, any>, userId?: string, ip?: string) {
-    this.log({ level: 'SECURITY', category, message, metadata, userId, ip });
+  security(category: SecurityEventCategory, message: string, metadata?: Record<string, any>, userId?: string, ip?: string, requestId?: string) {
+    this.log({ level: 'SECURITY', category, message, metadata, userId, ip, requestId });
   }
 };

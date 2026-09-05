@@ -79,20 +79,20 @@ export function MainLayout({ children }: { children: React.ReactNode }) {
       </AnimatePresence>
 
       {/* Main Content Area */}
-      <div className={`flex-1 flex flex-col h-[100dvh] relative ${isGamePage ? 'lg:pl-0 pb-0' : 'lg:pl-64 pb-20 lg:pb-0'}`}>
+      <div className={`flex-1 flex flex-col min-h-0 h-[100dvh] relative ${isGamePage ? 'lg:pl-0 pb-0' : 'lg:pl-60 xl:pl-64 pb-[calc(4.25rem+env(safe-area-inset-bottom,0px))] lg:pb-0'}`}>
         
         {/* Top Navbar for mobile & desktop context bar */}
         {!isGamePage && (
-          <header className="sticky top-0 z-40 bg-[#080a0f]/85 backdrop-blur-xl border-b border-white/[0.06] px-4 sm:px-6 h-16 flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="lg:hidden flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-lg bg-indigo-600 flex items-center justify-center shadow-md shadow-indigo-600/20">
-                  <Gamepad2 className="w-4 h-4 text-white" />
+          <header className="sticky top-0 z-40 bg-[#080a0f]/90 backdrop-blur-xl border-b border-white/[0.06] px-3 sm:px-6 h-14 sm:h-16 flex items-center justify-between flex-none">
+            <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
+              <div className="lg:hidden flex items-center gap-2">
+                <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-indigo-600 flex items-center justify-center shadow-md shadow-indigo-600/20 shrink-0">
+                  <Gamepad2 className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-white" />
                 </div>
-                <span className="font-display font-black tracking-wider text-base text-white">ZIGAME</span>
+                <span className="font-display font-black tracking-wider text-sm sm:text-base text-white">ZIGAME</span>
               </div>
               <div className="hidden lg:flex items-center gap-2 text-xs text-zinc-400 font-medium">
-                <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block" />
+                <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block shrink-0" />
                 <span className="font-mono text-zinc-400">Platform Online</span>
                 <span className="text-zinc-600">•</span>
                 <span className="text-zinc-400 font-mono">{systemTime}</span>
@@ -100,30 +100,30 @@ export function MainLayout({ children }: { children: React.ReactNode }) {
             </div>
 
             {/* Top Right Quick Stats / Profile Header */}
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2 sm:gap-3 shrink-0">
               <button
                 onClick={() => navigate('/shop')}
-                className="flex items-center gap-2 px-3 py-1.5 bg-[#121622] hover:bg-[#181e2e] border border-white/[0.06] rounded-full transition-colors cursor-pointer"
+                className="flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3 py-1 sm:py-1.5 bg-[#121622] hover:bg-[#181e2e] border border-white/[0.06] rounded-full transition-colors cursor-pointer text-xs"
                 title="Buka Toko Kosmetik"
               >
                 <span className="text-xs">🪙</span>
-                <span className="text-xs font-mono font-bold text-amber-400">
+                <span className="text-[11px] sm:text-xs font-mono font-bold text-amber-400">
                   {formatNumber(profile.coins)}
                 </span>
               </button>
 
               <button
                 onClick={() => navigate('/profile')}
-                className="flex items-center gap-2.5 bg-[#121622] hover:bg-[#181e2e] border border-white/[0.06] rounded-full p-1 pr-3 transition-colors cursor-pointer group"
+                className="flex items-center gap-2 bg-[#121622] hover:bg-[#181e2e] border border-white/[0.06] rounded-full p-1 sm:pr-3 transition-colors cursor-pointer group"
               >
                 <div 
-                  className="flex items-center justify-center w-7 h-7 rounded-full bg-zinc-800 text-sm shadow-inner"
+                  className="flex items-center justify-center w-6 h-6 sm:w-7 sm:h-7 rounded-full bg-zinc-800 text-xs sm:text-sm shadow-inner shrink-0"
                   style={{ border: `1.5px solid ${profile.colorTheme || '#6366f1'}` }}
                 >
                   {profile.avatar}
                 </div>
-                <div className="flex flex-col text-left hidden sm:flex">
-                  <span className="text-xs font-bold text-zinc-200 group-hover:text-white truncate max-w-[100px] leading-tight">
+                <div className="flex-col text-left hidden md:flex">
+                  <span className="text-xs font-bold text-zinc-200 group-hover:text-white truncate max-w-[90px] lg:max-w-[110px] leading-tight">
                     {profile.name}
                   </span>
                   <span className="text-[10px] font-mono text-zinc-400 leading-tight">
@@ -143,18 +143,18 @@ export function MainLayout({ children }: { children: React.ReactNode }) {
 
       {/* Desktop Sidebar (Left) */}
       {!isGamePage && (
-        <aside className="hidden lg:flex flex-col w-64 h-screen fixed left-0 top-0 bg-[#0a0d14] border-r border-white/[0.06] z-50">
-          <div className="p-5 flex flex-col h-full">
+        <aside className="hidden lg:flex flex-col w-60 xl:w-64 h-screen fixed left-0 top-0 bg-[#0a0d14] border-r border-white/[0.06] z-50">
+          <div className="p-4 xl:p-5 flex flex-col h-full">
             {/* Logo */}
-            <div className="flex items-center gap-3 mb-8 px-2">
-              <div className="w-9 h-9 rounded-xl bg-indigo-600 flex items-center justify-center shadow-lg shadow-indigo-600/20 ring-1 ring-white/10">
-                <Gamepad2 className="w-5 h-5 text-white" />
+            <div className="flex items-center gap-3 mb-6 xl:mb-8 px-2">
+              <div className="w-8 h-8 xl:w-9 xl:h-9 rounded-xl bg-indigo-600 flex items-center justify-center shadow-lg shadow-indigo-600/20 ring-1 ring-white/10 shrink-0">
+                <Gamepad2 className="w-4 h-4 xl:w-5 xl:h-5 text-white" />
               </div>
               <div>
-                <div className="font-display font-black tracking-wider text-lg text-white leading-none">
+                <div className="font-display font-black tracking-wider text-base xl:text-lg text-white leading-none">
                   ZIGAME
                 </div>
-                <span className="text-[10px] font-mono text-zinc-400 tracking-widest uppercase">
+                <span className="text-[9px] xl:text-[10px] font-mono text-zinc-400 tracking-widest uppercase">
                   GAMING PLATFORM
                 </span>
               </div>
@@ -169,25 +169,25 @@ export function MainLayout({ children }: { children: React.ReactNode }) {
                   <button
                     key={item.path}
                     onClick={() => navigate(item.path)}
-                    className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold tracking-wide transition-all duration-150 cursor-pointer ${
+                    className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold tracking-wide transition-all duration-150 cursor-pointer ${
                       isActive 
                         ? 'bg-indigo-600 text-white font-bold shadow-md shadow-indigo-600/20' 
                         : 'text-zinc-400 hover:text-zinc-100 hover:bg-white/[0.04]'
                     }`}
                   >
-                    <Icon className={`w-4 h-4 ${isActive ? 'text-white' : 'text-zinc-400'}`} />
-                    <span>{item.label}</span>
+                    <Icon className={`w-4 h-4 shrink-0 ${isActive ? 'text-white' : 'text-zinc-400'}`} />
+                    <span className="truncate">{item.label}</span>
                   </button>
                 );
               })}
             </div>
 
             {/* User Level Card & Quick Access Footer */}
-            <div className="mt-auto pt-6 space-y-3">
+            <div className="mt-auto pt-4 space-y-3">
               {/* Level Progress Widget */}
               <div 
                 onClick={() => navigate('/profile')}
-                className="bg-[#121622] hover:bg-[#161c2c] border border-white/[0.06] rounded-2xl p-3.5 transition-colors cursor-pointer group"
+                className="bg-[#121622] hover:bg-[#161c2c] border border-white/[0.06] rounded-2xl p-3 xl:p-3.5 transition-colors cursor-pointer group"
               >
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-[11px] font-mono font-bold text-zinc-300 group-hover:text-white">
@@ -208,7 +208,7 @@ export function MainLayout({ children }: { children: React.ReactNode }) {
               {/* Version & Security Tag */}
               <div className="flex items-center justify-between px-2 text-[10px] font-mono text-zinc-400">
                 <span className="flex items-center gap-1">
-                  <Shield size={11} className="text-emerald-500" />
+                  <Shield size={11} className="text-emerald-500 shrink-0" />
                   Anti-Cheat v2
                 </span>
                 <span>v2.6</span>
@@ -220,7 +220,10 @@ export function MainLayout({ children }: { children: React.ReactNode }) {
 
       {/* Mobile Bottom Navigation */}
       {!isGamePage && (
-        <div className="lg:hidden fixed bottom-0 left-0 right-0 h-16 bg-[#0a0d14]/95 backdrop-blur-xl border-t border-white/[0.06] z-50 px-2 flex items-center justify-around pb-safe">
+        <nav 
+          aria-label="Navigasi Mobile"
+          className="lg:hidden fixed bottom-0 left-0 right-0 h-[calc(3.75rem+env(safe-area-inset-bottom,0px))] pb-[env(safe-area-inset-bottom,0px)] bg-[#0a0d14]/95 backdrop-blur-xl border-t border-white/[0.06] z-50 px-1 sm:px-3 flex items-center justify-around"
+        >
           {navItems.map((item) => {
             const isActive = location.pathname === item.path;
             const Icon = item.icon;
@@ -228,14 +231,14 @@ export function MainLayout({ children }: { children: React.ReactNode }) {
               <button
                 key={item.path}
                 onClick={() => navigate(item.path)}
-                className="relative flex flex-col items-center justify-center flex-1 h-full py-1 cursor-pointer"
+                className="relative flex flex-col items-center justify-center flex-1 h-full py-1 cursor-pointer min-w-0"
               >
                 <div className={`relative flex items-center justify-center transition-all duration-200 ${isActive ? '-translate-y-0.5' : ''}`}>
-                  <Icon className={`w-5 h-5 transition-colors duration-200 ${
+                  <Icon className={`w-4 h-4 sm:w-5 sm:h-5 transition-colors duration-200 shrink-0 ${
                     isActive ? 'text-indigo-400' : 'text-zinc-500'
                   }`} />
                 </div>
-                <span className={`text-[10px] font-medium mt-0.5 transition-colors duration-200 ${
+                <span className={`text-[9px] sm:text-[10px] font-medium mt-0.5 transition-colors duration-200 truncate max-w-full px-0.5 ${
                   isActive ? 'text-indigo-400 font-bold' : 'text-zinc-500'
                 }`}>
                   {item.label}
@@ -249,7 +252,7 @@ export function MainLayout({ children }: { children: React.ReactNode }) {
               </button>
             );
           })}
-        </div>
+        </nav>
       )}
     </div>
   );

@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import { getApps } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
 import { serverLogger } from './logger';
+import { sendApiError } from './requestContext';
 
 export interface AuthenticatedUser {
   uid: string;
@@ -21,24 +22,20 @@ declare global {
   }
 }
 
-// Known admin emails / UIDs from environment or defaults
-const ADMIN_EMAILS = (process.env.ADMIN_EMAILS || 'admin@zigame.io,owner@zigame.io')
-  .split(',')
-  .map(e => e.trim().toLowerCase())
-  .filter(Boolean);
-
+// Optional emergency UID allowlist only (no default hardcoded email or UID)
 const ADMIN_UIDS = (process.env.ADMIN_UIDS || '')
   .split(',')
   .map(u => u.trim())
   .filter(Boolean);
 
 /**
- * Checks if a user has admin privilege based on claims, emails, or configured UIDs
+ * Checks if a user has admin privilege based strictly on Firebase Custom Claims,
+ * with optional emergency ADMIN_UIDS allowlist.
+ * NO hardcoded emails or default privileged accounts.
  */
-export function isUserAdmin(uid: string, email?: string, claims?: Record<string, any>): boolean {
+export function isUserAdmin(uid: string, _email?: string, claims?: Record<string, any>): boolean {
   if (claims?.admin === true || claims?.role === 'admin') return true;
-  if (email && ADMIN_EMAILS.includes(email.toLowerCase())) return true;
-  if (uid && ADMIN_UIDS.includes(uid)) return true;
+  if (uid && ADMIN_UIDS.length > 0 && ADMIN_UIDS.includes(uid)) return true;
   return false;
 }
 
@@ -62,19 +59,22 @@ export function extractBearerToken(req: Request): string | null {
  */
 export async function authenticateToken(req: Request, res: Response, next: NextFunction) {
   const token = extractBearerToken(req);
+  const isTestEnv = process.env.NODE_ENV === 'test' || Boolean(process.env.VITEST);
 
   if (!token) {
-    // Non-production test bypass support (e.g. for vitest)
-    if (process.env.NODE_ENV !== 'production') {
+    // Test bypass is STRICTLY restricted to test environment
+    if (isTestEnv) {
       const testUid = req.headers['x-test-uid'];
-      if (typeof testUid === 'string' && testUid) {
+      if (typeof testUid === 'string' && testUid.trim()) {
+        const uid = testUid.trim();
         const testEmail = typeof req.headers['x-test-email'] === 'string' ? req.headers['x-test-email'] : undefined;
-        const testIsAdmin = req.headers['x-test-admin'] === 'true' || isUserAdmin(testUid, testEmail);
+        const testIsAdmin = req.headers['x-test-admin'] === 'true' || isUserAdmin(uid, testEmail);
         req.user = {
-          uid: testUid,
+          uid,
           email: testEmail,
           name: typeof req.headers['x-test-name'] === 'string' ? req.headers['x-test-name'] : 'Test User',
-          isAdmin: testIsAdmin
+          isAdmin: testIsAdmin,
+          tokenClaims: { admin: testIsAdmin }
         };
         return next();
       }
@@ -95,44 +95,30 @@ export async function authenticateToken(req: Request, res: Response, next: NextF
       };
       return next();
     } else {
-      // In development when Firebase Admin isn't initialized
-      if (process.env.NODE_ENV !== 'production') {
-        serverLogger.warn('AUTH_DEV_MODE', 'Firebase Admin not initialized, parsing token fallback in dev mode');
-        // Accept mock dev token
+      // Firebase Admin uninitialized
+      if (isTestEnv) {
         req.user = {
-          uid: token.startsWith('mock_') ? token.replace('mock_', '') : 'dev_user',
+          uid: token.startsWith('mock_') ? token.replace('mock_', '') : 'test_user',
           isAdmin: token.includes('admin')
         };
         return next();
-      } else {
-        serverLogger.security('FIREBASE_FAILURE', 'Firebase Admin unavailable in production');
-        return res.status(503).json({
-          success: false,
-          code: 'SERVICE_UNAVAILABLE',
-          message: 'Layanan autentikasi backend tidak tersedia.'
-        });
       }
+
+      serverLogger.security('FIREBASE_FAILURE', 'Firebase Admin unavailable for token verification', undefined, undefined, req.ip, req.id);
+      return sendApiError(res, 503, 'SERVICE_UNAVAILABLE', 'Layanan autentikasi backend tidak tersedia.');
     }
   } catch (err: any) {
     serverLogger.security('AUTH_FAILURE', 'Failed to verify Firebase ID token', {
       errorName: err?.name,
       errorCode: err?.code,
       message: err?.message
-    }, undefined, req.ip);
+    }, undefined, req.ip, req.id);
 
     if (err?.code === 'auth/id-token-expired') {
-      return res.status(401).json({
-        success: false,
-        code: 'TOKEN_EXPIRED',
-        message: 'Token sesi telah kadaluarsa. Silakan muat ulang atau login kembali.'
-      });
+      return sendApiError(res, 401, 'TOKEN_EXPIRED', 'Token sesi telah kadaluarsa. Silakan muat ulang atau login kembali.');
     }
 
-    return res.status(401).json({
-      success: false,
-      code: 'INVALID_TOKEN',
-      message: 'Token otentikasi tidak valid.'
-    });
+    return sendApiError(res, 401, 'INVALID_TOKEN', 'Token otentikasi tidak valid.');
   }
 }
 
@@ -144,13 +130,9 @@ export function requireAuth(req: Request, res: Response, next: NextFunction) {
     serverLogger.security('AUTH_FAILURE', 'Unauthenticated request to protected endpoint', {
       path: req.originalUrl,
       method: req.method
-    }, undefined, req.ip);
+    }, undefined, req.ip, req.id);
 
-    return res.status(401).json({
-      success: false,
-      code: 'UNAUTHORIZED',
-      message: 'Akses ditolak. Silakan login terlebih dahulu.'
-    });
+    return sendApiError(res, 401, 'UNAUTHORIZED', 'Akses ditolak. Silakan login terlebih dahulu.');
   }
   next();
 }
@@ -160,24 +142,16 @@ export function requireAuth(req: Request, res: Response, next: NextFunction) {
  */
 export function requireAdmin(req: Request, res: Response, next: NextFunction) {
   if (!req.user || !req.user.uid) {
-    return res.status(401).json({
-      success: false,
-      code: 'UNAUTHORIZED',
-      message: 'Akses ditolak. Silakan login sebagai administrator.'
-    });
+    return sendApiError(res, 401, 'UNAUTHORIZED', 'Akses ditolak. Silakan login sebagai administrator.');
   }
 
   if (!req.user.isAdmin) {
     serverLogger.security('ADMIN_ACTION', 'Non-admin user attempted admin endpoint', {
       path: req.originalUrl,
       method: req.method
-    }, req.user.uid, req.ip);
+    }, req.user.uid, req.ip, req.id);
 
-    return res.status(403).json({
-      success: false,
-      code: 'FORBIDDEN',
-      message: 'Akses ditolak. Memerlukan hak akses administrator server.'
-    });
+    return sendApiError(res, 403, 'FORBIDDEN', 'Akses ditolak. Memerlukan hak akses administrator server.');
   }
 
   next();

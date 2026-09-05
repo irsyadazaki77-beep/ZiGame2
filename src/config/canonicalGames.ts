@@ -117,17 +117,45 @@ export const GAME_ID_ALIAS_MAP: Record<string, CanonicalGameId> = {
 
 /**
  * Resolve any game ID string (canonical or legacy alias) into its canonical representation.
+ * STRICT: Throws an error if gameId is not valid.
  */
-export function toCanonicalGameId(rawId: string): CanonicalGameId {
-  const normalized = (rawId || '').trim().toLowerCase();
-  return GAME_ID_ALIAS_MAP[normalized] || (CANONICAL_GAME_IDS.includes(normalized as CanonicalGameId) ? (normalized as CanonicalGameId) : 'snake');
+export function requireCanonicalGameId(rawId: string): CanonicalGameId {
+  if (!rawId || typeof rawId !== 'string') {
+    const err = new Error(`Invalid game ID: "${rawId}" is not a string`);
+    (err as any).code = 'INVALID_GAME_ID';
+    throw err;
+  }
+  const normalized = rawId.trim().toLowerCase();
+  const canonical = GAME_ID_ALIAS_MAP[normalized] || (CANONICAL_GAME_IDS.includes(normalized as CanonicalGameId) ? (normalized as CanonicalGameId) : null);
+  if (!canonical) {
+    const err = new Error(`Unknown game ID: "${rawId}" is not recognized in canonical registry`);
+    (err as any).code = 'INVALID_GAME_ID';
+    throw err;
+  }
+  return canonical;
+}
+
+/**
+ * Safe alias resolution with default fallback (intended for UI / display safety)
+ */
+export function toCanonicalGameId(rawId: string, fallback: CanonicalGameId = 'snake'): CanonicalGameId {
+  return resolveGameIdForUI(rawId, fallback);
+}
+
+/**
+ * UI-only helper that safely falls back to a default if unknown
+ */
+export function resolveGameIdForUI(rawId: string, fallback: CanonicalGameId = 'snake'): CanonicalGameId {
+  if (!rawId || typeof rawId !== 'string') return fallback;
+  const normalized = rawId.trim().toLowerCase();
+  return GAME_ID_ALIAS_MAP[normalized] || (CANONICAL_GAME_IDS.includes(normalized as CanonicalGameId) ? (normalized as CanonicalGameId) : fallback);
 }
 
 /**
  * Returns true if rawId is a valid known canonical game ID or alias.
  */
-export function isValidGameId(rawId: string): boolean {
+export function isValidGameId(rawId: unknown): rawId is string {
   if (!rawId || typeof rawId !== 'string') return false;
   const normalized = rawId.trim().toLowerCase();
-  return Boolean(GAME_ID_ALIAS_MAP[normalized]);
+  return Boolean(GAME_ID_ALIAS_MAP[normalized] || CANONICAL_GAME_IDS.includes(normalized as CanonicalGameId));
 }

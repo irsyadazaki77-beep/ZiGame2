@@ -75,8 +75,8 @@ export default function Shop({ profile, onUpdateProfile }: ShopProps) {
 
     audio.playCoin();
     
-    // Server validation for purchase
-    const result = await economyService.buyItem(item.id, profile.name); // Using profile name as ID for demo
+    // Server-authoritative purchase
+    const result = await economyService.buyItem(item.id);
     if (!result.success) {
       audio.playHit();
       showToast('Pembelian Gagal', result.message || 'Gagal memproses transaksi di server', 'error');

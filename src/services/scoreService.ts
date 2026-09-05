@@ -70,13 +70,29 @@ export const scoreService = {
     score,
     playerName,
     playerAvatar,
-    sessionId,
+    sessionId: inputSessionId,
     durationMs,
     masteryLevel
   }: ScoreSubmissionParams): Promise<ScoreSubmissionResult> => {
-    const idempotencyKey = `score_${gameId}_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+    // Generate valid formatted idempotency key
+    const randSuffix = Math.random().toString(36).substring(2, 10);
+    const idempotencyKey = `score_${Date.now()}_${randSuffix}`;
 
     try {
+      // Ensure we have a valid session before submitting
+      let activeSessionId = inputSessionId;
+      if (!activeSessionId) {
+        const sessionRes = await scoreService.startSession(gameId);
+        activeSessionId = sessionRes.sessionId;
+      }
+
+      if (!activeSessionId) {
+        return {
+          success: false,
+          message: 'Gagal membuat sesi permainan yang terverifikasi.'
+        };
+      }
+
       return await withRetry(async () => {
         const headers = await getAuthHeaders();
         const res = await fetch('/api/submit-score', {
@@ -87,7 +103,7 @@ export const scoreService = {
             score,
             playerName,
             playerAvatar,
-            sessionId,
+            sessionId: activeSessionId,
             durationMs,
             masteryLevel,
             idempotencyKey
@@ -96,7 +112,10 @@ export const scoreService = {
 
         if (!res.ok) {
           const errData = await res.json().catch(() => ({}));
-          throw new Error(errData.message || `Server responded with ${res.status}`);
+          const error: any = new Error(errData.message || `Server responded with ${res.status}`);
+          error.code = errData.code;
+          error.status = res.status;
+          throw error;
         }
 
         const data = await res.json();
@@ -109,16 +128,16 @@ export const scoreService = {
           newCoinBalance: data.newCoinBalance,
           message: data.message
         };
-      }, { maxRetries: 2, initialDelayMs: 400 });
+      }, { maxRetries: 1, initialDelayMs: 300 });
     } catch (e: any) {
-      logger.warn('Score submission failed server verification or was offline', {
-        code: 'SCORE_SUBMISSION_OFFLINE',
+      logger.warn('Score submission failed server verification', {
+        code: e.code || 'SCORE_SUBMISSION_ERROR',
         gameId,
         context: { score, error: e.message }
       });
       return {
         success: false,
-        message: e.message || 'Offline submission'
+        message: e.message || 'Gagal mengirim skor permainan ke server.'
       };
     }
   }

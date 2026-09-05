@@ -44,29 +44,63 @@ export const economyService = {
     return null;
   },
 
-  buyItem: async (
-    itemId: string,
-    costOrUser?: number | string,
-    itemType?: 'avatar' | 'theme',
-    value?: string
-  ): Promise<EconomyActionResult> => {
-    const cost = typeof costOrUser === 'number' ? costOrUser : 50;
-    const idempotencyKey = `buy_${itemId}_${Date.now()}`;
+  buyItem: async (itemId: string): Promise<EconomyActionResult> => {
+    const randSuffix = Math.random().toString(36).substring(2, 10);
+    const idempotencyKey = `buy_${itemId}_${Date.now()}_${randSuffix}`;
     try {
       const headers = await getAuthHeaders();
       const res = await fetch('/api/buy-item', {
         method: 'POST',
         headers,
-        body: JSON.stringify({ itemId, cost, itemType, value, idempotencyKey })
+        body: JSON.stringify({ itemId, idempotencyKey })
       });
       const data = await res.json();
       if (!res.ok) {
-        throw new Error(data.message || 'Pembelian gagal');
+        throw new Error(data.message || 'Pembelian gagal diproses oleh server.');
       }
-      return { success: true, remainingCoins: data.remainingCoins };
+      return {
+        success: true,
+        remainingCoins: data.remainingCoins,
+        rewardId: data.itemId
+      };
     } catch (e: any) {
       return { success: false, message: e.message };
     }
+  },
+
+  spin: async (): Promise<{ success: boolean; prize?: number; newCoinBalance?: number; message?: string }> => {
+    try {
+      const headers = await getAuthHeaders();
+      const res = await fetch('/api/spin', {
+        method: 'POST',
+        headers
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        return { success: false, message: data.message || 'Gagal memproses spin harian.' };
+      }
+      return {
+        success: true,
+        prize: data.prize,
+        newCoinBalance: data.newCoinBalance
+      };
+    } catch (e: any) {
+      return { success: false, message: e.message };
+    }
+  },
+
+  getSpinStatus: async (): Promise<{ canSpin: boolean; lastSpinDate: string | null }> => {
+    try {
+      const headers = await getAuthHeaders();
+      const res = await fetch('/api/spin-status', { headers });
+      if (res.ok) {
+        const data = await res.json();
+        return { canSpin: !!data.canSpin, lastSpinDate: data.lastSpinDate };
+      }
+    } catch (e) {
+      logger.warn('Failed to fetch spin status', { error: e });
+    }
+    return { canSpin: true, lastSpinDate: null };
   },
 
   claimReward: async (
@@ -155,37 +189,5 @@ export const economyService = {
       changeCoins: change,
       outcomeSide
     };
-  },
-
-  spin: async (): Promise<{ success: boolean; prize?: number; newCoinBalance?: number; message?: string }> => {
-    try {
-      const headers = await getAuthHeaders();
-      const res = await fetch('/api/spin', {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({})
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.message || 'Spin gagal');
-      }
-      return data;
-    } catch (e: any) {
-      return { success: false, message: e.message };
-    }
-  },
-
-  getSpinStatus: async (): Promise<{ canSpin: boolean; lastSpinDate: string | null }> => {
-    try {
-      const headers = await getAuthHeaders();
-      const res = await fetch('/api/spin-status', { headers });
-      if (res.ok) {
-        const data = await res.json();
-        return { canSpin: !!data.canSpin, lastSpinDate: data.lastSpinDate || null };
-      }
-    } catch (e) {
-      logger.warn('Failed to fetch spin status', { error: e });
-    }
-    return { canSpin: true, lastSpinDate: null };
   }
 };

@@ -1,15 +1,19 @@
 {
-  "name": "react-example",
+  "name": "zigame2",
   "private": true,
-  "version": "0.0.0",
+  "version": "2.0.0",
   "type": "module",
   "scripts": {
     "dev": "tsx server.ts",
     "build": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
     "start": "node dist/server.cjs",
-    "test": "vitest run",
-    "clean": "rm -rf dist server.js",
-    "lint": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "lint": "tsc --noEmit",
+    "test": "NODE_ENV=test vitest run",
+    "test:watch": "NODE_ENV=test vitest",
+    "test:integration": "NODE_ENV=test vitest run src/__tests__",
+    "seed:catalog": "tsx scripts/seed-catalog.ts",
+    "clean": "node -e \"const fs = require('fs'); fs.rmSync('dist', { recursive: true, force: true }); try { fs.rmSync('server.js', { force: true }); } catch (e) {}\""
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.1.14",
