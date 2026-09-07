@@ -257,15 +257,18 @@ export const useGameProgress = (
       setDailyMissions(updatedMissions);
       storageService.saveDailyMissions(updatedMissions);
       
-      if (earnedCoins > 0) {
+      const newlyCompletedMissions = updatedMissions.filter(m => m.completed);
+      if (newlyCompletedMissions.length > 0) {
         import('../services/economyService').then(({ economyService }) => {
-          economyService.claimReward(earnedCoins, 'daily_mission', profile.name).then(res => {
-            if (res.success && res.newBalance !== undefined) {
-               onUpdateProfile({
-                 ...profile,
-                 coins: res.newBalance
-               });
-            }
+          newlyCompletedMissions.forEach(m => {
+            economyService.claimReward(m.id, 'daily_mission', profile.name).then(res => {
+              if (res.success && res.newBalance !== undefined) {
+                onUpdateProfile({
+                  ...profile,
+                  coins: res.newBalance
+                });
+              }
+            });
           });
         });
       }
@@ -274,13 +277,13 @@ export const useGameProgress = (
 
   const checkAchievements = (gameId: string, currentScore: number) => {
     let newlyUnlocked = false;
-    let earnedCoins = 0;
+    const unlockedIds: string[] = [];
 
     const updatedAchievements = achievements.map((ach) => {
       if (!ach.unlocked && ach.gameId === gameId) {
         if (ach.target && currentScore >= ach.target) {
           newlyUnlocked = true;
-          earnedCoins += ach.rewardCoins;
+          unlockedIds.push(ach.id);
           showToast('Achievement Unlocked', `${ach.title} (+${ach.rewardCoins} Coins)`, 'success', ach.icon);
           return {
             ...ach,
@@ -298,13 +301,15 @@ export const useGameProgress = (
       storageService.saveAchievements(updatedAchievements);
 
       import('../services/economyService').then(({ economyService }) => {
-        economyService.claimReward(earnedCoins, 'achievement', profile.name).then(res => {
-          if (res.success && res.newBalance !== undefined) {
-            onUpdateProfile({
-              ...profile,
-              coins: res.newBalance
-            });
-          }
+        unlockedIds.forEach(achId => {
+          economyService.claimReward(achId, 'achievement', profile.name).then(res => {
+            if (res.success && res.newBalance !== undefined) {
+              onUpdateProfile({
+                ...profile,
+                coins: res.newBalance
+              });
+            }
+          });
         });
       });
     }

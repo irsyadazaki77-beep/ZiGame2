@@ -8,15 +8,7 @@
 
 import { CanonicalGameId, CANONICAL_GAME_IDS, toCanonicalGameId } from './canonicalGames';
 
-/**
- * ZiGame Central Balancing & Economy Configuration
- * Balance Version: 2.0.0
- * 
- * All economy rates, progression curves, seasons, events, and challenge
- * tuning variables are centralized here to avoid hardcoded fragmentation.
- */
-
-export const BALANCE_VERSION = "2.0.0";
+export const BALANCE_VERSION = "2.5.0";
 
 export interface GameBalanceConfig {
   baseCoinMultiplier: number;
@@ -120,13 +112,13 @@ export const SEASON_CONFIG = {
 export const EVENT_CONFIG = {
   events: [
     {
-      id: 'evt_double_xp_weekend',
-      name: '⚡ Double XP Weekend',
-      description: 'Dapatkan 2x XP untuk setiap game yang Anda mainkan sepanjang akhir pekan!',
+      id: 'evt_double_xp_cyber',
+      name: '⚡ Cyber September Double XP',
+      description: 'Dapatkan 2x XP untuk setiap game yang Anda mainkan di arena ZiGame!',
       icon: '⚡',
       badgeColor: 'from-amber-500 to-orange-600',
-      startAt: '2026-08-14T00:00:00Z',
-      endAt: '2026-08-18T23:59:59Z',
+      startAt: '2026-09-01T00:00:00Z',
+      endAt: '2026-09-30T23:59:59Z',
       targetGames: ['all'],
       xpMultiplier: 2.0,
       coinMultiplier: 1.0,
@@ -134,16 +126,16 @@ export const EVENT_CONFIG = {
     },
     {
       id: 'evt_shooter_frenzy',
-      name: '🚀 Space Shooter Frenzy',
-      description: 'Bonus 1.5x Koin dan 2x Mastery XP khusus game Shooter!',
+      name: '🚀 Space & Stealth Frenzy',
+      description: 'Bonus 1.5x Koin dan 2x Mastery XP khusus game Sci-Fi & Stealth!',
       icon: '🚀',
       badgeColor: 'from-cyan-500 to-blue-600',
-      startAt: '2026-08-10T00:00:00Z',
-      endAt: '2026-08-20T23:59:59Z',
-      targetGames: ['space-defender'],
+      startAt: '2026-09-01T00:00:00Z',
+      endAt: '2026-09-30T23:59:59Z',
+      targetGames: ['space-defender', 'neon-heist', 'orbital-defense', 'void-survivor'],
       xpMultiplier: 1.5,
       coinMultiplier: 1.5,
-      specialRule: 'Extra coin drop in Space Defender'
+      specialRule: 'Extra coin and mastery drop in tactical games'
     }
   ]
 };

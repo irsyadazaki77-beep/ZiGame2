@@ -176,6 +176,9 @@ describe('ZiGame 2.0 Backend Authority & Security Tests', () => {
         .send({ gameId: 'snake' });
 
       const sessionId = sessionRes.body.sessionId;
+      // Simulate realistic play duration (5s)
+      const sessionObj = memoryStore.sessions.get(sessionId);
+      if (sessionObj) sessionObj.startTime = Date.now() - 5000;
 
       const submitRes = await request(app)
         .post('/api/submit-score')
@@ -203,6 +206,8 @@ describe('ZiGame 2.0 Backend Authority & Security Tests', () => {
         .send({ gameId: 'snake' });
 
       const sessionId = sessionRes.body.sessionId;
+      const sessionObj = memoryStore.sessions.get(sessionId);
+      if (sessionObj) sessionObj.startTime = Date.now() - 5000;
 
       // First submission succeeds
       const firstSubmit = await request(app)
@@ -232,6 +237,30 @@ describe('ZiGame 2.0 Backend Authority & Security Tests', () => {
 
       expect(replaySubmit.status).toBe(422);
       expect(replaySubmit.body.code).toBe('SESSION_ALREADY_CONSUMED');
+    });
+
+    it('should award 0 coins when score is 0 and reject insufficient duration', async () => {
+      const testUid = `instant-cheater-${Date.now()}`;
+      const sessionRes = await request(app)
+        .post('/api/session/start')
+        .set('x-test-uid', testUid)
+        .send({ gameId: 'snake' });
+
+      const sessionId = sessionRes.body.sessionId;
+      // Instant submission without duration should be rejected for positive score
+      const failSubmit = await request(app)
+        .post('/api/submit-score')
+        .set('x-test-uid', testUid)
+        .send({
+          gameId: 'snake',
+          score: 50,
+          playerName: 'TooFast',
+          sessionId,
+          idempotencyKey: `submit_fast_${Date.now()}`
+        });
+
+      expect(failSubmit.status).toBe(422);
+      expect(failSubmit.body.code).toBe('INSUFFICIENT_DURATION');
     });
 
     it('should flag and reject scores exceeding ceiling', async () => {
@@ -351,17 +380,81 @@ describe('ZiGame 2.0 Backend Authority & Security Tests', () => {
       expect(res.body.remainingCoins).toBe(50); // 100 - 50 = 50
     });
 
-    it('should process reward claim atomically on server', async () => {
+    it('should process reward claim atomically on server with authoritative reward lookup', async () => {
       const testUid = `claimer-${Date.now()}`;
       const res = await request(app)
         .post('/api/economy/claim')
         .set('x-test-uid', testUid)
-        .send({ amount: 50, reason: 'DAILY_MISSION_COMPLETED' });
+        .send({
+          claimId: 'ach_first_win',
+          claimType: 'achievement',
+          idempotencyKey: `claim_first_${Date.now()}`
+        });
 
       expect(res.status).toBe(200);
       expect(res.body.success).toBe(true);
+      expect(res.body.amount).toBe(50);
       expect(res.body.newBalance).toBe(150); // 100 + 50 = 150
       expect(res.body.transactionId).toBeDefined();
+    });
+
+    it('should prevent duplicate claiming of the same reward (exploit test)', async () => {
+      const testUid = `duplicate-claimer-${Date.now()}`;
+      const firstRes = await request(app)
+        .post('/api/economy/claim')
+        .set('x-test-uid', testUid)
+        .send({
+          claimId: 'snake_turbo',
+          claimType: 'achievement',
+          idempotencyKey: `claim_500_1_${Date.now()}`
+        });
+
+      expect(firstRes.status).toBe(200);
+      expect(firstRes.body.success).toBe(true);
+      expect(firstRes.body.amount).toBe(100);
+
+      // Second attempt to claim the same achievement with a new idempotency key
+      const secondRes = await request(app)
+        .post('/api/economy/claim')
+        .set('x-test-uid', testUid)
+        .send({
+          claimId: 'snake_turbo',
+          claimType: 'achievement',
+          idempotencyKey: `claim_500_2_${Date.now()}`
+        });
+
+      expect(secondRes.status).toBe(400);
+      expect(secondRes.body.code).toBe('REWARD_ALREADY_CLAIMED');
+    });
+
+    it('should return idempotent cached response when same idempotency key is replayed', async () => {
+      const testUid = `idem-claimer-${Date.now()}`;
+      const idKey = `idem_key_${Date.now()}`;
+
+      const res1 = await request(app)
+        .post('/api/economy/claim')
+        .set('x-test-uid', testUid)
+        .send({
+          claimId: 'm_play_3',
+          claimType: 'daily_mission',
+          idempotencyKey: idKey
+        });
+
+      expect(res1.status).toBe(200);
+      const tx1 = res1.body.transactionId;
+
+      const res2 = await request(app)
+        .post('/api/economy/claim')
+        .set('x-test-uid', testUid)
+        .send({
+          claimId: 'm_play_3',
+          claimType: 'daily_mission',
+          idempotencyKey: idKey
+        });
+
+      expect(res2.status).toBe(200);
+      expect(res2.body.transactionId).toBe(tx1);
+      expect(res2.body.newBalance).toBe(res1.body.newBalance);
     });
   });
 

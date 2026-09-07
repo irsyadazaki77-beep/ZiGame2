@@ -46,21 +46,22 @@ describe('Frontend Utilities & Configuration Tests', () => {
     });
   });
 
-    describe('Canonical Game Registry & 32 Games Integrity', () => {
-    it('should have valid canonical ID and balance config for all 32 games', () => {
-      const all32Games = [
+    describe('Canonical Game Registry & 37 Games Integrity', () => {
+    it('should have valid canonical ID and balance config for all 37 games', () => {
+      const all37Games = [
         'snake', 'brick-breaker', 'flappy-pixel', 'space-defender', 'memory-grid',
         'cyber-runner', 'neon-pong', 'neon-stacker', 'vaporwave-racer', 'lock-breaker',
         'sine-rider', 'cosmic-dodge', 'laser-grid', 'cyber-simon', 'plinko-neo',
         'cosmic-asteroid', 'cyber-slasher', 'cyber-clicker', 'block-match', 'cyber-typer',
         'maze-runner', 'memory-path', 'rhythm-tap', 'pixel-golf', 'pixel-dino',
         'cyber-tetris', 'archery-neo', 'cyber-mines', 'neon-2048', 'whack-a-drone',
-        'jump-rope', 'neon-drift'
+        'jump-rope', 'neon-drift',
+        'neon-heist', 'void-survivor', 'orbital-defense', 'gravity-shift', 'hex-dominion'
       ];
 
-      expect(all32Games.length).toBe(32);
+      expect(all37Games.length).toBe(37);
 
-      for (const id of all32Games) {
+      for (const id of all37Games) {
         expect(isValidGameId(id)).toBe(true);
         expect(toCanonicalGameId(id)).toBe(id);
         const config = GAME_BALANCE_CONFIG[id as keyof typeof GAME_BALANCE_CONFIG];
@@ -80,6 +81,8 @@ describe('Frontend Utilities & Configuration Tests', () => {
       expect(toCanonicalGameId('racer')).toBe('vaporwave-racer');
       expect(toCanonicalGameId('dinorun')).toBe('pixel-dino');
       expect(toCanonicalGameId('typer')).toBe('cyber-typer');
+      expect(toCanonicalGameId('heist')).toBe('neon-heist');
+      expect(toCanonicalGameId('survivor')).toBe('void-survivor');
     });
   });
 });

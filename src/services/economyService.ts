@@ -1,5 +1,6 @@
 import { isFirebaseReady, auth } from './firebase';
 import { logger } from '../utils/logger';
+import { ShopItem } from '../types';
 
 async function getAuthHeaders(): Promise<Record<string, string>> {
   const headers: Record<string, string> = {
@@ -11,8 +12,9 @@ async function getAuthHeaders(): Promise<Record<string, string>> {
       if (token) {
         headers['Authorization'] = `Bearer ${token}`;
       }
-    } catch (e) {
-      logger.warn('Failed to retrieve Firebase ID token', { error: e });
+    } catch (e: unknown) {
+      const err = e instanceof Error ? e : new Error(String(e));
+      logger.warn('Failed to retrieve Firebase ID token', { error: err });
     }
   }
   return headers;
@@ -27,6 +29,15 @@ export interface EconomyActionResult {
   changeCoins?: number;
   won?: boolean;
   outcomeSide?: 'heads' | 'tails';
+  item?: ShopItem | Record<string, unknown>;
+  claimId?: string;
+  amount?: number;
+  xp?: number;
+}
+
+function generateIdempotencyKey(prefix: string): string {
+  const rand = Math.random().toString(36).substring(2, 10);
+  return `${prefix}_${Date.now()}_${rand}`;
 }
 
 export const economyService = {
@@ -38,15 +49,15 @@ export const economyService = {
         const data = await res.json();
         return typeof data.coins === 'number' ? data.coins : null;
       }
-    } catch (e) {
-      logger.warn('Failed to sync economy balance', { error: e });
+    } catch (e: unknown) {
+      const err = e instanceof Error ? e : new Error(String(e));
+      logger.warn('Failed to sync economy balance', { error: err });
     }
     return null;
   },
 
   buyItem: async (itemId: string): Promise<EconomyActionResult> => {
-    const randSuffix = Math.random().toString(36).substring(2, 10);
-    const idempotencyKey = `buy_${itemId}_${Date.now()}_${randSuffix}`;
+    const idempotencyKey = generateIdempotencyKey(`buy_${itemId}`);
     try {
       const headers = await getAuthHeaders();
       const res = await fetch('/api/buy-item', {
@@ -63,8 +74,9 @@ export const economyService = {
         remainingCoins: data.remainingCoins,
         rewardId: data.itemId
       };
-    } catch (e: any) {
-      return { success: false, message: e.message };
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : 'Pembelian gagal';
+      return { success: false, message: msg };
     }
   },
 
@@ -84,8 +96,9 @@ export const economyService = {
         prize: data.prize,
         newCoinBalance: data.newCoinBalance
       };
-    } catch (e: any) {
-      return { success: false, message: e.message };
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : 'Spin gagal';
+      return { success: false, message: msg };
     }
   },
 
@@ -97,43 +110,63 @@ export const economyService = {
         const data = await res.json();
         return { canSpin: !!data.canSpin, lastSpinDate: data.lastSpinDate };
       }
-    } catch (e) {
-      logger.warn('Failed to fetch spin status', { error: e });
+    } catch (e: unknown) {
+      const err = e instanceof Error ? e : new Error(String(e));
+      logger.warn('Failed to fetch spin status', { error: err });
     }
     return { canSpin: true, lastSpinDate: null };
   },
 
   claimReward: async (
-    amount: number,
-    reason: string,
+    claimIdOrAmount: string | number,
+    reasonOrType: string = 'achievement',
     _legacyUserOrName?: string
   ): Promise<EconomyActionResult> => {
     try {
       const headers = await getAuthHeaders();
+      const claimId = typeof claimIdOrAmount === 'string' ? claimIdOrAmount : reasonOrType;
+      const claimType = (typeof reasonOrType === 'string' && ['achievement', 'daily_mission', 'challenge', 'quest_tier', 'starter_pack', 'level_up'].includes(reasonOrType))
+        ? reasonOrType
+        : 'achievement';
+      
+      const idempotencyKey = generateIdempotencyKey(`claim_${claimId}`);
       const res = await fetch('/api/economy/claim', {
         method: 'POST',
         headers,
-        body: JSON.stringify({ amount, reason })
+        body: JSON.stringify({
+          claimId,
+          claimType,
+          idempotencyKey
+        })
       });
       const data = await res.json();
       if (res.ok) {
-        return { success: true, newBalance: data.newBalance, remainingCoins: data.newBalance };
+        return {
+          success: true,
+          newBalance: data.newBalance,
+          remainingCoins: data.newBalance,
+          amount: data.amount,
+          xp: data.xp,
+          claimId: data.claimId
+        };
       }
       return { success: false, message: data.message };
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Gagal mengklaim reward';
-      logger.warn('Failed to claim reward on server', { error: e });
+      const err = e instanceof Error ? e : new Error(msg);
+      logger.warn('Failed to claim reward on server', { error: err });
       return { success: false, message: msg };
     }
   },
 
   gacha: async (_legacyUserOrName?: string): Promise<EconomyActionResult> => {
+    const idempotencyKey = generateIdempotencyKey('gacha');
     try {
       const headers = await getAuthHeaders();
       const res = await fetch('/api/economy/gacha', {
         method: 'POST',
         headers,
-        body: JSON.stringify({})
+        body: JSON.stringify({ idempotencyKey })
       });
       const data = await res.json();
       if (res.ok) {
@@ -156,12 +189,13 @@ export const economyService = {
     choice: 'heads' | 'tails',
     _legacyUserOrName?: string
   ): Promise<EconomyActionResult> => {
+    const idempotencyKey = generateIdempotencyKey(`gamble_${choice}_${bet}`);
     try {
       const headers = await getAuthHeaders();
       const res = await fetch('/api/economy/gamble', {
         method: 'POST',
         headers,
-        body: JSON.stringify({ bet, choice })
+        body: JSON.stringify({ bet, choice, idempotencyKey })
       });
       const data = await res.json();
       if (res.ok) {
@@ -176,7 +210,8 @@ export const economyService = {
       return { success: false, message: data.message };
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Gagal memproses taruhan';
-      logger.warn('Gamble transaction failed', { error: e });
+      const err = e instanceof Error ? e : new Error(msg);
+      logger.warn('Gamble transaction failed', { error: err });
       return { success: false, message: msg };
     }
   }

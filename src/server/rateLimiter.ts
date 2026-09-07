@@ -99,6 +99,19 @@ export class FirestoreRateLimiter implements RateLimiter {
 
 export const defaultRateLimiter: RateLimiter = new FirestoreRateLimiter();
 
+export const SENSITIVE_CATEGORIES = new Set([
+  'economy',
+  'economy_fetch',
+  'reward_claim',
+  'gamble',
+  'gacha',
+  'shop_purchase',
+  'score_submit',
+  'daily_spin',
+  'session_start',
+  'admin'
+]);
+
 /**
  * Express middleware generator for rate limiting
  */
@@ -108,6 +121,8 @@ export function rateLimit(
   category?: string,
   limiter: RateLimiter = defaultRateLimiter
 ) {
+  const fallbackMemLimiter = new MemoryRateLimiter();
+
   return async (req: Request, res: Response, next: NextFunction) => {
     // In test environment, skip rate limiting unless explicitly testing it
     if (process.env.NODE_ENV === 'test' && !req.headers['x-test-rate-limit']) {
@@ -117,9 +132,20 @@ export function rateLimit(
     const identifier = req.user?.uid ? `usr_${req.user.uid}` : `ip_${req.ip || 'unknown'}`;
     const endpointCat = category || req.baseUrl + req.path;
     const key = `rl_${endpointCat}_${identifier}`;
+    const isSensitive = category ? SENSITIVE_CATEGORIES.has(category) : false;
 
     try {
-      const result = await limiter.check(key, maxRequests, windowMs);
+      let result: RateLimitResult;
+      try {
+        result = await limiter.check(key, maxRequests, windowMs);
+      } catch (limiterErr) {
+        // Secure degraded: fallback to in-memory limiter
+        serverLogger.warn('RATE_LIMIT_DEGRADED', 'Primary rate limiter failed, applying in-memory fallback', {
+          category: endpointCat,
+          error: String(limiterErr)
+        });
+        result = await fallbackMemLimiter.check(key, maxRequests, windowMs);
+      }
 
       res.setHeader('X-RateLimit-Limit', maxRequests.toString());
       res.setHeader('X-RateLimit-Remaining', Math.max(0, result.remaining).toString());
@@ -144,6 +170,15 @@ export function rateLimit(
       next();
     } catch (err) {
       serverLogger.error('RATE_LIMIT_ERROR', 'Failed to evaluate rate limit', err, undefined, req.user?.uid, req.ip, req.id);
+      if (isSensitive) {
+        // Fail-closed for sensitive economy/admin/score endpoints
+        return sendApiError(
+          res,
+          503,
+          'SERVICE_UNAVAILABLE',
+          'Layanan verifikasi keamanan sedang mengalami degradasi. Silakan coba kembali sesaat lagi.'
+        );
+      }
       next();
     }
   };

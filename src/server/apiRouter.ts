@@ -332,21 +332,31 @@ apiRouter.post('/economy/gacha', requireAuth, rateLimit(20, 60000, 'gacha'), asy
 
 /**
  * POST /api/economy/claim and /api/economy/claim-reward
- * Server-Authoritative reward claim endpoint for missions, achievements, and challenges
+ * Server-Authoritative reward claim endpoint for missions, achievements, and challenges.
+ * Client is STRICTLY FORBIDDEN from specifying reward amounts.
  */
 const handleClaimReward = async (req: Request, res: Response) => {
   try {
     const userId = req.user!.uid;
-    const { amount, reason, idempotencyKey } = req.body;
+    const { claimId, claimType, reason, idempotencyKey, details } = req.body;
 
-    if (typeof amount !== 'number' || amount <= 0 || !Number.isFinite(amount)) {
-      return sendApiError(res, 400, 'INVALID_AMOUNT', 'Nilai reward koin tidak valid.');
+    // Support both new claimId contract and legacy reason mapping for backwards safety
+    const resolvedClaimId = claimId || (typeof reason === 'string' ? reason : undefined);
+    if (!resolvedClaimId || typeof resolvedClaimId !== 'string') {
+      return sendApiError(res, 400, 'INVALID_REWARD_CLAIM', 'ID klaim reward (claimId) wajib disertakan.');
     }
 
-    const result = await executeClaimReward(userId, Math.floor(amount), reason, idempotencyKey);
+    if (!idempotencyKey || typeof idempotencyKey !== 'string') {
+      return sendApiError(res, 400, 'INVALID_IDEMPOTENCY_KEY', 'Kunci idempotency valid wajib disertakan untuk klaim reward.');
+    }
 
-    serverLogger.info('REWARD_CLAIMED', `User claimed ${amount} coins for ${reason}`, {
+    const type = claimType || 'achievement';
+    const result = await executeClaimReward(userId, resolvedClaimId, type, idempotencyKey, details);
+
+    serverLogger.info('REWARD_CLAIMED', `User claimed ${result.amount} coins for ${resolvedClaimId}`, {
+      claimId: result.claimId,
       amount: result.amount,
+      xp: result.xp,
       newBalance: result.newBalance,
       transactionId: result.transactionId
     }, userId, req.ip, req.id);

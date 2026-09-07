@@ -14,6 +14,7 @@ import { ApiError } from './errors';
 import { requireCanonicalGameId, CanonicalGameId } from '../config/canonicalGames';
 import { getAuthoritativeCatalogItem } from '../config/shopCatalog';
 import { getGameBalanceConfig } from '../config/balanceConfig';
+import { resolveAuthoritativeReward, RewardClaimType } from '../config/rewardCatalog';
 
 export const SESSION_MAX_LIFETIME_MS = 60 * 60 * 1000; // 1 hour max session lifetime
 
@@ -88,6 +89,7 @@ class InMemoryStore {
   processedActions = new Map<string, { result: any; timestamp: number }>();
   suspiciousScores: StoredSuspiciousScore[] = [];
   ledger: StoredEconomyTransaction[] = [];
+  claimedRewards = new Map<string, Set<string>>(); // userId -> Set of claimIds
 
   clear() {
     this.sessions.clear();
@@ -98,6 +100,7 @@ class InMemoryStore {
     this.processedActions.clear();
     this.suspiciousScores = [];
     this.ledger = [];
+    this.claimedRewards.clear();
   }
 }
 
@@ -869,16 +872,28 @@ export async function executeGacha(
 
 export async function executeClaimReward(
   userId: string,
-  amount: number,
-  reason: string,
-  idempotencyKey?: string
+  claimId: string,
+  claimType: RewardClaimType = 'achievement',
+  idempotencyKey?: string,
+  details?: Record<string, unknown>
 ): Promise<{
   success: boolean;
+  claimId: string;
   amount: number;
+  xp: number;
   newBalance: number;
   transactionId: string;
 }> {
   assertPersistenceOperational();
+
+  if (!claimId || typeof claimId !== 'string') {
+    throw ApiError.badRequest('ID klaim reward (claimId) wajib diisi.', 'INVALID_REWARD_CLAIM');
+  }
+
+  const validTypes: RewardClaimType[] = ['achievement', 'daily_mission', 'challenge', 'quest_tier', 'starter_pack', 'level_up'];
+  if (!validTypes.includes(claimType)) {
+    throw ApiError.badRequest('Jenis reward claim tidak valid.', 'INVALID_CLAIM_SOURCE');
+  }
 
   if (idempotencyKey && !isValidIdempotencyKey(idempotencyKey)) {
     throw ApiError.badRequest('Kunci idempotency tidak valid.', 'INVALID_IDEMPOTENCY_KEY');
@@ -889,14 +904,14 @@ export async function executeClaimReward(
     if (existing) return existing;
   }
 
-  if (typeof amount !== 'number' || amount <= 0 || amount > 1000 || !Number.isFinite(amount)) {
-    throw ApiError.badRequest('Jumlah koin reward tidak valid (maksimal 1,000 koin per klaim).', 'INVALID_REWARD_AMOUNT');
+  // Lookup authoritative reward definition on the server
+  const definition = resolveAuthoritativeReward(claimId, claimType, details);
+  if (!definition) {
+    throw ApiError.badRequest('Definisi reward tidak ditemukan atau tidak valid.', 'INVALID_REWARD_CLAIM');
   }
 
-  const sanitizedReason = (typeof reason === 'string' && reason.trim())
-    ? reason.trim().slice(0, 64)
-    : 'QUEST_REWARD';
-
+  const amount = definition.rewardCoins;
+  const xp = definition.rewardXp;
   const transactionId = `tx_${Date.now()}_${crypto.randomBytes(8).toString('hex')}`;
   const nowIso = new Date().toISOString();
   let newBalance = 0;
@@ -904,9 +919,15 @@ export async function executeClaimReward(
   if (isFirestoreAvailable()) {
     const db = getDb();
     const ecoRef = db.collection('userEconomy').doc(userId);
+    const claimRef = db.collection('userClaimedRewards').doc(`${userId}_${claimId}`);
     const ledgerRef = db.collection('economyTransactions').doc(transactionId);
 
     await db.runTransaction(async (tx) => {
+      const claimDoc = await tx.get(claimRef);
+      if (claimDoc.exists) {
+        throw new ApiError(400, 'REWARD_ALREADY_CLAIMED', 'Reward ini sudah pernah Anda klaim sebelumnya.');
+      }
+
       const ecoDoc = await tx.get(ecoRef);
       const current: StoredEconomy = ecoDoc.exists
         ? (ecoDoc.data() as StoredEconomy)
@@ -922,6 +943,15 @@ export async function executeClaimReward(
 
       tx.set(ecoRef, updatedEco);
 
+      tx.set(claimRef, {
+        userId,
+        claimId,
+        claimType,
+        amount,
+        xp,
+        claimedAt: nowIso
+      });
+
       const ledgerEntry: StoredEconomyTransaction = {
         transactionId,
         userId,
@@ -929,7 +959,7 @@ export async function executeClaimReward(
         amount,
         balanceBefore: current.coins,
         balanceAfter: updatedEco.coins,
-        reason: sanitizedReason,
+        reason: `REWARD_${claimType.toUpperCase()}_${claimId}`,
         createdAt: nowIso
       };
       tx.set(ledgerRef, ledgerEntry);
@@ -937,12 +967,20 @@ export async function executeClaimReward(
       newBalance = updatedEco.coins;
     });
   } else {
+    const userClaims = memoryStore.claimedRewards.get(userId) || new Set<string>();
+    if (userClaims.has(claimId)) {
+      throw new ApiError(400, 'REWARD_ALREADY_CLAIMED', 'Reward ini sudah pernah Anda klaim sebelumnya.');
+    }
+
     const current = await getUserEconomy(userId);
     const balanceBefore = current.coins;
     current.coins += amount;
     current.totalEarned += amount;
     current.lastUpdated = Date.now();
     memoryStore.economies.set(userId, current);
+
+    userClaims.add(claimId);
+    memoryStore.claimedRewards.set(userId, userClaims);
 
     const ledgerEntry: StoredEconomyTransaction = {
       transactionId,
@@ -951,7 +989,7 @@ export async function executeClaimReward(
       amount,
       balanceBefore,
       balanceAfter: current.coins,
-      reason: sanitizedReason,
+      reason: `REWARD_${claimType.toUpperCase()}_${claimId}`,
       createdAt: nowIso
     };
     memoryStore.ledger.push(ledgerEntry);
@@ -960,7 +998,9 @@ export async function executeClaimReward(
 
   const result = {
     success: true,
+    claimId,
     amount,
+    xp,
     newBalance,
     transactionId
   };
@@ -1055,7 +1095,7 @@ export async function executeScoreSubmission({
   const durationSeconds = Math.max(verifiedDurationMs / 1000, 0.5);
   const scoreVelocity = score / durationSeconds;
 
-  if (verifiedDurationMs < config.minDurationMs && score > 50) {
+  if (score > 0 && verifiedDurationMs < config.minDurationMs) {
     await recordSuspiciousScore({
       sessionId,
       userId,
@@ -1063,13 +1103,13 @@ export async function executeScoreSubmission({
       score,
       durationMs: verifiedDurationMs,
       velocity: scoreVelocity,
-      reason: `Duration ${verifiedDurationMs}ms below min ${config.minDurationMs}ms`
+      reason: `Duration ${verifiedDurationMs}ms below min ${config.minDurationMs}ms for score ${score}`
     });
 
-    throw ApiError.unprocessable('Durasi permainan terlalu singkat untuk skor ini.', 'INSUFFICIENT_DURATION');
+    throw ApiError.unprocessable('Durasi permainan terlalu singkat untuk perolehan skor ini.', 'INSUFFICIENT_DURATION');
   }
 
-  if (score > 100 && scoreVelocity > config.maxScorePerSec) {
+  if (score > 50 && scoreVelocity > config.maxScorePerSec) {
     await recordSuspiciousScore({
       sessionId,
       userId,
@@ -1083,9 +1123,10 @@ export async function executeScoreSubmission({
     throw ApiError.unprocessable('Laju perolehan skor melebihi batas wajar.', 'SCORE_CEILING_EXCEEDED');
   }
 
-  // Authoritative reward calculation
-  const coinsEarned = Math.max(1, Math.min(250, Math.floor(score * config.baseCoinMultiplier)));
-  const xpEarned = Math.max(5, Math.min(500, Math.floor(score * config.baseXpMultiplier)));
+  // Authoritative reward calculation: strictly NO rewards for zero score or ineligible runs
+  const isEligibleForReward = score > 0 && verifiedDurationMs >= config.minDurationMs;
+  const coinsEarned = isEligibleForReward ? Math.min(250, Math.floor(score * config.baseCoinMultiplier)) : 0;
+  const xpEarned = isEligibleForReward ? Math.min(500, Math.floor(score * config.baseXpMultiplier)) : 0;
   const transactionId = `tx_${Date.now()}_${crypto.randomBytes(8).toString('hex')}`;
   const nowIso = new Date().toISOString();
 
@@ -1112,21 +1153,23 @@ export async function executeScoreSubmission({
       };
       newCoinBalance = updatedEco.coins;
 
-      tx.set(ecoRef, updatedEco);
+      if (coinsEarned > 0) {
+        tx.set(ecoRef, updatedEco);
 
-      // Record transaction ledger
-      const ledgerEntry: StoredEconomyTransaction = {
-        transactionId,
-        userId,
-        type: 'GAME_REWARD',
-        amount: coinsEarned,
-        balanceBefore: current.coins,
-        balanceAfter: updatedEco.coins,
-        reason: `GAME_REWARD_${canonicalId.toUpperCase()}`,
-        referenceId: sessionId,
-        createdAt: nowIso
-      };
-      tx.set(ledgerRef, ledgerEntry);
+        // Record transaction ledger
+        const ledgerEntry: StoredEconomyTransaction = {
+          transactionId,
+          userId,
+          type: 'GAME_REWARD',
+          amount: coinsEarned,
+          balanceBefore: current.coins,
+          balanceAfter: updatedEco.coins,
+          reason: `GAME_REWARD_${canonicalId.toUpperCase()}`,
+          referenceId: sessionId,
+          createdAt: nowIso
+        };
+        tx.set(ledgerRef, ledgerEntry);
+      }
 
       // Save leaderboard high score
       const leaderDoc = await tx.get(leaderRef);
@@ -1151,18 +1194,20 @@ export async function executeScoreSubmission({
     memoryStore.economies.set(userId, eco);
     newCoinBalance = eco.coins;
 
-    const ledgerEntry: StoredEconomyTransaction = {
-      transactionId,
-      userId,
-      type: 'GAME_REWARD',
-      amount: coinsEarned,
-      balanceBefore,
-      balanceAfter: eco.coins,
-      reason: `GAME_REWARD_${canonicalId.toUpperCase()}`,
-      referenceId: sessionId,
-      createdAt: nowIso
-    };
-    memoryStore.ledger.push(ledgerEntry);
+    if (coinsEarned > 0) {
+      const ledgerEntry: StoredEconomyTransaction = {
+        transactionId,
+        userId,
+        type: 'GAME_REWARD',
+        amount: coinsEarned,
+        balanceBefore,
+        balanceAfter: eco.coins,
+        reason: `GAME_REWARD_${canonicalId.toUpperCase()}`,
+        referenceId: sessionId,
+        createdAt: nowIso
+      };
+      memoryStore.ledger.push(ledgerEntry);
+    }
 
     // Save leaderboard entry in memory
     const list = memoryStore.leaderboards.get(canonicalId) || [];

@@ -373,6 +373,14 @@ class RetroAudio {
     } catch {}
   }
 
+  playCountdown(step?: number) {
+    if (step === 0) {
+      this.playCountdownGo();
+    } else {
+      this.playCountdownTick();
+    }
+  }
+
   playCountdownGo() {
     if (this.isMuted || this.sfxVolume <= 0) return;
     this.initContext();
