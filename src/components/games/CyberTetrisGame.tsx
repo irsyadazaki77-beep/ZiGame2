@@ -201,7 +201,7 @@ export default function CyberTetrisGame({ onGameOver, onScoreUpdate, highScore }
     }
 
     // Check for row completions
-    let rowsToClear: number[] = [];
+    const rowsToClear: number[] = [];
     for (let r = 0; r < ROWS; r++) {
       if (nextBoard[r].every(val => val !== 0)) {
         rowsToClear.push(r);

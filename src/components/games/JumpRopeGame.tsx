@@ -48,12 +48,12 @@ export default function JumpRopeGame({ onScoreUpdate, onGameOver, highScore }: G
   useEffect(() => {
     if (gameOver || !isPlaying) return;
 
-    let speed = 2 + Math.floor(score / 5); // Speed increases with score
+    const speed = 2 + Math.floor(score / 5); // Speed increases with score
     let animationFrameId: number;
 
     const gameLoop = () => {
       setRopePosition((prev) => {
-        let newPos = prev - speed;
+        const newPos = prev - speed;
         
         // Check collision when rope is under the player (between 40 and 60)
         // Player is jumping if isJumping is true

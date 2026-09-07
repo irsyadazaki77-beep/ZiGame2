@@ -30,8 +30,11 @@ jobs:
       - name: Lint
         run: npm run lint
 
-      - name: Run Test Suite
+      - name: Unit & Smoke Tests
         run: npm run test
+
+      - name: Integration Tests
+        run: npm run test:integration
 
       - name: Build Production Distribution
         run: npm run build

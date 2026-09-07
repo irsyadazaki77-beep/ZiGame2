@@ -4,7 +4,8 @@ import { createServer as createViteServer } from "vite";
 import { initializeApp, cert, getApps } from "firebase-admin/app";
 import { apiRouter } from "./src/server/apiRouter";
 import { serverLogger } from "./src/server/logger";
-import { requestCorrelationMiddleware } from "./src/server/requestContext";
+import { requestCorrelationMiddleware, handleServerException } from "./src/server/requestContext";
+import { APP_VERSION } from "./src/config/version";
 
 // Validate production environment on boot
 export function validateEnvironment() {
@@ -66,21 +67,13 @@ export async function createExpressApp() {
   app.use('/api', apiRouter);
 
   // Centralized Error Handler with standardized contract
-  app.use((err: any, req: Request, res: Response, _next: NextFunction) => {
+  app.use((err: unknown, req: Request, res: Response, _next: NextFunction) => {
     serverLogger.error('UNCAUGHT_SERVER_ERROR', 'Uncaught exception during request processing', err, {
       path: req.originalUrl,
       method: req.method
     }, req.user?.uid, req.ip, req.id);
 
-    const status = err?.status || err?.statusCode || (err?.code === 'SERVICE_UNAVAILABLE' ? 503 : (err?.code === 'INSUFFICIENT_FUNDS' ? 400 : 500));
-    res.status(status).json({
-      success: false,
-      code: err?.code || 'INTERNAL_SERVER_ERROR',
-      message: process.env.NODE_ENV === 'production'
-        ? 'Terjadi kendala pada server. Tim kami telah mencatat insiden ini.'
-        : err?.message || 'Internal Server Error',
-      requestId: req.id
-    });
+    handleServerException(err, req, res);
   });
 
   return app;
@@ -107,7 +100,7 @@ async function startServer() {
   }
 
   app.listen(PORT, "0.0.0.0", () => {
-    serverLogger.info('SERVER_START', `ZiGame 2.0 Hardened Production Server running on port ${PORT}`);
+    serverLogger.info('SERVER_START', `ZiGame ${APP_VERSION} Hardened Production Server running on port ${PORT}`);
   });
 }
 

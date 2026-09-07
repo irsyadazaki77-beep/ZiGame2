@@ -36,9 +36,9 @@ export default function CyberMinesGame({ onGameOver, onScoreUpdate, highScore }:
   
   // Create a new board
   const initializeBoard = () => {
-    let newBoard: Cell[][] = [];
+    const newBoard: Cell[][] = [];
     for (let y = 0; y < ROWS; y++) {
-      let row: Cell[] = [];
+      const row: Cell[] = [];
       for (let x = 0; x < COLS; x++) {
         row.push({
           x,
@@ -102,7 +102,7 @@ export default function CyberMinesGame({ onGameOver, onScoreUpdate, highScore }:
   const revealCell = (x: number, y: number) => {
     if (!isPlaying || gameOver || won || board[y][x].isRevealed || board[y][x].isFlagged) return;
 
-    let newBoard = [...board];
+    const newBoard = [...board];
     
     if (newBoard[y][x].isMine) {
       // Game Over
@@ -150,7 +150,7 @@ export default function CyberMinesGame({ onGameOver, onScoreUpdate, highScore }:
     e.preventDefault();
     if (!isPlaying || gameOver || won || board[y][x].isRevealed) return;
 
-    let newBoard = [...board];
+    const newBoard = [...board];
     if (newBoard[y][x].isFlagged) {
       newBoard[y][x].isFlagged = false;
       setFlagsRemaining(prev => prev + 1);

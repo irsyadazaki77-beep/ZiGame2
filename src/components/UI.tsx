@@ -172,7 +172,7 @@ export const Badge: React.FC<BadgeProps> = ({ className = '', variant = 'primary
 };
 
 // ==========================================
-// 5. MODAL
+// 5. MODAL & BOTTOM SHEET (RESPONSIVE)
 // ==========================================
 interface ModalProps {
   isOpen: boolean;
@@ -201,39 +201,45 @@ export const Modal: React.FC<ModalProps> = ({
   }, [isOpen, onClose]);
 
   const sizes = {
-    sm: 'max-w-md',
-    md: 'max-w-lg',
-    lg: 'max-w-2xl',
-    xl: 'max-w-4xl'
+    sm: 'sm:max-w-md',
+    md: 'sm:max-w-lg',
+    lg: 'sm:max-w-2xl',
+    xl: 'sm:max-w-4xl'
   };
 
   return (
     <AnimatePresence>
       {isOpen && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-3 sm:p-4">
-          {/* Backdrop Click closes menu */}
+        <div className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center p-0 sm:p-4">
+          {/* Backdrop */}
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             onClick={onClose}
-            className="absolute inset-0 bg-black/80 backdrop-blur-md"
+            className="absolute inset-0 bg-black/80 backdrop-blur-sm sm:backdrop-blur-md"
           />
           
           <motion.div
-            initial={{ scale: 0.96, opacity: 0, y: 10 }}
-            animate={{ scale: 1, opacity: 1, y: 0 }}
-            exit={{ scale: 0.96, opacity: 0, y: 10 }}
-            transition={{ type: 'spring', damping: 26, stiffness: 350 }}
+            initial={{ y: '100%', opacity: 0.5 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={{ y: '100%', opacity: 0 }}
+            transition={{ type: 'spring', damping: 28, stiffness: 350 }}
             className={`
-              relative w-full ${sizes[size]} bg-[#11151f] border border-white/[0.08] rounded-2xl
-              shadow-2xl shadow-black/90 flex flex-col max-h-[88vh] overflow-hidden z-10
+              relative w-full ${sizes[size]} bg-[#11151f] border-t sm:border border-white/[0.08] 
+              rounded-t-2xl sm:rounded-2xl shadow-2xl shadow-black/90 flex flex-col 
+              max-h-[90dvh] sm:max-h-[85vh] overflow-hidden z-10 pb-safe
             `}
           >
+            {/* Mobile Sheet Drag Indicator */}
+            <div className="sm:hidden w-full flex justify-center pt-2 pb-1 bg-[#0d1017]">
+              <div className="w-10 h-1 rounded-full bg-zinc-700/60" />
+            </div>
+
             {/* Modal Header */}
-            <div className="flex items-center justify-between px-5 sm:px-6 py-4 border-b border-white/[0.06] bg-[#0d1017]">
+            <div className="flex items-center justify-between px-4 sm:px-6 py-3 sm:py-4 border-b border-white/[0.06] bg-[#0d1017]">
               {title ? (
-                <h3 className="font-semibold text-base text-white truncate">
+                <h3 className="font-semibold text-sm sm:text-base text-white truncate">
                   {title}
                 </h3>
               ) : (
@@ -242,14 +248,14 @@ export const Modal: React.FC<ModalProps> = ({
               <button
                 onClick={onClose}
                 className="w-8 h-8 rounded-full flex items-center justify-center text-zinc-400 hover:text-white hover:bg-white/[0.06] transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer"
-                aria-label="Tutup"
+                aria-label="Tutup Dialog"
               >
                 <X size={16} />
               </button>
             </div>
             
             {/* Modal Content */}
-            <div className="flex-1 overflow-y-auto px-6 py-5">
+            <div className="flex-1 overflow-y-auto px-4 sm:px-6 py-4 sm:py-5 overscroll-contain">
               {children}
             </div>
           </motion.div>

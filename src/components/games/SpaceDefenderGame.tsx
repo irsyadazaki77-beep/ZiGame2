@@ -1,8 +1,8 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { audio } from '../../utils/audio';
-import { Particle } from '../../types';
+import { inputManager } from '../../services/inputService';
 import { GameOverlay } from '../gameplay/GameOverlay';
-import { MobileControls } from '../gameplay/MobileControls';
+import { Shield, Zap, Sparkles } from 'lucide-react';
 
 interface SpaceDefenderProps {
   onGameOver: (score: number) => void;
@@ -15,6 +15,7 @@ interface Star {
   y: number;
   speed: number;
   size: number;
+  brightness: number;
 }
 
 interface Enemy {
@@ -25,9 +26,10 @@ interface Enemy {
   speed: number;
   color: string;
   points: number;
-  active: boolean;
-  type: 'basic' | 'speedy' | 'tank';
+  type: 'scout' | 'interceptor' | 'tank' | 'commander';
   health: number;
+  maxHealth: number;
+  shootCooldown: number;
 }
 
 interface Bullet {
@@ -37,91 +39,137 @@ interface Bullet {
   vy: number;
   radius: number;
   color: string;
-  active: boolean;
   isEnemy: boolean;
 }
+
+interface PowerUp {
+  x: number;
+  y: number;
+  type: 'spread' | 'shield' | 'bomb' | 'rapid';
+  label: string;
+  color: string;
+}
+
+interface Particle {
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  size: number;
+  color: string;
+  alpha: number;
+  decay: number;
+}
+
+interface FloatingText {
+  x: number;
+  y: number;
+  text: string;
+  color: string;
+  alpha: number;
+  vy: number;
+}
+
+const WIDTH = 450;
+const HEIGHT = 400;
 
 export default function SpaceDefenderGame({ onGameOver, onScoreUpdate, highScore }: SpaceDefenderProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
 
-  // Game state
-  const [isPlaying, setIsPlaying] = useState(false);
+  // States
+  const [gameState, setGameState] = useState<'ready' | 'countdown' | 'playing' | 'paused' | 'gameover'>('ready');
+  const [countdown, setCountdown] = useState(3);
   const [score, setScore] = useState(0);
-  const gameLoopRef = useRef<number | null>(null);
-  const scoreRef = useRef(0);
-  const [lives, setLives] = useState(3);
-  const livesRef = useRef(3);
   const [wave, setWave] = useState(1);
-  const waveRef = useRef(1);
-  const [gameOver, setGameOver] = useState(false);
-  const isPlayingRef = useRef(false);
-  const gameOverRef = useRef(false);
+  const [lives, setLives] = useState(3);
+  const [combo, setCombo] = useState(0);
+  const [weaponType, setWeaponType] = useState<'single' | 'dual' | 'spread'>('single');
+  const [hasShield, setHasShield] = useState(false);
 
+  // Loop & Sync Refs
+  const gameStateRef = useRef(gameState);
+  const scoreRef = useRef(0);
+  const waveRef = useRef(1);
+  const livesRef = useRef(3);
+  const comboRef = useRef(0);
+  const comboTimerRef = useRef(0);
+  const hitStopRef = useRef(0);
+  const shakeRef = useRef(0);
+  const warpSpeedRef = useRef(1);
+  const gameLoopRef = useRef<number | null>(null);
+  const lastTimeRef = useRef<number>(0);
 
   useEffect(() => {
-    isPlayingRef.current = isPlaying;
-    gameOverRef.current = gameOver;
-    scoreRef.current = score;
-    livesRef.current = lives;
-    waveRef.current = wave;
-  }, [isPlaying, gameOver, score, lives, wave]);
-  const [muted, setMuted] = useState(audio.getMuteState());
+    gameStateRef.current = gameState;
+  }, [gameState]);
 
-  // Player state
-  const playerRef = useRef<{ x: number; y: number; w: number; h: number; speed: number; lastShot: number; shield: boolean }>({
+  // Player State
+  const playerRef = useRef({
     x: 40,
     y: 180,
-    w: 24,
-    h: 20,
+    w: 26,
+    h: 22,
     speed: 5.5,
     lastShot: 0,
+    weapon: 'single' as 'single' | 'dual' | 'spread',
+    weaponTimer: 0,
     shield: false,
+    invincibleTimer: 0,
   });
 
   const starsRef = useRef<Star[]>([]);
   const enemiesRef = useRef<Enemy[]>([]);
   const bulletsRef = useRef<Bullet[]>([]);
+  const powerupsRef = useRef<PowerUp[]>([]);
   const particlesRef = useRef<Particle[]>([]);
+  const floatingTextsRef = useRef<FloatingText[]>([]);
   const activeKeysRef = useRef<{ [key: string]: boolean }>({});
-  const lastFrameTimeRef = useRef<number>(0);
   const spawnTimerRef = useRef<number>(0);
-  const shakeRef = useRef<number>(0);
-  const floatingTextsRef = useRef<{ x: number; y: number; text: string; color: string; alpha: number; vy: number }[]>([]);
 
-  const WIDTH = 400;
-  const HEIGHT = 400;
+  // Starfield initialization
+  const generateStars = useCallback(() => {
+    const stars: Star[] = [];
+    for (let i = 0; i < 45; i++) {
+      stars.push({
+        x: Math.random() * WIDTH,
+        y: Math.random() * HEIGHT,
+        speed: Math.random() * 2 + 0.5,
+        size: Math.random() * 1.8 + 0.6,
+        brightness: Math.random() * 0.7 + 0.3,
+      });
+    }
+    starsRef.current = stars;
+  }, []);
 
   useEffect(() => {
-    // Generate initial starfield
     generateStars();
     drawStatic();
     return () => {
       if (gameLoopRef.current) cancelAnimationFrame(gameLoopRef.current);
     };
+  }, [generateStars]);
+
+  // Tab auto-pause
+  useEffect(() => {
+    const handleVis = () => {
+      if (document.hidden && gameStateRef.current === 'playing') {
+        setGameState('paused');
+      }
+    };
+    document.addEventListener('visibilitychange', handleVis);
+    return () => document.removeEventListener('visibilitychange', handleVis);
   }, []);
 
-  const generateStars = () => {
-    const quality = localStorage.getItem('zigame-graphics') || 'high';
-    const starCount = quality === 'low' ? 15 : quality === 'medium' ? 25 : 40;
-    const stars: Star[] = [];
-    for (let i = 0; i < starCount; i++) {
-      stars.push({
-        x: Math.random() * WIDTH,
-        y: Math.random() * HEIGHT,
-        speed: Math.random() * 2 + 0.5,
-        size: Math.random() * 2 + 0.5,
-      });
-    }
-    starsRef.current = stars;
-  };
-
-  // Keyboard hooks
+  // Keyboard input listeners
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'KeyW', 'KeyS', 'KeyA', 'KeyD', 'Space'].includes(e.code)) {
         e.preventDefault();
         activeKeysRef.current[e.code] = true;
+      }
+      if (e.key === 'Escape' && gameStateRef.current === 'playing') {
+        setGameState('paused');
       }
     };
 
@@ -140,689 +188,772 @@ export default function SpaceDefenderGame({ onGameOver, onScoreUpdate, highScore
     };
   }, []);
 
-  // Main game thread
-  const gameStep = (time: number) => {
-    if (!isPlayingRef.current || gameOverRef.current ) return;
-
-    // FPS Limiter implementation
-    const fpsPref = localStorage.getItem('zigame-fps') || 'auto';
-    if (fpsPref !== 'auto') {
-      const targetFps = parseInt(fpsPref, 10);
-      const interval = 1000 / targetFps;
-      const elapsed = time - lastFrameTimeRef.current;
-      
-      // If elapsed time is less than target interval minus a 1ms safety buffer, skip
-      if (elapsed < interval - 1) {
-        gameLoopRef.current = requestAnimationFrame(gameStep);
-        return;
-      }
-      
-      // Keep intervals stable
-      lastFrameTimeRef.current = time - (elapsed % interval);
-    } else {
-      lastFrameTimeRef.current = time;
+  const spawnParticles = (x: number, y: number, color: string, count = 10, speed = 2.5) => {
+    for (let i = 0; i < count; i++) {
+      const angle = (Math.PI * 2 * i) / count + (Math.random() - 0.5);
+      const spd = (Math.random() * 0.8 + 0.4) * speed;
+      particlesRef.current.push({
+        x,
+        y,
+        vx: Math.cos(angle) * spd,
+        vy: Math.sin(angle) * spd,
+        size: Math.random() * 2.5 + 1.5,
+        color,
+        alpha: 1.0,
+        decay: 0.035 + Math.random() * 0.02,
+      });
     }
-
-    updateStars();
-    updatePlayer();
-    updateBullets();
-    updateEnemies();
-    updateParticles();
-
-    render();
-
-    gameLoopRef.current = requestAnimationFrame(gameStep);
   };
 
-  const updateStars = () => {
-    starsRef.current.forEach(star => {
-      star.x -= star.speed;
-      if (star.x < 0) {
-        star.x = WIDTH;
-        star.y = Math.random() * HEIGHT;
-      }
+  const spawnFloatingText = (x: number, y: number, text: string, color = '#fbbf24') => {
+    floatingTextsRef.current.push({
+      x,
+      y,
+      text,
+      color,
+      alpha: 1.0,
+      vy: -1.0,
     });
   };
 
-  const updatePlayer = () => {
-    const player = playerRef.current;
-    
-    // Up movement
-    if (activeKeysRef.current['ArrowUp'] || activeKeysRef.current['KeyW']) {
-      player.y = Math.max(10, player.y - player.speed);
-    }
-    // Down movement
-    if (activeKeysRef.current['ArrowDown'] || activeKeysRef.current['KeyS']) {
-      player.y = Math.min(HEIGHT - player.h - 10, player.y + player.speed);
-    }
-    // Left movement
-    if (activeKeysRef.current['ArrowLeft'] || activeKeysRef.current['KeyA']) {
-      player.x = Math.max(10, player.x - player.speed);
-    }
-    // Right movement
-    if (activeKeysRef.current['ArrowRight'] || activeKeysRef.current['KeyD']) {
-      player.x = Math.min(WIDTH / 2, player.x + player.speed);
-    }
+  const resetGame = useCallback(() => {
+    scoreRef.current = 0;
+    setScore(0);
+    onScoreUpdate(0);
+    waveRef.current = 1;
+    setWave(1);
+    livesRef.current = 3;
+    setLives(3);
+    comboRef.current = 0;
+    setCombo(0);
+    comboTimerRef.current = 0;
 
-    // Shoot Laser
-    if (activeKeysRef.current['Space']) {
-      triggerFireLaser();
-    }
-  };
+    playerRef.current = {
+      x: 40,
+      y: HEIGHT / 2 - 11,
+      w: 26,
+      h: 22,
+      speed: 5.5,
+      lastShot: 0,
+      weapon: 'single',
+      weaponTimer: 0,
+      shield: false,
+      invincibleTimer: 0,
+    };
+    setWeaponType('single');
+    setHasShield(false);
 
-  const triggerFireLaser = () => {
+    enemiesRef.current = [];
+    bulletsRef.current = [];
+    powerupsRef.current = [];
+    particlesRef.current = [];
+    floatingTextsRef.current = [];
+    spawnTimerRef.current = 0;
+    warpSpeedRef.current = 1;
+
+    generateStars();
+    drawStatic();
+  }, [generateStars, onScoreUpdate]);
+
+  const startGame = useCallback(() => {
+    resetGame();
+    setGameState('countdown');
+    setCountdown(3);
+    audio.playCountdownTick();
+
+    let count = 3;
+    const timer = setInterval(() => {
+      count--;
+      if (count > 0) {
+        setCountdown(count);
+        audio.playCountdownTick();
+      } else {
+        clearInterval(timer);
+        audio.playCountdownGo();
+        setGameState('playing');
+        lastTimeRef.current = performance.now();
+        if (gameLoopRef.current) cancelAnimationFrame(gameLoopRef.current);
+        gameLoopRef.current = requestAnimationFrame(gameLoop);
+      }
+    }, 800);
+  }, [resetGame]);
+
+  const triggerLaser = (now: number) => {
     const player = playerRef.current;
-    const now = Date.now();
-    
-    // Throttle lasers: max 1 per 220ms
-    if (now - player.lastShot > 220) {
+    const cooldown = player.weapon === 'rapid' ? 120 : 180;
+    if (now - player.lastShot < cooldown) return;
+
+    player.lastShot = now;
+    audio.playLaser();
+    shakeRef.current = 1.5;
+
+    const px = player.x + player.w;
+    const py = player.y + player.h / 2;
+
+    if (player.weapon === 'spread') {
+      // 3-way Spread Laser
+      bulletsRef.current.push(
+        { x: px, y: py, vx: 10, vy: 0, radius: 3.5, color: '#a855f7', isEnemy: false },
+        { x: px, y: py - 4, vx: 9.5, vy: -2, radius: 3.5, color: '#a855f7', isEnemy: false },
+        { x: px, y: py + 4, vx: 9.5, vy: 2, radius: 3.5, color: '#a855f7', isEnemy: false }
+      );
+    } else if (player.weapon === 'dual') {
+      // Twin Lasers
+      bulletsRef.current.push(
+        { x: px, y: py - 6, vx: 10, vy: 0, radius: 3.5, color: '#38bdf8', isEnemy: false },
+        { x: px, y: py + 6, vx: 10, vy: 0, radius: 3.5, color: '#38bdf8', isEnemy: false }
+      );
+    } else {
+      // Standard Plasma Beam
       bulletsRef.current.push({
-        x: player.x + player.w,
-        y: player.y + player.h / 2,
-        vx: 9, // Slightly faster laser
+        x: px,
+        y: py,
+        vx: 10,
         vy: 0,
         radius: 3.5,
-        color: '#6366f1', // glowing indigo laser
-        active: true,
+        color: '#6366f1',
         isEnemy: false,
       });
-      player.lastShot = now;
-      audio.playLaser();
-      shakeRef.current = 1.5; // Micro screen shake on shoot
     }
-  };
 
-  const movePlayerTouch = (dir: 'up' | 'down') => {
-    const player = playerRef.current;
-    if (dir === 'up') {
-      player.y = Math.max(10, player.y - 20);
-    } else {
-      player.y = Math.min(HEIGHT - player.h - 10, player.y + 20);
-    }
-  };
-
-  const updateBullets = () => {
-    bulletsRef.current = bulletsRef.current
-      .map(b => {
-        b.x += b.vx;
-        b.y += b.vy;
-        // Check out of bounds
-        if (b.x < 0 || b.x > WIDTH) b.active = false;
-        return b;
-      })
-      .filter(b => b.active);
+    // Engine exhaust spark
+    spawnParticles(player.x - 2, py, '#f97316', 3, 1.2);
   };
 
   const spawnEnemy = () => {
-    const types: Enemy['type'][] = ['basic', 'speedy', 'tank'];
     const r = Math.random();
-    
-    let type: Enemy['type'] = 'basic';
-    let color = '#38bdf8'; // light cyan
-    let speed = Math.random() * 1.5 + 1.2 + (waveRef.current * 0.15);
+    const currentWave = waveRef.current;
+
+    let type: Enemy['type'] = 'scout';
+    let color = '#38bdf8';
+    let speed = Math.random() * 1.2 + 1.6 + currentWave * 0.2;
     let hp = 1;
     let points = 10;
-    let w = 20, h = 20;
+    let w = 22, h = 20;
+    let shootCd = 0;
 
-    if (r < 0.2) {
-      type = 'speedy';
-      color = '#f43f5e'; // pinkish red
-      speed = Math.random() * 1.5 + 2.8 + (waveRef.current * 0.2);
+    if (r < 0.22) {
+      type = 'interceptor';
+      color = '#f43f5e';
+      speed = Math.random() * 1.5 + 3.0 + currentWave * 0.25;
       points = 20;
-    } else if (r < 0.35) {
+      w = 24; h = 18;
+    } else if (r < 0.4) {
       type = 'tank';
-      color = '#a855f7'; // violet purple
-      speed = Math.random() * 0.8 + 0.8 + (waveRef.current * 0.05);
+      color = '#a855f7';
+      speed = Math.random() * 0.6 + 1.0 + currentWave * 0.1;
       hp = 3;
-      points = 30;
-      w = 26;
-      h = 26;
+      points = 35;
+      w = 28; h = 28;
+    } else if (r < 0.5 && currentWave >= 2) {
+      type = 'commander';
+      color = '#fbbf24';
+      speed = 0.9;
+      hp = 5;
+      points = 60;
+      w = 32; h = 32;
+      shootCd = 60;
     }
 
     enemiesRef.current.push({
       x: WIDTH + 20,
-      y: Math.max(30, Math.random() * (HEIGHT - 40)),
+      y: Math.max(30, Math.random() * (HEIGHT - 50)),
       w,
       h,
       speed,
       color,
       points,
-      active: true,
       type,
       health: hp,
+      maxHealth: hp,
+      shootCooldown: shootCd,
     });
   };
 
-  const updateEnemies = () => {
-    const enemies = enemiesRef.current;
-    const player = playerRef.current;
-    const bullets = bulletsRef.current;
+  const gameLoop = (timestamp: number) => {
+    if (gameStateRef.current !== 'playing') return;
 
-    // Enemy Spawning Rate: based on wave
-    spawnTimerRef.current++;
-    const spawnRate = Math.max(25, 75 - waveRef.current * 4);
-    if (spawnTimerRef.current >= spawnRate) {
+    const dt = Math.min(timestamp - lastTimeRef.current, 100);
+    lastTimeRef.current = timestamp;
+
+    if (hitStopRef.current > 0) {
+      hitStopRef.current -= dt;
+      draw();
+      gameLoopRef.current = requestAnimationFrame(gameLoop);
+      return;
+    }
+
+    updatePhysics(dt, timestamp);
+    draw();
+
+    if (gameStateRef.current === 'playing') {
+      gameLoopRef.current = requestAnimationFrame(gameLoop);
+    }
+  };
+
+  const updatePhysics = (dt: number, now: number) => {
+    const player = playerRef.current;
+
+    // Decay Combo
+    if (comboTimerRef.current > 0) {
+      comboTimerRef.current -= dt;
+      if (comboTimerRef.current <= 0) {
+        comboRef.current = 0;
+        setCombo(0);
+      }
+    }
+
+    // Decay Weapon Timer
+    if (player.weaponTimer > 0) {
+      player.weaponTimer -= dt;
+      if (player.weaponTimer <= 0) {
+        player.weapon = 'single';
+        setWeaponType('single');
+      }
+    }
+
+    // Decay Invincible Timer
+    if (player.invincibleTimer > 0) {
+      player.invincibleTimer -= dt;
+    }
+
+    // Decay Warp speed
+    if (warpSpeedRef.current > 1) {
+      warpSpeedRef.current = Math.max(1, warpSpeedRef.current - 0.05);
+    }
+
+    // Player Movement via Keys
+    const keys = activeKeysRef.current;
+    if (keys['ArrowUp'] || keys['KeyW']) player.y = Math.max(15, player.y - player.speed);
+    if (keys['ArrowDown'] || keys['KeyS']) player.y = Math.min(HEIGHT - player.h - 15, player.y + player.speed);
+    if (keys['ArrowLeft'] || keys['KeyA']) player.x = Math.max(15, player.x - player.speed);
+    if (keys['ArrowRight'] || keys['KeyD']) player.x = Math.min(WIDTH / 2, player.x + player.speed);
+
+    // Auto-fire or hold Space
+    if (keys['Space']) {
+      triggerLaser(now);
+    }
+
+    // Update Starfield
+    starsRef.current.forEach(star => {
+      star.x -= star.speed * warpSpeedRef.current;
+      if (star.x < 0) {
+        star.x = WIDTH;
+        star.y = Math.random() * HEIGHT;
+      }
+    });
+
+    // Update Bullets
+    for (let i = bulletsRef.current.length - 1; i >= 0; i--) {
+      const b = bulletsRef.current[i];
+      b.x += b.vx;
+      b.y += b.vy;
+
+      // Clean out of bounds
+      if (b.x < 0 || b.x > WIDTH || b.y < 0 || b.y > HEIGHT) {
+        bulletsRef.current.splice(i, 1);
+        continue;
+      }
+
+      // Enemy Bullet hitting player
+      if (b.isEnemy) {
+        if (
+          player.invincibleTimer <= 0 &&
+          b.x >= player.x &&
+          b.x <= player.x + player.w &&
+          b.y >= player.y &&
+          b.y <= player.y + player.h
+        ) {
+          bulletsRef.current.splice(i, 1);
+          handlePlayerDamage();
+          continue;
+        }
+      }
+    }
+
+    // Spawn Enemies
+    spawnTimerRef.current += dt;
+    const spawnInterval = Math.max(500, 1500 - waveRef.current * 180);
+    if (spawnTimerRef.current >= spawnInterval) {
       spawnEnemy();
       spawnTimerRef.current = 0;
     }
 
-    // Check wave transitions
-    const enemiesKilled = scoreRef.current / 10;
-    const nextWaveTarget = waveRef.current * 10;
-    if (enemiesKilled >= nextWaveTarget && waveRef.current < 5) {
-      const nextWave = waveRef.current + 1;
-      setWave(nextWave);
-      audio.playLevelUp();
-      shakeRef.current = 14;
-      floatingTextsRef.current.push({
-        x: WIDTH / 2,
-        y: HEIGHT / 2,
-        text: `WAVE ${nextWave}!`,
-        color: '#a855f7',
-        alpha: 1.0,
-        vy: -1.0
-      });
-      createWaveParticles();
-    }
-
-    for (let i = enemies.length - 1; i >= 0; i--) {
-      const enemy = enemies[i];
+    // Update Enemies
+    for (let i = enemiesRef.current.length - 1; i >= 0; i--) {
+      const enemy = enemiesRef.current[i];
       enemy.x -= enemy.speed;
 
-      // Clean up out of bounds enemies
+      // Commander shoots return lasers
+      if (enemy.type === 'commander') {
+        enemy.shootCooldown--;
+        if (enemy.shootCooldown <= 0) {
+          bulletsRef.current.push({
+            x: enemy.x,
+            y: enemy.y + enemy.h / 2,
+            vx: -5,
+            vy: 0,
+            radius: 3,
+            color: '#ef4444',
+            isEnemy: true,
+          });
+          enemy.shootCooldown = 90;
+        }
+      }
+
+      // Out of bounds
       if (enemy.x + enemy.w < 0) {
-        enemies.splice(i, 1);
+        enemiesRef.current.splice(i, 1);
         continue;
       }
 
-      // Spaceship / Enemy Collision
+      // Ship-Enemy Collision
       if (
+        player.invincibleTimer <= 0 &&
         player.x + player.w >= enemy.x &&
         player.x <= enemy.x + enemy.w &&
         player.y + player.h >= enemy.y &&
         player.y <= enemy.y + enemy.h
       ) {
-        // Explode enemy
-        createExplosionParticles(enemy.x + enemy.w / 2, enemy.y + enemy.h / 2, enemy.color);
-        enemies.splice(i, 1);
-        handlePlayerHit();
+        spawnParticles(enemy.x + enemy.w / 2, enemy.y + enemy.h / 2, enemy.color, 16);
+        enemiesRef.current.splice(i, 1);
+        handlePlayerDamage();
         continue;
       }
 
-      // Bullet / Enemy collision
-      for (let j = bullets.length - 1; j >= 0; j--) {
-        const bullet = bullets[j];
-        if (
-          !bullet.isEnemy &&
-          bullet.x + bullet.radius >= enemy.x &&
-          bullet.x - bullet.radius <= enemy.x + enemy.w &&
-          bullet.y + bullet.radius >= enemy.y &&
-          bullet.y - bullet.radius <= enemy.y + enemy.h
-        ) {
-          // Remove bullet
-          bullet.active = false;
-          bullets.splice(j, 1);
+      // Bullet-Enemy Collisions
+      for (let j = bulletsRef.current.length - 1; j >= 0; j--) {
+        const b = bulletsRef.current[j];
+        if (b.isEnemy) continue;
 
-          // Damage enemy
+        if (
+          b.x + b.radius >= enemy.x &&
+          b.x - b.radius <= enemy.x + enemy.w &&
+          b.y + b.radius >= enemy.y &&
+          b.y - b.radius <= enemy.y + enemy.h
+        ) {
+          bulletsRef.current.splice(j, 1);
           enemy.health--;
+
           if (enemy.health <= 0) {
-            audio.playExplosion();
-            shakeRef.current = 7;
-            floatingTextsRef.current.push({
-              x: enemy.x + enemy.w / 2,
-              y: enemy.y,
-              text: `+${enemy.points}`,
-              color: enemy.color,
-              alpha: 1.0,
-              vy: -0.8
-            });
-            createExplosionParticles(enemy.x + enemy.w / 2, enemy.y + enemy.h / 2, enemy.color);
-            setScore(prev => {
-              const next = prev + enemy.points;
-              onScoreUpdate(next);
-              return next;
-            });
-            // Spawn shield chance
-            if (Math.random() < 0.08 && !player.shield) {
-              player.shield = true;
-              audio.playLevelUp();
-              floatingTextsRef.current.push({
-                x: player.x,
-                y: player.y - 12,
-                text: "SHIELD UP!",
-                color: '#3b82f6',
-                alpha: 1.0,
-                vy: -0.6
-              });
+            // Enemy Destroyed!
+            const newCombo = Math.min(5, comboRef.current + 1);
+            comboRef.current = newCombo;
+            comboTimerRef.current = 2800;
+            setCombo(newCombo);
+
+            const pointsEarned = enemy.points * newCombo;
+            const nextScore = scoreRef.current + pointsEarned;
+            scoreRef.current = nextScore;
+            setScore(nextScore);
+            onScoreUpdate(nextScore);
+
+            audio.playCombo(newCombo);
+            inputManager.vibrateGamepad(100, 0.4);
+            shakeRef.current = enemy.type === 'tank' || enemy.type === 'commander' ? 8 : 4;
+            hitStopRef.current = enemy.type === 'commander' ? 60 : 35; // Crisp hit-stop
+
+            spawnParticles(enemy.x + enemy.w / 2, enemy.y + enemy.h / 2, enemy.color, 18);
+            spawnFloatingText(enemy.x + enemy.w / 2, enemy.y, `+${pointsEarned} ${newCombo > 1 ? `(${newCombo}x)` : ''}`, enemy.color);
+
+            // Power-up drops
+            if (Math.random() < 0.18) {
+              spawnPowerup(enemy.x, enemy.y);
             }
-            enemies.splice(i, 1);
+
+            enemiesRef.current.splice(i, 1);
+
+            // Check Wave Transition
+            checkWaveProgress();
+            break;
           } else {
+            // Damage spark
             audio.playHit();
-            shakeRef.current = 2;
-            createExplosionParticles(bullet.x, bullet.y, '#ffffff'); // tiny spark
+            spawnParticles(b.x, b.y, enemy.color, 4);
           }
-          break;
         }
       }
     }
+
+    // Update Powerups
+    for (let i = powerupsRef.current.length - 1; i >= 0; i--) {
+      const pu = powerupsRef.current[i];
+      pu.x -= 1.8;
+
+      // Catch
+      if (
+        player.x + player.w >= pu.x &&
+        player.x <= pu.x + 20 &&
+        player.y + player.h >= pu.y &&
+        player.y <= pu.y + 20
+      ) {
+        applyPowerup(pu.type);
+        powerupsRef.current.splice(i, 1);
+        continue;
+      }
+
+      if (pu.x < -20) {
+        powerupsRef.current.splice(i, 1);
+      }
+    }
+
+    // Update Particles
+    for (let i = particlesRef.current.length - 1; i >= 0; i--) {
+      const p = particlesRef.current[i];
+      p.x += p.vx;
+      p.y += p.vy;
+      p.alpha -= p.decay;
+      if (p.alpha <= 0) particlesRef.current.splice(i, 1);
+    }
+
+    // Update Floating Texts
+    for (let i = floatingTextsRef.current.length - 1; i >= 0; i--) {
+      const t = floatingTextsRef.current[i];
+      t.y += t.vy;
+      t.alpha -= 0.025;
+      if (t.alpha <= 0) floatingTextsRef.current.splice(i, 1);
+    }
   };
 
-  const handlePlayerHit = () => {
+  const spawnPowerup = (x: number, y: number) => {
+    const types: PowerUp['type'][] = ['spread', 'dual', 'shield', 'bomb'] as any;
+    const type = types[Math.floor(Math.random() * types.length)];
+    const meta: Record<string, { label: string; color: string }> = {
+      spread: { label: 'SPREAD', color: '#a855f7' },
+      dual: { label: 'DUAL', color: '#38bdf8' },
+      shield: { label: 'SHIELD', color: '#06b6d4' },
+      bomb: { label: 'BOMB', color: '#ef4444' },
+    };
+
+    powerupsRef.current.push({
+      x,
+      y,
+      type,
+      label: meta[type].label,
+      color: meta[type].color,
+    });
+  };
+
+  const applyPowerup = (type: PowerUp['type']) => {
     const player = playerRef.current;
-    audio.playExplosion();
-    createExplosionParticles(player.x + player.w / 2, player.y + player.h / 2, '#ef4444');
+    audio.playPowerup();
+    shakeRef.current = 3;
+
+    if (type === 'spread') {
+      player.weapon = 'spread';
+      player.weaponTimer = 10000;
+      setWeaponType('spread');
+      spawnFloatingText(player.x, player.y - 12, 'SPREAD CANNON!', '#a855f7');
+    } else if (type === 'shield') {
+      player.shield = true;
+      setHasShield(true);
+      audio.playShield();
+      spawnFloatingText(player.x, player.y - 12, 'SHIELD AKTIF!', '#06b6d4');
+    } else if (type === 'bomb') {
+      // Clear all enemies on screen
+      audio.playExplosion();
+      shakeRef.current = 14;
+      hitStopRef.current = 70;
+      enemiesRef.current.forEach(e => {
+        spawnParticles(e.x + e.w / 2, e.y + e.h / 2, e.color, 12);
+        scoreRef.current += e.points;
+      });
+      enemiesRef.current = [];
+      setScore(scoreRef.current);
+      onScoreUpdate(scoreRef.current);
+      spawnFloatingText(WIDTH / 2, HEIGHT / 2, 'EMP BOMB DETONATED!', '#ef4444');
+    } else {
+      player.weapon = 'dual';
+      player.weaponTimer = 10000;
+      setWeaponType('dual');
+      spawnFloatingText(player.x, player.y - 12, 'DUAL LASERS!', '#38bdf8');
+    }
+  };
+
+  const handlePlayerDamage = () => {
+    const player = playerRef.current;
 
     if (player.shield) {
-      player.shield = false; // consume shield instead of life
-      shakeRef.current = 10;
-      floatingTextsRef.current.push({
-        x: player.x,
-        y: player.y - 12,
-        text: "SHIELD DOWN!",
-        color: '#ef4444',
-        alpha: 1.0,
-        vy: -0.6
-      });
+      player.shield = false;
+      setHasShield(false);
+      player.invincibleTimer = 1200;
+      audio.playShield();
+      shakeRef.current = 6;
+      spawnFloatingText(player.x, player.y - 10, 'SHIELD ABSORBED!', '#06b6d4');
       return;
     }
 
+    audio.playHit();
+    shakeRef.current = 12;
+    hitStopRef.current = 60;
+    inputManager.vibrateGamepad(180, 0.7);
+
     const nextLives = livesRef.current - 1;
+    livesRef.current = nextLives;
     setLives(nextLives);
-    shakeRef.current = 16;
-    
+    player.invincibleTimer = 1800; // 1.8s invincibility flash
+
     if (nextLives <= 0) {
-      setIsPlaying(false);
-      setGameOver(true);
-      shakeRef.current = 25;
-      audio.playGameOver();
+      setGameState('gameover');
+      audio.playExplosion();
       onGameOver(scoreRef.current);
     }
   };
 
-  const createExplosionParticles = (x: number, y: number, color: string) => {
-    const quality = localStorage.getItem('zigame-graphics') || 'high';
-    const pCount = quality === 'low' ? 3 : quality === 'medium' ? 7 : 15;
-    for (let i = 0; i < pCount; i++) {
-      particlesRef.current.push({
-        x,
-        y,
-        vx: (Math.random() - 0.5) * 6,
-        vy: (Math.random() - 0.5) * 6,
-        color,
-        radius: Math.random() * 3 + 1,
-        alpha: 1.0,
-        decay: Math.random() * 0.04 + 0.02,
-      });
+  const checkWaveProgress = () => {
+    const nextWaveThreshold = waveRef.current * 180;
+    if (scoreRef.current >= nextWaveThreshold && waveRef.current < 8) {
+      const nextWave = waveRef.current + 1;
+      waveRef.current = nextWave;
+      setWave(nextWave);
+      warpSpeedRef.current = 4.5; // Warp speed hyperdrive effect!
+      audio.playLevelUp();
+      shakeRef.current = 8;
+      spawnFloatingText(WIDTH / 2, HEIGHT / 2, `GELOMBANG ${nextWave}!`, '#a855f7');
     }
   };
 
-  const createWaveParticles = () => {
-    const quality = localStorage.getItem('zigame-graphics') || 'high';
-    const pCount = quality === 'low' ? 6 : quality === 'medium' ? 15 : 30;
-    for (let i = 0; i < pCount; i++) {
-      particlesRef.current.push({
-        x: WIDTH / 2,
-        y: HEIGHT / 2,
-        vx: Math.cos(i * (Math.PI * 2 / pCount)) * 5,
-        vy: Math.sin(i * (Math.PI * 2 / pCount)) * 5,
-        color: '#a855f7',
-        radius: Math.random() * 4 + 1.5,
-        alpha: 1.0,
-        decay: 0.025,
-      });
-    }
-  };
-
-  const updateParticles = () => {
-    particlesRef.current = particlesRef.current
-      .map(p => {
-        p.x += p.vx;
-        p.y += p.vy;
-        p.alpha -= p.decay;
-        return p;
-      })
-      .filter(p => p.alpha > 0);
-
-    floatingTextsRef.current = floatingTextsRef.current
-      .map(t => {
-        t.y += t.vy;
-        t.alpha -= 0.025;
-        return t;
-      })
-      .filter(t => t.alpha > 0);
-  };
-
-  const startGame = () => {
-    audio.playCoin();
-    setScore(0);
-    setLives(3);
-    setWave(1);
-    setGameOver(false);
-    bulletsRef.current = [];
-    enemiesRef.current = [];
-    particlesRef.current = [];
-    playerRef.current = {
-      x: 40,
-      y: 180,
-      w: 24,
-      h: 20,
-      speed: 5.5,
-      lastShot: 0,
-      shield: false,
-    };
-    
-    // Explicitly update refs to ensure synchronous start
-    isPlayingRef.current = true;
-    gameOverRef.current = false;
-    setIsPlaying(true);
-
-    if (gameLoopRef.current) cancelAnimationFrame(gameLoopRef.current);
-    gameLoopRef.current = requestAnimationFrame(gameStep);
-  };
-
-  const toggleSound = () => {
-    audio.toggleMute();
-    setMuted(audio.getMuteState());
-  };
-
-  // Canvas static
   const drawStatic = () => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    ctx.clearRect(0, 0, WIDTH, HEIGHT);
-    ctx.fillStyle = '#09090b';
-    ctx.fillRect(0, 0, WIDTH, HEIGHT);
-
-    ctx.fillStyle = '#6366f1';
-    ctx.font = '14px "Press Start 2P", monospace';
-    ctx.textAlign = 'center';
-    ctx.shadowBlur = 10;
-    ctx.shadowColor = '#6366f1';
-    ctx.fillText('TEKAN MULAI UNTUK MAIN', WIDTH / 2, HEIGHT / 2);
-    ctx.shadowBlur = 0;
+    draw();
   };
 
-  const render = () => {
+  const draw = () => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    const quality = localStorage.getItem('zigame-graphics') || 'high';
-    const dpr = quality === 'low' ? 1.0 : quality === 'medium' ? 1.5 : Math.max(window.devicePixelRatio || 2, 2.5);
-
-    const targetWidth = Math.round(WIDTH * dpr);
-    const targetHeight = Math.round(HEIGHT * dpr);
-    if (canvas.width !== targetWidth || canvas.height !== targetHeight) {
-      canvas.width = targetWidth;
-      canvas.height = targetHeight;
-    }
-
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.scale(dpr, dpr);
-
     ctx.save();
+
+    // Decaying Screen Shake
     if (shakeRef.current > 0) {
-      const dx = (Math.random() - 0.5) * shakeRef.current;
-      const dy = (Math.random() - 0.5) * shakeRef.current;
-      ctx.translate(dx, dy);
-      shakeRef.current *= 0.85;
-      if (shakeRef.current < 0.5) shakeRef.current = 0;
+      const sx = (Math.random() - 0.5) * shakeRef.current;
+      const sy = (Math.random() - 0.5) * shakeRef.current;
+      ctx.translate(sx, sy);
+      shakeRef.current = Math.max(0, shakeRef.current - 0.4);
     }
 
-    const enableShadows = quality !== 'low';
-    const enableNebula = quality !== 'low';
-    const shadowScale = quality === 'medium' ? 0.4 : 1.0;
-
-    const setShadow = (blur: number, color: string) => {
-      if (!enableShadows) {
-        ctx.shadowBlur = 0;
-        return;
-      }
-      ctx.shadowBlur = blur * shadowScale;
-      ctx.shadowColor = color;
-    };
-
-    // Space Deep Dark Background with Glowing Cosmic Nebulas
-    ctx.fillStyle = '#030208';
+    // Deep Space Background
+    ctx.fillStyle = '#06080d';
     ctx.fillRect(0, 0, WIDTH, HEIGHT);
 
-    if (enableNebula) {
-      // Nebula cloud 1 (Deep Purple Glow)
-      const nebGrad1 = ctx.createRadialGradient(WIDTH * 0.25, HEIGHT * 0.3, 20, WIDTH * 0.25, HEIGHT * 0.3, 160);
-      nebGrad1.addColorStop(0, 'rgba(124, 58, 237, 0.13)'); // violet
-      nebGrad1.addColorStop(1, 'rgba(0, 0, 0, 0)');
-      ctx.fillStyle = nebGrad1;
-      ctx.fillRect(0, 0, WIDTH, HEIGHT);
-
-      // Nebula cloud 2 (Deep Cyan Glow)
-      const nebGrad2 = ctx.createRadialGradient(WIDTH * 0.75, HEIGHT * 0.7, 10, WIDTH * 0.75, HEIGHT * 0.7, 140);
-      nebGrad2.addColorStop(0, 'rgba(6, 182, 212, 0.12)'); // cyan
-      nebGrad2.addColorStop(1, 'rgba(0, 0, 0, 0)');
-      ctx.fillStyle = nebGrad2;
-      ctx.fillRect(0, 0, WIDTH, HEIGHT);
-    }
-
-    // Starfield Draw (Desynchronized Twinkling Stars)
-    starsRef.current.forEach((star, idx) => {
-      const twinkle = 0.4 + 0.6 * Math.sin((Date.now() / 320) + idx * 7);
-      ctx.fillStyle = '#ffffff';
-      ctx.globalAlpha = (star.speed / 2.5) * twinkle;
-      ctx.beginPath();
-      ctx.arc(star.x, star.y, star.size, 0, Math.PI * 2);
-      ctx.fill();
+    // Starfield
+    starsRef.current.forEach(s => {
+      ctx.fillStyle = `rgba(255, 255, 255, ${s.brightness})`;
+      if (warpSpeedRef.current > 1.2) {
+        // Warp streak line
+        ctx.strokeStyle = '#818cf8';
+        ctx.lineWidth = s.size;
+        ctx.beginPath();
+        ctx.moveTo(s.x, s.y);
+        ctx.lineTo(s.x + s.speed * warpSpeedRef.current * 3, s.y);
+        ctx.stroke();
+      } else {
+        ctx.beginPath();
+        ctx.arc(s.x, s.y, s.size, 0, Math.PI * 2);
+        ctx.fill();
+      }
     });
-    ctx.globalAlpha = 1.0; // reset
 
-    // Draw Space Ship (Player)
-    const p = playerRef.current;
-    ctx.save();
-    ctx.translate(p.x, p.y);
-
-    // Engine flame with high-fidelity gradient + heat distortion sparks
-    const flameSize = 13 + Math.random() * 8;
-    const flameGrad = ctx.createLinearGradient(0, p.h / 2, -flameSize, p.h / 2);
-    flameGrad.addColorStop(0, '#a5f3fc'); // bright white-cyan core
-    flameGrad.addColorStop(0.3, '#3b82f6'); // blue
-    flameGrad.addColorStop(0.7, '#8b5cf6'); // violet
-    flameGrad.addColorStop(1, 'rgba(139, 92, 246, 0)'); // fade out
-    ctx.fillStyle = flameGrad;
-    setShadow(18, '#3b82f6');
-    ctx.beginPath();
-    ctx.moveTo(-2, p.h / 2 - 4.5);
-    ctx.lineTo(-flameSize, p.h / 2);
-    ctx.lineTo(-2, p.h / 2 + 4.5);
-    ctx.closePath();
-    ctx.fill();
-
-    // Ship Body (glowing futuristic fighter shape with dual tone styling)
-    ctx.fillStyle = '#6366f1';
-    setShadow(15, '#6366f1');
-    ctx.beginPath();
-    ctx.moveTo(0, 4);
-    ctx.lineTo(p.w - 3, p.h / 2);
-    ctx.lineTo(0, p.h - 4);
-    ctx.lineTo(4, p.h / 2);
-    ctx.closePath();
-    ctx.fill();
-
-    // Side Wings (neon cyan accents)
-    ctx.fillStyle = '#06b6d4';
-    setShadow(10, '#06b6d4');
-    ctx.fillRect(2, 0, 4, p.h);
-    ctx.shadowBlur = 0;
-
-    // Cockpit
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(10, p.h / 2 - 2, 4, 4);
-
-    ctx.restore();
-
-    // Glowing protective shield around ship
-    if (p.shield) {
-      ctx.strokeStyle = '#38bdf8';
-      ctx.lineWidth = 2.5;
-      setShadow(15, '#38bdf8');
-      ctx.beginPath();
-      ctx.arc(p.x + p.w / 2, p.y + p.h / 2, p.w * 0.9, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.shadowBlur = 0;
-    }
-
-    // Draw Bullets (Indigo Lasers)
+    // Bullets
     bulletsRef.current.forEach(b => {
       ctx.fillStyle = b.color;
-      setShadow(12, b.color);
       ctx.beginPath();
-      ctx.ellipse(b.x, b.y, b.radius * 1.8, b.radius * 0.7, 0, 0, Math.PI * 2);
+      ctx.arc(b.x, b.y, b.radius, 0, Math.PI * 2);
       ctx.fill();
+
+      // Laser tail
+      ctx.strokeStyle = b.color;
+      ctx.lineWidth = b.radius * 1.5;
+      ctx.beginPath();
+      ctx.moveTo(b.x, b.y);
+      ctx.lineTo(b.x - (b.isEnemy ? -8 : 10), b.y);
+      ctx.stroke();
     });
 
-    // Draw Aliens / Enemies
-    enemiesRef.current.forEach(enemy => {
-      ctx.fillStyle = enemy.color;
-      setShadow(10, enemy.color);
+    // Enemies
+    enemiesRef.current.forEach(e => {
+      ctx.fillStyle = e.color;
+      ctx.beginPath();
+      ctx.moveTo(e.x, e.y + e.h / 2);
+      ctx.lineTo(e.x + e.w, e.y);
+      ctx.lineTo(e.x + e.w * 0.7, e.y + e.h / 2);
+      ctx.lineTo(e.x + e.w, e.y + e.h);
+      ctx.closePath();
+      ctx.fill();
 
-      ctx.save();
-      ctx.translate(enemy.x, enemy.y);
+      // Cockpit glow
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(e.x + 4, e.y + e.h / 2 - 2, 4, 4);
 
-      // Draw custom pixel invaders shapes
-      if (enemy.type === 'tank') {
-        // heavy blocky alien ship
-        ctx.fillRect(0, 4, enemy.w, enemy.h - 8);
-        ctx.fillRect(4, 0, enemy.w - 8, enemy.h);
-        ctx.fillStyle = '#f43f5e'; // glowing eye
-        ctx.fillRect(4, enemy.h / 2 - 2, 4, 4);
-      } else if (enemy.type === 'speedy') {
-        // sleek agile dart alien
-        ctx.beginPath();
-        ctx.moveTo(enemy.w, enemy.h / 2);
-        ctx.lineTo(0, 0);
-        ctx.lineTo(4, enemy.h / 2);
-        ctx.lineTo(0, enemy.h);
-        ctx.closePath();
-        ctx.fill();
-      } else {
-        // classic pixel invader crab
-        ctx.fillRect(4, 0, enemy.w - 8, enemy.h);
-        ctx.fillRect(0, 4, 4, enemy.h - 8);
-        ctx.fillRect(enemy.w - 4, 4, 4, enemy.h - 8);
-        // tentacles
-        ctx.fillRect(2, enemy.h - 3, 2, 3);
-        ctx.fillRect(enemy.w - 4, enemy.h - 3, 2, 3);
+      // HP Bar for tank/commander
+      if (e.maxHealth > 1) {
+        const hpPct = e.health / e.maxHealth;
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.2)';
+        ctx.fillRect(e.x, e.y - 6, e.w, 3);
+        ctx.fillStyle = '#ef4444';
+        ctx.fillRect(e.x, e.y - 6, e.w * hpPct, 3);
       }
-
-      ctx.restore();
     });
 
-    // Draw explosion and wave-up particles
-    ctx.shadowBlur = 0;
+    // Powerups
+    powerupsRef.current.forEach(pu => {
+      ctx.fillStyle = pu.color;
+      ctx.beginPath();
+      ctx.roundRect(pu.x, pu.y, 20, 16, 4);
+      ctx.fill();
+
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 8px monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText(pu.label[0], pu.x + 10, pu.y + 11);
+    });
+
+    // Player Ship (with Invincibility flashing)
+    const player = playerRef.current;
+    const isFlashing = player.invincibleTimer > 0 && Math.floor(player.invincibleTimer / 100) % 2 === 0;
+
+    if (!isFlashing) {
+      // Ship Hull
+      ctx.fillStyle = '#6366f1';
+      ctx.beginPath();
+      ctx.moveTo(player.x + player.w, player.y + player.h / 2);
+      ctx.lineTo(player.x, player.y);
+      ctx.lineTo(player.x + 5, player.y + player.h / 2);
+      ctx.lineTo(player.x, player.y + player.h);
+      ctx.closePath();
+      ctx.fill();
+
+      // Cockpit
+      ctx.fillStyle = '#38bdf8';
+      ctx.beginPath();
+      ctx.arc(player.x + player.w * 0.6, player.y + player.h / 2, 3.5, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Shield Aura
+      if (player.shield) {
+        ctx.strokeStyle = '#06b6d4';
+        ctx.lineWidth = 2.5;
+        ctx.beginPath();
+        ctx.arc(player.x + player.w / 2, player.y + player.h / 2, player.w * 0.85, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+    }
+
+    // Particles
     particlesRef.current.forEach(p => {
       ctx.fillStyle = p.color;
       ctx.globalAlpha = p.alpha;
       ctx.beginPath();
-      ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
+      ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
       ctx.fill();
     });
-    ctx.globalAlpha = 1.0;
+    ctx.globalAlpha = 1;
 
-    // Draw floating texts
+    // Floating Texts
     floatingTextsRef.current.forEach(t => {
       ctx.fillStyle = t.color;
       ctx.globalAlpha = t.alpha;
-      ctx.font = 'bold 9px "Press Start 2P", monospace';
+      ctx.font = 'bold 11px monospace';
       ctx.textAlign = 'center';
       ctx.fillText(t.text, t.x, t.y);
     });
-    ctx.globalAlpha = 1.0;
+    ctx.globalAlpha = 1;
 
     ctx.restore();
   };
 
-  const getGameState = () => {
-    if (!isPlaying && score === 0 && wave === 1) return 'ready';
-    if (!isPlaying) return 'gameover';
-    return 'playing';
-  };
+  // Direct Touch / Pointer control for mobile
+  const handlePointerMove = (e: React.PointerEvent) => {
+    if (gameStateRef.current !== 'playing') return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
 
-  const handleDirection = (dir: 'up' | 'down' | 'left' | 'right') => {
-    // Only support up/down movement in MobileControls for this game (or we can use all directions)
-    // The previous mobile controls used separate up/down/shoot buttons.
-    // We'll update state variables directly since they are refs used in loop.
-    activeKeysRef.current['ArrowUp'] = dir === 'up';
-    activeKeysRef.current['ArrowDown'] = dir === 'down';
-    activeKeysRef.current['ArrowLeft'] = dir === 'left';
-    activeKeysRef.current['ArrowRight'] = dir === 'right';
+    const rect = canvas.getBoundingClientRect();
+    const clientX = e.clientX - rect.left;
+    const clientY = e.clientY - rect.top;
+    const scaleX = WIDTH / rect.width;
+    const scaleY = HEIGHT / rect.height;
 
-    // Need to reset after a small delay because MobileControls sends a single event
-    setTimeout(() => {
-      activeKeysRef.current['ArrowUp'] = false;
-      activeKeysRef.current['ArrowDown'] = false;
-      activeKeysRef.current['ArrowLeft'] = false;
-      activeKeysRef.current['ArrowRight'] = false;
-    }, 100);
-  };
+    const targetX = clientX * scaleX - playerRef.current.w / 2;
+    const targetY = clientY * scaleY - playerRef.current.h / 2;
 
-  const handleAction = () => {
-    triggerFireLaser();
+    playerRef.current.x = Math.max(10, Math.min(WIDTH / 2, targetX));
+    playerRef.current.y = Math.max(10, Math.min(HEIGHT - playerRef.current.h - 10, targetY));
+
+    // Touch auto-fire
+    triggerLaser(performance.now());
   };
 
   return (
-    <div className="relative flex flex-col h-full w-full min-h-0 items-center justify-center overflow-hidden p-2 bg-[#090b10]">
-      {/* Clean HUD Bar */}
-      <div className="w-full flex-none flex justify-between items-center mb-2 px-3 text-xs">
-        <div className="text-zinc-400 font-medium">
-          Gelombang: <span className="text-indigo-400 font-semibold">{wave}</span>
+    <div 
+      ref={containerRef}
+      className="relative flex flex-col h-full w-full min-h-0 items-center justify-center overflow-hidden p-2 bg-[#090b10]"
+    >
+      {/* Dynamic Flight HUD */}
+      <div className="w-full max-w-[450px] flex-none flex justify-between items-center mb-2 px-3 py-1 bg-[#121622]/80 border border-white/[0.06] rounded-xl text-xs font-mono">
+        <div className="flex items-center gap-1.5">
+          <span className="text-zinc-400">WAVE:</span>
+          <span className="text-indigo-400 font-bold">{wave}</span>
         </div>
-        <div className="text-zinc-400 font-medium">
-          Nyawa: <span className="text-rose-400 font-semibold">{'❤️'.repeat(Math.max(0, lives))}</span>
+
+        <div className="flex items-center gap-1">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <span key={i} className={`text-xs ${i < lives ? 'text-rose-500' : 'text-zinc-700'}`}>
+              ❤️
+            </span>
+          ))}
         </div>
-        <div className="text-zinc-400 font-medium">
-          Skor: <span className="text-white font-bold">{score}</span>
+
+        {combo > 1 && (
+          <div className="flex items-center gap-1 text-amber-400 font-bold animate-pulse">
+            <Sparkles size={12} />
+            <span>{combo}x</span>
+          </div>
+        )}
+
+        {hasShield && (
+          <div className="flex items-center gap-1 text-cyan-400 font-bold">
+            <Shield size={12} />
+            <span>SHIELD</span>
+          </div>
+        )}
+
+        {weaponType !== 'single' && (
+          <span className="px-1.5 py-0.5 bg-indigo-500/20 text-indigo-300 text-[10px] rounded font-bold uppercase">
+            {weaponType}
+          </span>
+        )}
+
+        <div className="flex items-center gap-1.5">
+          <span className="text-zinc-400">SKOR:</span>
+          <span className="text-white font-bold">{score}</span>
         </div>
       </div>
 
-      {/* Canvas Wrapper */}
+      {/* Canvas Stage */}
       <div 
-        ref={containerRef}
-        className="relative flex-1 min-h-0 w-full flex items-center justify-center bg-[#090b10] rounded-2xl border border-white/[0.08] shadow-inner overflow-hidden"
+        className="relative flex-1 min-h-0 w-full max-w-[450px] max-h-[400px] flex items-center justify-center bg-[#06080d] rounded-2xl border border-white/[0.08] shadow-2xl overflow-hidden touch-none"
+        onPointerMove={handlePointerMove}
+        onPointerDown={handlePointerMove}
       >
         <canvas
           ref={canvasRef}
           width={WIDTH}
           height={HEIGHT}
-          className="max-w-full max-h-full object-contain block bg-[#090b10]"
+          className="w-full h-full object-contain block cursor-crosshair select-none"
         />
 
-        {/* Space wave transition banner */}
-        {isPlaying && particlesRef.current.some(p => p.color === '#a855f7' && p.decay === 0.025) && (
-          <div className="absolute inset-x-0 top-1/3 text-center pointer-events-none animate-in fade-in duration-200">
-            <div className="text-indigo-300 font-bold text-lg tracking-tight">
-              Gelombang {wave}
-            </div>
-            <p className="text-zinc-400 text-xs mt-0.5">Kecepatan alien bertambah!</p>
-          </div>
-        )}
-
         <GameOverlay
-          gameState={getGameState()}
+          gameState={gameState}
+          countdown={countdown}
           score={score}
           highScore={highScore}
           onStart={startGame}
           onRestart={startGame}
-          instructions="Kemudikan pesawat tempur dengan tombol panah/WASD dan tekan SPASI untuk menembak armada alien!"
+          instructions="Kemudikan pesawat tempur dengan WASD / tombol panah dan tahan SPASI untuk menembak armada alien!"
         />
       </div>
-
-      {/* Mobile Controls outside canvas */}
-      {isPlaying && (
-        <div className="flex-none mt-2 w-full">
-          <MobileControls onDirection={handleDirection} onAction={handleAction} actionLabel="TEMBAK" />
-        </div>
-      )}
     </div>
   );
 }

@@ -173,23 +173,44 @@ export function useGameEngine({
     if (onRestart) onRestart();
   }, [onRestart, stopLoop]);
 
+  const countdownTimerRef = useRef<NodeJS.Timeout | null>(null);
+
   // Start with countdown
   const startWithCountdown = useCallback((onCountdownEnd?: () => void) => {
+    if (countdownTimerRef.current) {
+      clearInterval(countdownTimerRef.current);
+      countdownTimerRef.current = null;
+    }
     setGameState('countdown');
     setCountdown(3);
     setScore(0);
+    audio.playCountdownTick();
 
     let current = 3;
-    const timer = setInterval(() => {
+    countdownTimerRef.current = setInterval(() => {
       current--;
       if (current > 0) {
         setCountdown(current);
+        audio.playCountdownTick();
       } else {
-        clearInterval(timer);
+        if (countdownTimerRef.current) {
+          clearInterval(countdownTimerRef.current);
+          countdownTimerRef.current = null;
+        }
+        audio.playCountdownGo();
         setGameState('playing');
         if (onCountdownEnd) onCountdownEnd();
       }
-    }, 1000);
+    }, 800);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (countdownTimerRef.current) {
+        clearInterval(countdownTimerRef.current);
+        countdownTimerRef.current = null;
+      }
+    };
   }, []);
 
   // DPR capping canvas initializer with adaptive performance profile

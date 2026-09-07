@@ -1,8 +1,8 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { audio } from '../../utils/audio';
-import { Particle } from '../../types';
+import { inputManager } from '../../services/inputService';
 import { GameOverlay } from '../gameplay/GameOverlay';
-import { ArrowUp, ArrowDown } from 'lucide-react';
+import { Sparkles, Trophy, Flame } from 'lucide-react';
 
 interface NeonPongGameProps {
   onGameOver: (score: number) => void;
@@ -10,159 +10,187 @@ interface NeonPongGameProps {
   highScore: number;
 }
 
+interface Particle {
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  size: number;
+  color: string;
+  alpha: number;
+  decay: number;
+}
+
+interface FloatingText {
+  x: number;
+  y: number;
+  text: string;
+  color: string;
+  alpha: number;
+  vy: number;
+}
+
+const CANVAS_WIDTH = 600;
+const CANVAS_HEIGHT = 340;
+const PADDLE_WIDTH = 12;
+const PADDLE_HEIGHT = 65;
+const BALL_SIZE = 8;
+const MAX_BALL_SPEED = 12;
+
 export default function NeonPongGame({ onGameOver, onScoreUpdate, highScore }: NeonPongGameProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
 
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [score, setScore] = useState(0);
-  const gameLoopRef = useRef<number | null>(null);
-  const scoreRef = useRef(0);
-  const [opponentScore, setOpponentScore] = useState(0);
-  const [gameOver, setGameOver] = useState(false);
-  const isPlayingRef = useRef(false);
-  const gameOverRef = useRef(false);
+  const [gameState, setGameState] = useState<'ready' | 'countdown' | 'playing' | 'paused' | 'gameover'>('ready');
+  const [countdown, setCountdown] = useState(3);
+  const [playerScore, setPlayerScore] = useState(0);
+  const [botScore, setBotScore] = useState(0);
+  const [rallyStreak, setRallyStreak] = useState(0);
 
+  const gameStateRef = useRef(gameState);
+  const playerScoreRef = useRef(0);
+  const botScoreRef = useRef(0);
+  const rallyRef = useRef(0);
+  const gameLoopRef = useRef<number | null>(null);
+  const lastTimeRef = useRef<number>(0);
+  const shakeRef = useRef<number>(0);
+  const hitStopRef = useRef<number>(0);
 
   useEffect(() => {
-    isPlayingRef.current = isPlaying;
-    gameOverRef.current = gameOver;
-    scoreRef.current = score;
-  }, [isPlaying, gameOver, score]);
-  const [muted, setMuted] = useState(audio.getMuteState());
+    gameStateRef.current = gameState;
+  }, [gameState]);
 
-  // Game settings
-  const CANVAS_WIDTH = 600;
-  const CANVAS_HEIGHT = 300;
-  const PADDLE_WIDTH = 10;
-  const PADDLE_HEIGHT = 60;
-  const BALL_SIZE = 8;
-
+  // Paddles & Ball
   const playerYRef = useRef((CANVAS_HEIGHT - PADDLE_HEIGHT) / 2);
+  const playerTargetYRef = useRef((CANVAS_HEIGHT - PADDLE_HEIGHT) / 2);
+  const playerPrevYRef = useRef((CANVAS_HEIGHT - PADDLE_HEIGHT) / 2);
+
   const opponentYRef = useRef((CANVAS_HEIGHT - PADDLE_HEIGHT) / 2);
+
   const ballRef = useRef({
     x: CANVAS_WIDTH / 2,
     y: CANVAS_HEIGHT / 2,
-    vx: 3,
-    vy: 2,
-    speed: 4,
+    vx: 4.5,
+    vy: 2.2,
+    speed: 4.8,
   });
 
   const particlesRef = useRef<Particle[]>([]);
-  const shakeRef = useRef<number>(0);
-  const floatingTextsRef = useRef<{ x: number; y: number; text: string; color: string; alpha: number; vy: number }[]>([]);
+  const floatingTextsRef = useRef<FloatingText[]>([]);
   const trailsRef = useRef<{ x: number; y: number; color: string }[]>([]);
-  const lastTimeRef = useRef<number>(0);
+  const activeKeysRef = useRef<{ [key: string]: boolean }>({});
 
-  // Control keys
-  const keysPressedRef = useRef<{ [key: string]: boolean }>({});
-
+  // Auto-pause when tab hidden
   useEffect(() => {
-    drawStatic();
-    return () => {
-      if (gameLoopRef.current) cancelAnimationFrame(gameLoopRef.current);
+    const handleVis = () => {
+      if (document.hidden && gameStateRef.current === 'playing') {
+        setGameState('paused');
+      }
     };
+    document.addEventListener('visibilitychange', handleVis);
+    return () => document.removeEventListener('visibilitychange', handleVis);
   }, []);
 
-  const drawStatic = () => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    // Clear background
-    ctx.fillStyle = '#09090b';
-    ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
-
-    // Decorative neon net divider
-    ctx.strokeStyle = '#1e1b4b';
-    ctx.lineWidth = 2;
-    ctx.setLineDash([10, 10]);
-    ctx.beginPath();
-    ctx.moveTo(CANVAS_WIDTH / 2, 0);
-    ctx.lineTo(CANVAS_WIDTH / 2, CANVAS_HEIGHT);
-    ctx.stroke();
-    ctx.setLineDash([]); // Reset
-
-    // Draw Title Text
-    ctx.fillStyle = '#ffffff';
-    ctx.font = "bold 20px 'Space Grotesk', sans-serif";
-    ctx.textAlign = 'center';
-    ctx.fillText('NEON PONG ARCADE', CANVAS_WIDTH / 2, 110);
-
-    ctx.fillStyle = '#3b82f6';
-    ctx.font = "12px 'JetBrains Mono', monospace";
-    ctx.fillText('PANTULKAN BOLA & KALAHKAN BOT CYBER', CANVAS_WIDTH / 2, 135);
-
-    ctx.fillStyle = '#71717a';
-    ctx.font = "11px 'JetBrains Mono', monospace";
-    ctx.fillText('Gunakan PANAH ATAS / BAWAH untuk Mengontrol Paddle', CANVAS_WIDTH / 2, 170);
-    ctx.fillText('Skor bertambah jika Anda memenangkan satu putaran', CANVAS_WIDTH / 2, 190);
-  };
-
-  const startNewGame = () => {
-    audio.playCoin();
-    
-    // Explicitly update ref states to guarantee synchronous start
-    isPlayingRef.current = true;
-    gameOverRef.current = false;
-    
-    setIsPlaying(true);
-    setGameOver(false);
-    setScore(0);
-    setOpponentScore(0);
-    onScoreUpdate(0);
-
-    // Reset paddles and ball
-    playerYRef.current = (CANVAS_HEIGHT - PADDLE_HEIGHT) / 2;
-    opponentYRef.current = (CANVAS_HEIGHT - PADDLE_HEIGHT) / 2;
-    resetBall(true); // Player serves first
-
-    particlesRef.current = [];
-    lastTimeRef.current = performance.now();
-
-    if (gameLoopRef.current) cancelAnimationFrame(gameLoopRef.current);
-    gameLoopRef.current = requestAnimationFrame(update);
-  };
-
-  const resetBall = (toPlayer: boolean) => {
-    ballRef.current = {
-      x: CANVAS_WIDTH / 2,
-      y: CANVAS_HEIGHT / 2,
-      vx: toPlayer ? -3.5 : 3.5,
-      vy: (Math.random() - 0.5) * 4,
-      speed: 4.5,
-    };
-  };
-
-  const createHitParticles = (x: number, y: number, color: string) => {
-    for (let i = 0; i < 15; i++) {
+  const spawnParticles = (x: number, y: number, color: string, count = 12, speed = 3) => {
+    for (let i = 0; i < count; i++) {
+      const angle = (Math.PI * 2 * i) / count + (Math.random() - 0.5);
+      const spd = Math.random() * speed + 1;
       particlesRef.current.push({
         x,
         y,
-        vx: (Math.random() - 0.5) * 6,
-        vy: (Math.random() - 0.5) * 6,
+        vx: Math.cos(angle) * spd,
+        vy: Math.sin(angle) * spd,
+        size: Math.random() * 2.5 + 1.5,
         color,
-        radius: Math.random() * 2.5 + 1,
-        alpha: 1,
-        decay: Math.random() * 0.05 + 0.03,
+        alpha: 1.0,
+        decay: 0.04 + Math.random() * 0.02,
       });
     }
   };
 
+  const spawnFloatingText = (x: number, y: number, text: string, color = '#fbbf24') => {
+    floatingTextsRef.current.push({
+      x,
+      y,
+      text,
+      color,
+      alpha: 1.0,
+      vy: -1.0,
+    });
+  };
+
+  const resetBall = (toPlayer: boolean) => {
+    const angle = (Math.random() - 0.5) * (Math.PI / 4);
+    const speed = 4.8;
+    ballRef.current = {
+      x: CANVAS_WIDTH / 2,
+      y: CANVAS_HEIGHT / 2,
+      vx: (toPlayer ? -1 : 1) * speed * Math.cos(angle),
+      vy: speed * Math.sin(angle),
+      speed,
+    };
+    rallyRef.current = 0;
+    setRallyStreak(0);
+  };
+
+  const resetGame = useCallback(() => {
+    playerScoreRef.current = 0;
+    botScoreRef.current = 0;
+    setPlayerScore(0);
+    setBotScore(0);
+    onScoreUpdate(0);
+    rallyRef.current = 0;
+    setRallyStreak(0);
+
+    playerYRef.current = (CANVAS_HEIGHT - PADDLE_HEIGHT) / 2;
+    opponentYRef.current = (CANVAS_HEIGHT - PADDLE_HEIGHT) / 2;
+    particlesRef.current = [];
+    floatingTextsRef.current = [];
+    trailsRef.current = [];
+
+    resetBall(true);
+    draw();
+  }, [onScoreUpdate]);
+
+  const startGame = useCallback(() => {
+    resetGame();
+    setGameState('countdown');
+    setCountdown(3);
+    audio.playCountdownTick();
+
+    let count = 3;
+    const interval = setInterval(() => {
+      count--;
+      if (count > 0) {
+        setCountdown(count);
+        audio.playCountdownTick();
+      } else {
+        clearInterval(interval);
+        audio.playCountdownGo();
+        setGameState('playing');
+        lastTimeRef.current = performance.now();
+        if (gameLoopRef.current) cancelAnimationFrame(gameLoopRef.current);
+        gameLoopRef.current = requestAnimationFrame(gameLoop);
+      }
+    }, 800);
+  }, [resetGame]);
+
   // Keyboard controls
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+      if (['ArrowUp', 'ArrowDown', 'KeyW', 'KeyS'].includes(e.code)) {
         e.preventDefault();
-        keysPressedRef.current[e.key] = true;
+        activeKeysRef.current[e.code] = true;
+      }
+      if (e.key === 'Escape' && gameStateRef.current === 'playing') {
+        setGameState('paused');
       }
     };
 
     const handleKeyUp = (e: KeyboardEvent) => {
-      if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+      if (['ArrowUp', 'ArrowDown', 'KeyW', 'KeyS'].includes(e.code)) {
         e.preventDefault();
-        keysPressedRef.current[e.key] = false;
+        activeKeysRef.current[e.code] = false;
       }
     };
 
@@ -174,346 +202,383 @@ export default function NeonPongGame({ onGameOver, onScoreUpdate, highScore }: N
     };
   }, []);
 
-  const movePaddle = (dir: 'up' | 'down') => {
-    const speed = 6;
-    if (dir === 'up') {
-      playerYRef.current = Math.max(0, playerYRef.current - speed);
-    } else {
-      playerYRef.current = Math.min(CANVAS_HEIGHT - PADDLE_HEIGHT, playerYRef.current + speed);
+  const gameLoop = (timestamp: number) => {
+    if (gameStateRef.current !== 'playing') return;
+
+    const dt = Math.min(timestamp - lastTimeRef.current, 100);
+    lastTimeRef.current = timestamp;
+
+    if (hitStopRef.current > 0) {
+      hitStopRef.current -= dt;
+      draw();
+      gameLoopRef.current = requestAnimationFrame(gameLoop);
+      return;
+    }
+
+    updatePhysics(dt);
+    draw();
+
+    if (gameStateRef.current === 'playing') {
+      gameLoopRef.current = requestAnimationFrame(gameLoop);
     }
   };
 
-  // Game Engine Frame
-  const update = (timestamp: number) => {
+  const updatePhysics = (dt: number) => {
+    const keys = activeKeysRef.current;
+    const speed = 7.0;
+
+    // Keyboard paddle movement
+    playerPrevYRef.current = playerYRef.current;
+    if (keys['ArrowUp'] || keys['KeyW']) {
+      playerYRef.current = Math.max(10, playerYRef.current - speed);
+    }
+    if (keys['ArrowDown'] || keys['KeyS']) {
+      playerYRef.current = Math.min(CANVAS_HEIGHT - PADDLE_HEIGHT - 10, playerYRef.current + speed);
+    }
+
+    // Ball movement
+    const ball = ballRef.current;
+    ball.x += ball.vx;
+    ball.y += ball.vy;
+
+    // Trails
+    if (Math.random() < 0.6) {
+      trailsRef.current.push({ x: ball.x, y: ball.y, color: '#38bdf8' });
+      if (trailsRef.current.length > 16) trailsRef.current.shift();
+    }
+
+    // Top & Bottom Wall Bounces
+    if (ball.y - BALL_SIZE / 2 <= 0) {
+      ball.y = BALL_SIZE / 2;
+      ball.vy = Math.abs(ball.vy);
+      audio.playReflect();
+      spawnParticles(ball.x, 0, '#38bdf8', 6);
+    } else if (ball.y + BALL_SIZE / 2 >= CANVAS_HEIGHT) {
+      ball.y = CANVAS_HEIGHT - BALL_SIZE / 2;
+      ball.vy = -Math.abs(ball.vy);
+      audio.playReflect();
+      spawnParticles(ball.x, CANVAS_HEIGHT, '#38bdf8', 6);
+    }
+
+    // AI Bot Movement (Realistic tracking with slight delay & speed cap)
+    const botCenter = opponentYRef.current + PADDLE_HEIGHT / 2;
+    const botSpeed = Math.min(5.2, 3.6 + rallyRef.current * 0.15);
+    if (ball.vx > 0) {
+      // Predict ball position
+      const diff = ball.y - botCenter;
+      if (Math.abs(diff) > 8) {
+        opponentYRef.current += Math.sign(diff) * botSpeed;
+      }
+    } else {
+      // Idle return to center
+      const centerDiff = CANVAS_HEIGHT / 2 - botCenter;
+      if (Math.abs(centerDiff) > 10) {
+        opponentYRef.current += Math.sign(centerDiff) * 2;
+      }
+    }
+    opponentYRef.current = Math.max(10, Math.min(CANVAS_HEIGHT - PADDLE_HEIGHT - 10, opponentYRef.current));
+
+    // Player Paddle Collision (Left side: x=25)
+    const playerX = 25;
+    if (
+      ball.x - BALL_SIZE / 2 <= playerX + PADDLE_WIDTH &&
+      ball.x + BALL_SIZE / 2 >= playerX &&
+      ball.y >= playerYRef.current &&
+      ball.y <= playerYRef.current + PADDLE_HEIGHT &&
+      ball.vx < 0
+    ) {
+      // Calculate dynamic reflection & spin from paddle movement
+      const hitRatio = (ball.y - (playerYRef.current + PADDLE_HEIGHT / 2)) / (PADDLE_HEIGHT / 2);
+      const paddleVelocity = (playerYRef.current - playerPrevYRef.current) * 0.2;
+
+      rallyRef.current += 1;
+      setRallyStreak(rallyRef.current);
+
+      const newSpeed = Math.min(MAX_BALL_SPEED, ball.speed + 0.35);
+      ball.speed = newSpeed;
+
+      const angle = hitRatio * (Math.PI / 3) + paddleVelocity;
+      ball.vx = Math.abs(Math.cos(angle) * newSpeed);
+      ball.vy = Math.sin(angle) * newSpeed;
+      ball.x = playerX + PADDLE_WIDTH + BALL_SIZE / 2;
+
+      audio.playReflect();
+      inputManager.vibrateGamepad(50, 0.4);
+      shakeRef.current = Math.min(6, 2 + rallyRef.current * 0.4);
+      hitStopRef.current = rallyRef.current >= 5 ? 40 : 0;
+
+      spawnParticles(ball.x, ball.y, '#10b981', 12);
+      if (rallyRef.current >= 4) {
+        spawnFloatingText(ball.x + 30, ball.y, `RALLY x${rallyRef.current}!`, '#38bdf8');
+      }
+    }
+
+    // Opponent Paddle Collision (Right side: x=CANVAS_WIDTH - 25 - PADDLE_WIDTH)
+    const oppX = CANVAS_WIDTH - 25 - PADDLE_WIDTH;
+    if (
+      ball.x + BALL_SIZE / 2 >= oppX &&
+      ball.x - BALL_SIZE / 2 <= oppX + PADDLE_WIDTH &&
+      ball.y >= opponentYRef.current &&
+      ball.y <= opponentYRef.current + PADDLE_HEIGHT &&
+      ball.vx > 0
+    ) {
+      const hitRatio = (ball.y - (opponentYRef.current + PADDLE_HEIGHT / 2)) / (PADDLE_HEIGHT / 2);
+      rallyRef.current += 1;
+      setRallyStreak(rallyRef.current);
+
+      const newSpeed = Math.min(MAX_BALL_SPEED, ball.speed + 0.35);
+      ball.speed = newSpeed;
+
+      const angle = hitRatio * (Math.PI / 3);
+      ball.vx = -Math.abs(Math.cos(angle) * newSpeed);
+      ball.vy = Math.sin(angle) * newSpeed;
+      ball.x = oppX - BALL_SIZE / 2;
+
+      audio.playReflect();
+      spawnParticles(ball.x, ball.y, '#f43f5e', 10);
+    }
+
+    // Scoring conditions
+    // Player scores (ball passes right wall)
+    if (ball.x - BALL_SIZE / 2 > CANVAS_WIDTH) {
+      audio.playCoin();
+      shakeRef.current = 6;
+      hitStopRef.current = 50;
+      inputManager.vibrateGamepad(100, 0.5);
+
+      const rallyBonus = Math.max(1, Math.floor(rallyRef.current / 2));
+      const points = 10 + rallyBonus * 5;
+      const nextScore = playerScoreRef.current + points;
+      playerScoreRef.current = nextScore;
+      setPlayerScore(nextScore);
+      onScoreUpdate(nextScore);
+
+      spawnFloatingText(CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2, `+${points} POINT!`, '#10b981');
+      spawnParticles(CANVAS_WIDTH - 20, ball.y, '#10b981', 18);
+
+      if (nextScore >= 100) {
+        // Player wins the match!
+        handleMatchEnd(true);
+      } else {
+        resetBall(false);
+      }
+    }
+
+    // Bot scores (ball passes left wall)
+    if (ball.x + BALL_SIZE / 2 < 0) {
+      audio.playHit();
+      shakeRef.current = 8;
+      hitStopRef.current = 60;
+      inputManager.vibrateGamepad(150, 0.6);
+
+      const nextBotScore = botScoreRef.current + 10;
+      botScoreRef.current = nextBotScore;
+      setBotScore(nextBotScore);
+
+      spawnFloatingText(CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2, 'BOT SCORED', '#f43f5e');
+      spawnParticles(20, ball.y, '#f43f5e', 18);
+
+      if (nextBotScore >= 50) {
+        // Match over
+        handleMatchEnd(false);
+      } else {
+        resetBall(true);
+      }
+    }
+
+    // Update Particles
+    for (let i = particlesRef.current.length - 1; i >= 0; i--) {
+      const p = particlesRef.current[i];
+      p.x += p.vx;
+      p.y += p.vy;
+      p.alpha -= p.decay;
+      if (p.alpha <= 0) particlesRef.current.splice(i, 1);
+    }
+
+    // Update Floating Texts
+    for (let i = floatingTextsRef.current.length - 1; i >= 0; i--) {
+      const t = floatingTextsRef.current[i];
+      t.y += t.vy;
+      t.alpha -= 0.025;
+      if (t.alpha <= 0) floatingTextsRef.current.splice(i, 1);
+    }
+  };
+
+  const handleMatchEnd = (playerWon: boolean) => {
+    if (playerWon) audio.playLevelUp();
+    else audio.playExplosion();
+
+    setGameState('gameover');
+    if (gameLoopRef.current) cancelAnimationFrame(gameLoopRef.current);
+    onGameOver(playerScoreRef.current);
+  };
+
+  const draw = () => {
     const canvas = canvasRef.current;
-    if (!canvas || !isPlayingRef.current || gameOverRef.current ) return;
+    if (!canvas) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    const delta = (timestamp - lastTimeRef.current) / 16.666;
-    lastTimeRef.current = timestamp;
-
-    // 1. Move Player paddle using key states
-    const paddleMoveSpeed = 5 * delta;
-    if (keysPressedRef.current['ArrowUp']) {
-      playerYRef.current = Math.max(0, playerYRef.current - paddleMoveSpeed);
-    }
-    if (keysPressedRef.current['ArrowDown']) {
-      playerYRef.current = Math.min(CANVAS_HEIGHT - PADDLE_HEIGHT, playerYRef.current + paddleMoveSpeed);
-    }
-
-    // 2. Ball physics & movement
-    const ball = ballRef.current;
-    ball.x += ball.vx * delta;
-    ball.y += ball.vy * delta;
-
-    // Push to trails for glowing speed effect
-    trailsRef.current.push({ x: ball.x, y: ball.y, color: '#38bdf8' });
-    if (trailsRef.current.length > 12) {
-      trailsRef.current.shift();
-    }
-
-    // Wall bounces top / bottom
-    if (ball.y <= BALL_SIZE / 2) {
-      ball.y = BALL_SIZE / 2;
-      ball.vy = -ball.vy;
-      audio.playHit();
-      shakeRef.current = 2;
-      createHitParticles(ball.x, ball.y, '#38bdf8');
-    } else if (ball.y >= CANVAS_HEIGHT - BALL_SIZE / 2) {
-      ball.y = CANVAS_HEIGHT - BALL_SIZE / 2;
-      ball.vy = -ball.vy;
-      audio.playHit();
-      shakeRef.current = 2;
-      createHitParticles(ball.x, ball.y, '#38bdf8');
-    }
-
-    // 3. Simple Intelligent AI Opponent (right side)
-    const opponentSpeed = 3.6 * (1 + scoreRef.current * 0.05) * delta; // Scales slightly with score
-    const targetY = ball.y - PADDLE_HEIGHT / 2;
-    const diff = targetY - opponentYRef.current;
-
-    if (Math.abs(diff) > 4) {
-      if (diff > 0) {
-        opponentYRef.current = Math.min(CANVAS_HEIGHT - PADDLE_HEIGHT, opponentYRef.current + opponentSpeed);
-      } else {
-        opponentYRef.current = Math.max(0, opponentYRef.current - opponentSpeed);
-      }
-    }
-
-    // 4. Ball & Paddle Collisions
-    // Player Paddle collision (left side)
-    const PLAYER_X = 20;
-    if (ball.x <= PLAYER_X + PADDLE_WIDTH && ball.x >= PLAYER_X) {
-      if (ball.y >= playerYRef.current && ball.y <= playerYRef.current + PADDLE_HEIGHT) {
-        ball.x = PLAYER_X + PADDLE_WIDTH;
-        
-        // Speed increase & dynamic bounce angles based on relative hit position
-        const relativeHit = (ball.y - (playerYRef.current + PADDLE_HEIGHT / 2)) / (PADDLE_HEIGHT / 2);
-        ball.speed = Math.min(10, ball.speed + 0.5);
-        ball.vx = ball.speed;
-        ball.vy = relativeHit * 4.5;
-        
-        audio.playScore();
-        shakeRef.current = 5;
-        floatingTextsRef.current.push({
-          x: ball.x + 10,
-          y: ball.y,
-          text: "BOUNCE!",
-          color: '#3b82f6',
-          alpha: 1.0,
-          vy: -0.8
-        });
-        createHitParticles(ball.x, ball.y, '#3b82f6');
-      }
-    }
-
-    // Opponent Paddle collision (right side)
-    const OPPONENT_X = CANVAS_WIDTH - 20 - PADDLE_WIDTH;
-    if (ball.x >= OPPONENT_X - BALL_SIZE && ball.x <= OPPONENT_X) {
-      if (ball.y >= opponentYRef.current && ball.y <= opponentYRef.current + PADDLE_HEIGHT) {
-        ball.x = OPPONENT_X - BALL_SIZE;
-
-        const relativeHit = (ball.y - (opponentYRef.current + PADDLE_HEIGHT / 2)) / (PADDLE_HEIGHT / 2);
-        ball.speed = Math.min(10, ball.speed + 0.5);
-        ball.vx = -ball.speed;
-        ball.vy = relativeHit * 4.5;
-
-        audio.playScore();
-        shakeRef.current = 5;
-        floatingTextsRef.current.push({
-          x: ball.x - 30,
-          y: ball.y,
-          text: "AI BLOCK!",
-          color: '#ec4899',
-          alpha: 1.0,
-          vy: -0.8
-        });
-        createHitParticles(ball.x, ball.y, '#ec4899');
-      }
-    }
-
-    // 5. Score Points & Round reset
-    // Opponent scores (Ball leaves left side)
-    if (ball.x < 0) {
-      audio.playExplosion();
-      shakeRef.current = 10;
-      floatingTextsRef.current.push({
-        x: CANVAS_WIDTH * 0.25,
-        y: CANVAS_HEIGHT / 2,
-        text: "AI POINT!",
-        color: '#ef4444',
-        alpha: 1.0,
-        vy: -1.0
-      });
-      setOpponentScore(prev => {
-        const next = prev + 1;
-        if (next >= 5) {
-          triggerGameOver(false);
-        } else {
-          resetBall(false); // Serve to AI
-        }
-        return next;
-      });
-    }
-    // Player scores (Ball leaves right side)
-    else if (ball.x > CANVAS_WIDTH) {
-      audio.playLevelUp();
-      shakeRef.current = 12;
-      floatingTextsRef.current.push({
-        x: CANVAS_WIDTH * 0.75,
-        y: CANVAS_HEIGHT / 2,
-        text: "GOAL!",
-        color: '#eab308',
-        alpha: 1.0,
-        vy: -1.0
-      });
-      setScore(prev => {
-        const next = prev + 1;
-        onScoreUpdate(next * 50); // Give 50 pts per point won
-        if (next >= 5) {
-          triggerGameOver(true);
-        } else {
-          resetBall(true); // Serve to Player
-        }
-        return next;
-      });
-    }
-
-    // --- RENDER SECTION ---
     ctx.save();
+
+    // Screen Shake
     if (shakeRef.current > 0) {
-      const dx = (Math.random() - 0.5) * shakeRef.current;
-      const dy = (Math.random() - 0.5) * shakeRef.current;
-      ctx.translate(dx, dy);
-      shakeRef.current *= 0.85;
-      if (shakeRef.current < 0.5) shakeRef.current = 0;
+      const sx = (Math.random() - 0.5) * shakeRef.current;
+      const sy = (Math.random() - 0.5) * shakeRef.current;
+      ctx.translate(sx, sy);
+      shakeRef.current = Math.max(0, shakeRef.current - 0.4);
     }
 
-    ctx.fillStyle = '#09090b';
+    // Dark Arena Background
+    ctx.fillStyle = '#080a0f';
     ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
 
-    // Grid details
-    ctx.strokeStyle = '#111827';
-    ctx.lineWidth = 1;
-    for (let i = 0; i < CANVAS_WIDTH; i += 30) {
-      ctx.beginPath();
-      ctx.moveTo(i, 0);
-      ctx.lineTo(i, CANVAS_HEIGHT);
-      ctx.stroke();
-    }
-    for (let j = 0; j < CANVAS_HEIGHT; j += 30) {
-      ctx.beginPath();
-      ctx.moveTo(0, j);
-      ctx.lineTo(CANVAS_WIDTH, j);
-      ctx.stroke();
-    }
-
     // Neon Net Divider
-    ctx.strokeStyle = '#1e293b';
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
     ctx.lineWidth = 2;
-    ctx.setLineDash([6, 8]);
+    ctx.setLineDash([8, 8]);
     ctx.beginPath();
     ctx.moveTo(CANVAS_WIDTH / 2, 0);
     ctx.lineTo(CANVAS_WIDTH / 2, CANVAS_HEIGHT);
     ctx.stroke();
     ctx.setLineDash([]);
 
-    // Draw ball trails
-    ctx.shadowBlur = 0;
-    trailsRef.current.forEach((t, idx) => {
-      const alpha = (idx / trailsRef.current.length) * 0.35;
+    // Big Background Score Watermark
+    ctx.font = 'bold 80px monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = 'rgba(16, 185, 129, 0.06)';
+    ctx.fillText(playerScoreRef.current.toString(), CANVAS_WIDTH / 4, CANVAS_HEIGHT / 2);
+    ctx.fillStyle = 'rgba(244, 63, 94, 0.06)';
+    ctx.fillText(botScoreRef.current.toString(), (3 * CANVAS_WIDTH) / 4, CANVAS_HEIGHT / 2);
+
+    // Ball Trails
+    trailsRef.current.forEach((t, i) => {
       ctx.fillStyle = t.color;
-      ctx.globalAlpha = alpha;
+      ctx.globalAlpha = (i / trailsRef.current.length) * 0.35;
       ctx.beginPath();
       ctx.arc(t.x, t.y, BALL_SIZE / 2, 0, Math.PI * 2);
       ctx.fill();
     });
-    ctx.globalAlpha = 1.0;
+    ctx.globalAlpha = 1;
 
-    // Draw Player Paddle (Blue Glow)
-    ctx.shadowBlur = 10;
-    ctx.shadowColor = '#3b82f6';
-    ctx.fillStyle = '#3b82f6';
-    ctx.fillRect(PLAYER_X, playerYRef.current, PADDLE_WIDTH, PADDLE_HEIGHT);
+    // Player Paddle (Neon Green)
+    ctx.fillStyle = '#10b981';
+    ctx.beginPath();
+    ctx.roundRect(25, playerYRef.current, PADDLE_WIDTH, PADDLE_HEIGHT, 6);
+    ctx.fill();
 
-    // Draw Opponent Paddle (Pink Glow)
-    ctx.shadowColor = '#ec4899';
-    ctx.fillStyle = '#ec4899';
-    ctx.fillRect(OPPONENT_X, opponentYRef.current, PADDLE_WIDTH, PADDLE_HEIGHT);
+    // Opponent Paddle (Neon Rose)
+    ctx.fillStyle = '#f43f5e';
+    ctx.beginPath();
+    ctx.roundRect(CANVAS_WIDTH - 25 - PADDLE_WIDTH, opponentYRef.current, PADDLE_WIDTH, PADDLE_HEIGHT, 6);
+    ctx.fill();
 
-    // Draw Ball (White/Blue mix)
-    ctx.shadowColor = '#38bdf8';
+    // Ball
+    const ball = ballRef.current;
     ctx.fillStyle = '#ffffff';
     ctx.beginPath();
     ctx.arc(ball.x, ball.y, BALL_SIZE / 2, 0, Math.PI * 2);
     ctx.fill();
-    ctx.shadowBlur = 0;
 
-    // Draw scoreboard
-    ctx.fillStyle = '#ffffff';
-    ctx.font = "bold 24px 'Space Grotesk', sans-serif";
-    ctx.textAlign = 'center';
-    ctx.fillText(`${score}`, CANVAS_WIDTH / 2 - 40, 40);
-    ctx.fillText(`${opponentScore}`, CANVAS_WIDTH / 2 + 40, 40);
+    // Ball glow
+    ctx.strokeStyle = '#38bdf8';
+    ctx.lineWidth = 2;
+    ctx.stroke();
 
-    // Particle update and drawing
+    // Particles
     particlesRef.current.forEach(p => {
-      p.x += p.vx * delta;
-      p.y += p.vy * delta;
-      p.alpha -= p.decay * delta;
-
       ctx.fillStyle = p.color;
-      ctx.globalAlpha = Math.max(0, p.alpha);
+      ctx.globalAlpha = p.alpha;
       ctx.beginPath();
-      ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
+      ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
       ctx.fill();
     });
-    ctx.globalAlpha = 1.0;
-    particlesRef.current = particlesRef.current.filter(p => p.alpha > 0);
+    ctx.globalAlpha = 1;
 
-    // Floating texts update and draw
+    // Floating Texts
     floatingTextsRef.current.forEach(t => {
-      t.y += t.vy * delta;
-      t.alpha -= 0.025 * delta;
-
       ctx.fillStyle = t.color;
-      ctx.globalAlpha = Math.max(0, t.alpha);
-      ctx.font = 'bold 9px "Press Start 2P", monospace';
+      ctx.globalAlpha = t.alpha;
+      ctx.font = 'bold 12px monospace';
       ctx.textAlign = 'center';
       ctx.fillText(t.text, t.x, t.y);
     });
-    ctx.globalAlpha = 1.0;
-    floatingTextsRef.current = floatingTextsRef.current.filter(t => t.alpha > 0);
+    ctx.globalAlpha = 1;
 
     ctx.restore();
-    gameLoopRef.current = requestAnimationFrame(update);
   };
 
-  const triggerGameOver = (playerWon: boolean) => {
-    audio.playGameOver();
-    setIsPlaying(false);
-    setGameOver(true);
-    const finalCalculatedScore = scoreRef.current * 100;
-    onGameOver(finalCalculatedScore);
-    if (gameLoopRef.current) cancelAnimationFrame(gameLoopRef.current);
-  };
-
-  const toggleMute = () => {
-    const nextMuted = audio.toggleMute();
-    setMuted(nextMuted);
-  };
-
-  const getGameState = () => {
-    if (!isPlaying && score === 0 && opponentScore === 0 && !gameOver) return 'ready';
-    if (!isPlaying) return 'gameover';
-    return 'playing';
-  };
-
-  const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (!isPlayingRef.current || gameOverRef.current) return;
+  // Direct Pointer / Touch paddle tracking on mobile
+  const handlePointerMove = (e: React.PointerEvent) => {
+    if (gameStateRef.current !== 'playing') return;
     const canvas = canvasRef.current;
     if (!canvas) return;
+
     const rect = canvas.getBoundingClientRect();
-    // Get pointer position relative to canvas height
-    const relativeY = ((e.clientY - rect.top) / rect.height) * CANVAS_HEIGHT;
-    // Set paddle center to relativeY
-    playerYRef.current = Math.max(0, Math.min(CANVAS_HEIGHT - PADDLE_HEIGHT, relativeY - PADDLE_HEIGHT / 2));
+    const clientY = e.clientY - rect.top;
+    const scaleY = CANVAS_HEIGHT / rect.height;
+    const targetY = clientY * scaleY - PADDLE_HEIGHT / 2;
+
+    playerPrevYRef.current = playerYRef.current;
+    playerYRef.current = Math.max(10, Math.min(CANVAS_HEIGHT - PADDLE_HEIGHT - 10, targetY));
   };
 
+  useEffect(() => {
+    draw();
+  }, []);
+
   return (
-    <div className="relative flex flex-col h-full w-full min-h-0 items-center justify-center overflow-hidden p-2 bg-zinc-950">
-      {/* HUD Bar inside the flex layout to prevent overlap */}
-      <div className="w-full flex-none flex justify-between items-center mb-2 px-2 font-mono text-xs">
-        <div className="text-blue-400 font-bold uppercase tracking-wider">
-          SKOR ANDA: <span className="text-white">{score}</span>
+    <div 
+      ref={containerRef}
+      className="relative flex flex-col h-full w-full min-h-0 items-center justify-center overflow-hidden p-2 bg-[#090b10]"
+    >
+      {/* Pong Scoreboard Header */}
+      <div className="w-full max-w-[600px] flex-none flex justify-between items-center mb-2 px-3 py-1 bg-[#121622]/80 border border-white/[0.06] rounded-xl text-xs font-mono">
+        <div className="flex items-center gap-1.5 text-emerald-400 font-bold">
+          <span>YOU: {playerScore}</span>
         </div>
-        <div className="text-pink-400 font-bold uppercase tracking-wider">
-          CYBER BOT: <span className="text-white">{opponentScore}</span>
+
+        {rallyStreak >= 3 && (
+          <div className="flex items-center gap-1 text-amber-400 font-bold animate-pulse">
+            <Flame size={12} />
+            <span>RALLY {rallyStreak}x</span>
+          </div>
+        )}
+
+        <div className="flex items-center gap-1.5 text-zinc-400">
+          <Trophy size={12} className="text-amber-400" />
+          <span>BEST: <strong className="text-white">{highScore}</strong></span>
+        </div>
+
+        <div className="flex items-center gap-1.5 text-rose-400 font-bold">
+          <span>AI BOT: {botScore}</span>
         </div>
       </div>
 
       {/* Canvas Wrapper */}
       <div 
+        className="relative flex-1 min-h-0 w-full max-w-[600px] max-h-[340px] flex items-center justify-center bg-[#080a0f] rounded-2xl border border-white/[0.08] shadow-2xl overflow-hidden touch-none select-none"
         onPointerMove={handlePointerMove}
-        className="relative flex-1 min-h-0 w-full flex items-center justify-center bg-black rounded-xl border border-zinc-800 shadow-[0_0_20px_rgba(0,0,0,0.5)] overflow-hidden touch-none"
+        onPointerDown={handlePointerMove}
       >
         <canvas
           ref={canvasRef}
           width={CANVAS_WIDTH}
           height={CANVAS_HEIGHT}
-          className="max-w-full max-h-full object-contain block bg-zinc-950"
+          className="w-full h-full object-contain block cursor-ns-resize"
         />
 
         <GameOverlay
-          gameState={getGameState()}
-          score={score * 100}
-          onStart={startNewGame}
-          onRestart={startNewGame}
-          instructions="Gunakan PANAH ATAS / BAWAH atau seret di layar untuk Mengontrol Paddle. Pantulkan bola dan kalahkan bot cyber!"
+          gameState={gameState}
+          score={playerScore}
+          highScore={highScore}
+          countdown={countdown}
+          onStart={startGame}
+          onRestart={startGame}
+          instructions="Geser pointer atau gunakan PANAH ATAS / BAWAH untuk mengendalikan paddle. Pantulkan bola melewati bot lawan!"
         />
       </div>
-
     </div>
   );
 }

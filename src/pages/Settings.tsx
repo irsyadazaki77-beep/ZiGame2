@@ -64,8 +64,9 @@ const verifyAndImportBackup = (jsonString: string): any => {
     }
     
     return parsed.data;
-  } catch (e: any) {
-    throw new Error(e.message || "Gagal mengurai berkas cadangan.");
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : "Gagal mengurai berkas cadangan.";
+    throw new Error(msg, { cause: e });
   }
 };
 

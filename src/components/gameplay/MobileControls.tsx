@@ -1,5 +1,5 @@
 import React from 'react';
-import { ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Zap, Grip } from 'lucide-react';
+import { ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Zap, CircleDot } from 'lucide-react';
 
 export interface MobileControlButtonProps {
   icon: React.ReactNode;
@@ -7,9 +7,17 @@ export interface MobileControlButtonProps {
   onPress: () => void;
   onRelease?: () => void;
   className?: string;
+  variant?: 'dpad' | 'action';
 }
 
-export const MobileControlButton: React.FC<MobileControlButtonProps> = ({ icon, label, onPress, onRelease, className = '' }) => {
+export const MobileControlButton: React.FC<MobileControlButtonProps> = ({ 
+  icon, 
+  label, 
+  onPress, 
+  onRelease, 
+  className = '',
+  variant = 'dpad'
+}) => {
   const handleStart = (e: React.SyntheticEvent) => {
     e.preventDefault();
     onPress();
@@ -19,6 +27,10 @@ export const MobileControlButton: React.FC<MobileControlButtonProps> = ({ icon, 
     if (onRelease) onRelease();
   };
 
+  const variantStyles = variant === 'action'
+    ? 'bg-indigo-600/90 hover:bg-indigo-500 active:bg-indigo-400 text-white border-indigo-400/30 shadow-md shadow-indigo-950/50 active:scale-95'
+    : 'bg-[#141824]/90 hover:bg-[#1a2030] active:bg-[#222a40] text-zinc-300 active:text-white border-white/[0.08] active:scale-95';
+
   return (
     <button
       onTouchStart={handleStart}
@@ -26,10 +38,11 @@ export const MobileControlButton: React.FC<MobileControlButtonProps> = ({ icon, 
       onMouseDown={handleStart}
       onMouseUp={handleEnd}
       onMouseLeave={handleEnd}
-      className={`flex flex-col items-center justify-center gap-1 bg-zinc-900 border border-zinc-800 rounded-xl active:bg-zinc-800 active:border-zinc-700 select-none shadow text-zinc-400 active:text-white transition-colors ${className}`}
+      aria-label={label || 'Game Control'}
+      className={`flex flex-col items-center justify-center gap-0.5 border rounded-2xl select-none cursor-pointer transition-all duration-100 touch-manipulation min-w-[44px] min-h-[44px] ${variantStyles} ${className}`}
     >
       {icon}
-      {label && <span className="text-[10px] font-mono font-bold tracking-wider">{label}</span>}
+      {label && <span className="text-[9px] font-mono font-bold tracking-wider uppercase leading-none">{label}</span>}
     </button>
   );
 };
@@ -41,32 +54,36 @@ export interface MobileDpadProps {
 
 export const MobileDpad: React.FC<MobileDpadProps> = ({ onDirection, className = '' }) => {
   return (
-    <div className={`grid grid-cols-3 gap-1 w-32 h-32 ${className}`}>
+    <div className={`grid grid-cols-3 gap-1.5 w-32 h-32 sm:w-36 sm:h-36 shrink-0 ${className}`}>
       <div />
       <MobileControlButton 
         icon={<ArrowUp size={20} />} 
         onPress={() => onDirection('up', true)} 
         onRelease={() => onDirection('up', false)} 
+        label="UP"
       />
       <div />
       <MobileControlButton 
         icon={<ArrowLeft size={20} />} 
         onPress={() => onDirection('left', true)} 
         onRelease={() => onDirection('left', false)} 
+        label="LEFT"
       />
-      <div className="flex items-center justify-center bg-zinc-900/50 rounded-xl">
-        <Grip size={16} className="text-zinc-700" />
+      <div className="flex items-center justify-center bg-[#0e121a]/60 rounded-xl border border-white/[0.04]">
+        <CircleDot size={14} className="text-zinc-600" />
       </div>
       <MobileControlButton 
         icon={<ArrowRight size={20} />} 
         onPress={() => onDirection('right', true)} 
         onRelease={() => onDirection('right', false)} 
+        label="RIGHT"
       />
       <div />
       <MobileControlButton 
         icon={<ArrowDown size={20} />} 
         onPress={() => onDirection('down', true)} 
         onRelease={() => onDirection('down', false)} 
+        label="DOWN"
       />
       <div />
     </div>
@@ -112,33 +129,37 @@ export const MobileControls: React.FC<MobileControlsProps> = ({
   const resolvedActionLabel = actionLabel || labelA || 'ACTION';
 
   return (
-    <div className={`w-full mt-4 flex justify-between items-center gap-4 ${className}`}>
+    <div className={`w-full max-w-lg mx-auto mt-3 sm:mt-4 flex items-center justify-between gap-3 px-2 pb-safe select-none ${className}`}>
       {(onDirection || onLeft || onRight || onUp || onDown) && (
-         <MobileDpad onDirection={(dir, active) => {
-           if (onDirection && active) {
-             onDirection(dir);
-           }
-           // Trigger legacy bindings
-           if (dir === 'left') {
-             if (active && onLeft) onLeft();
-             if (!active && onLeftRelease) onLeftRelease();
-           } else if (dir === 'right') {
-             if (active && onRight) onRight();
-             if (!active && onRightRelease) onRightRelease();
-           } else if (dir === 'up') {
-             if (active && onUp) onUp();
-           } else if (dir === 'down') {
-             if (active && onDown) onDown();
-           }
-         }} />
+        <MobileDpad onDirection={(dir, active) => {
+          if (onDirection && active) {
+            onDirection(dir);
+          }
+          // Legacy bindings
+          if (dir === 'left') {
+            if (active && onLeft) onLeft();
+            if (!active && onLeftRelease) onLeftRelease();
+          } else if (dir === 'right') {
+            if (active && onRight) onRight();
+            if (!active && onRightRelease) onRightRelease();
+          } else if (dir === 'up') {
+            if (active && onUp) onUp();
+          } else if (dir === 'down') {
+            if (active && onDown) onDown();
+          }
+        }} />
       )}
+      
       {resolvedAction && (
-         <MobileControlButton
-            icon={<Zap size={24} />}
+        <div className="flex-1 flex justify-end">
+          <MobileControlButton
+            icon={<Zap size={22} />}
             label={resolvedActionLabel}
             onPress={resolvedAction}
-            className="flex-1 h-32"
-         />
+            variant="action"
+            className="w-28 sm:w-36 h-28 sm:h-36 rounded-2xl"
+          />
+        </div>
       )}
     </div>
   );

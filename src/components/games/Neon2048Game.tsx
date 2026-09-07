@@ -65,7 +65,7 @@ export default function Neon2048Game({ onGameOver, onScoreUpdate, highScore }: N
   };
 
   const moveLeft = (currentBoard: number[][]) => {
-    let newBoard = currentBoard.map(row => [...row]);
+    const newBoard = currentBoard.map(row => [...row]);
     let pointsAdded = 0;
     let moved = false;
 
@@ -91,9 +91,9 @@ export default function Neon2048Game({ onGameOver, onScoreUpdate, highScore }: N
   };
 
   const rotateRight = (matrix: number[][]) => {
-    let result = [];
+    const result = [];
     for (let c = 0; c < GRID_SIZE; c++) {
-      let newRow = [];
+      const newRow = [];
       for (let r = GRID_SIZE - 1; r >= 0; r--) {
         newRow.push(matrix[r][c]);
       }
@@ -103,9 +103,9 @@ export default function Neon2048Game({ onGameOver, onScoreUpdate, highScore }: N
   };
 
   const rotateLeft = (matrix: number[][]) => {
-    let result = [];
+    const result = [];
     for (let c = GRID_SIZE - 1; c >= 0; c--) {
-      let newRow = [];
+      const newRow = [];
       for (let r = 0; r < GRID_SIZE; r++) {
         newRow.push(matrix[r][c]);
       }
@@ -115,20 +115,20 @@ export default function Neon2048Game({ onGameOver, onScoreUpdate, highScore }: N
   };
 
   const moveRight = (currentBoard: number[][]) => {
-    let rotated = rotateRight(rotateRight(currentBoard));
-    let { newBoard, pointsAdded, moved } = moveLeft(rotated);
+    const rotated = rotateRight(rotateRight(currentBoard));
+    const { newBoard, pointsAdded, moved } = moveLeft(rotated);
     return { newBoard: rotateLeft(rotateLeft(newBoard)), pointsAdded, moved };
   };
 
   const moveUp = (currentBoard: number[][]) => {
-    let rotated = rotateLeft(currentBoard);
-    let { newBoard, pointsAdded, moved } = moveLeft(rotated);
+    const rotated = rotateLeft(currentBoard);
+    const { newBoard, pointsAdded, moved } = moveLeft(rotated);
     return { newBoard: rotateRight(newBoard), pointsAdded, moved };
   };
 
   const moveDown = (currentBoard: number[][]) => {
-    let rotated = rotateRight(currentBoard);
-    let { newBoard, pointsAdded, moved } = moveLeft(rotated);
+    const rotated = rotateRight(currentBoard);
+    const { newBoard, pointsAdded, moved } = moveLeft(rotated);
     return { newBoard: rotateLeft(newBoard), pointsAdded, moved };
   };
 

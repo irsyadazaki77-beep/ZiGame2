@@ -10,6 +10,7 @@ import crypto from 'crypto';
 import { getApps } from 'firebase-admin/app';
 import { getFirestore, Firestore } from 'firebase-admin/firestore';
 import { serverLogger } from './logger';
+import { ApiError } from './errors';
 import { requireCanonicalGameId, CanonicalGameId } from '../config/canonicalGames';
 import { getAuthoritativeCatalogItem } from '../config/shopCatalog';
 import { getGameBalanceConfig } from '../config/balanceConfig';
@@ -126,10 +127,21 @@ function getDb(): Firestore {
 export function assertPersistenceOperational() {
   if (process.env.NODE_ENV === 'production' && !isFirestoreAvailable()) {
     serverLogger.security('FIREBASE_FAILURE', 'Database persistence unavailable in production');
-    const err = new Error('Database persistence service unavailable.');
-    (err as any).code = 'SERVICE_UNAVAILABLE';
-    throw err;
+    throw ApiError.serviceUnavailable('Database persistence service unavailable.');
   }
+}
+
+export type PersistenceStatus = 'firestore' | 'degraded' | 'unavailable';
+
+export function getPersistenceHealthStatus(): { status: 'ok' | 'degraded' | 'unavailable'; persistence: PersistenceStatus } {
+  const isAvailable = isFirestoreAvailable();
+  if (isAvailable) {
+    return { status: 'ok', persistence: 'firestore' };
+  }
+  if (process.env.NODE_ENV === 'production') {
+    return { status: 'degraded', persistence: 'degraded' };
+  }
+  return { status: 'ok', persistence: 'degraded' };
 }
 
 /**
@@ -284,9 +296,7 @@ export async function executeShopPurchase(
   assertPersistenceOperational();
 
   if (!isValidIdempotencyKey(idempotencyKey)) {
-    const err = new Error('Kunci idempotency tidak valid.');
-    (err as any).code = 'INVALID_IDEMPOTENCY_KEY';
-    throw err;
+    throw ApiError.badRequest('Kunci idempotency tidak valid.', 'INVALID_IDEMPOTENCY_KEY');
   }
 
   // Check idempotency cache first
@@ -298,9 +308,7 @@ export async function executeShopPurchase(
   // Authoritative catalog check
   const catalogItem = getAuthoritativeCatalogItem(itemId);
   if (!catalogItem) {
-    const err = new Error(`Item ${itemId} tidak ditemukan dalam katalog toko.`);
-    (err as any).code = 'ITEM_NOT_FOUND';
-    throw err;
+    throw ApiError.notFound(`Item ${itemId} tidak ditemukan dalam katalog toko.`, 'ITEM_NOT_FOUND');
   }
 
   const transactionId = `tx_${Date.now()}_${crypto.randomBytes(8).toString('hex')}`;
@@ -318,24 +326,18 @@ export async function executeShopPurchase(
       if (!catalogItem.stackable) {
         const itemDoc = await tx.get(itemRef);
         if (itemDoc.exists) {
-          const err = new Error('Item ini sudah Anda miliki.');
-          (err as any).code = 'ITEM_ALREADY_OWNED';
-          throw err;
+          throw new ApiError(400, 'ITEM_ALREADY_OWNED', 'Item ini sudah Anda miliki.');
         }
       }
 
       // 2. Check user balance
       const ecoDoc = await tx.get(ecoRef);
       if (!ecoDoc.exists) {
-        const err = new Error('Saldo koin tidak mencukupi.');
-        (err as any).code = 'INSUFFICIENT_FUNDS';
-        throw err;
+        throw new ApiError(400, 'INSUFFICIENT_FUNDS', 'Saldo koin tidak mencukupi.');
       }
       const ecoData = ecoDoc.data() as StoredEconomy;
       if (ecoData.coins < catalogItem.cost) {
-        const err = new Error('Saldo koin tidak mencukupi untuk membeli item ini.');
-        (err as any).code = 'INSUFFICIENT_FUNDS';
-        throw err;
+        throw new ApiError(400, 'INSUFFICIENT_FUNDS', 'Saldo koin tidak mencukupi untuk membeli item ini.');
       }
 
       // 3. Debit balance
@@ -389,16 +391,12 @@ export async function executeShopPurchase(
     // Memory store transaction equivalent
     const userItems = memoryStore.inventory.get(userId) || new Set<string>();
     if (!catalogItem.stackable && userItems.has(catalogItem.id)) {
-      const err = new Error('Item ini sudah Anda miliki.');
-      (err as any).code = 'ITEM_ALREADY_OWNED';
-      throw err;
+      throw new ApiError(400, 'ITEM_ALREADY_OWNED', 'Item ini sudah Anda miliki.');
     }
 
     const currentEco = await getUserEconomy(userId);
     if (currentEco.coins < catalogItem.cost) {
-      const err = new Error('Saldo koin tidak mencukupi untuk membeli item ini.');
-      (err as any).code = 'INSUFFICIENT_FUNDS';
-      throw err;
+      throw new ApiError(400, 'INSUFFICIENT_FUNDS', 'Saldo koin tidak mencukupi untuk membeli item ini.');
     }
 
     const balanceBefore = currentEco.coins;
@@ -507,9 +505,7 @@ export async function executeDailySpin(userId: string): Promise<{
       // Atomic cooldown verification
       const cdDoc = await tx.get(cooldownRef);
       if (cdDoc.exists && cdDoc.data()?.lastSpinDate === todayStr) {
-        const err = new Error('SPIN_COOLDOWN');
-        (err as any).code = 'SPIN_COOLDOWN';
-        throw err;
+        throw new ApiError(429, 'SPIN_COOLDOWN', 'Putaran harian sudah digunakan hari ini. Silakan kembali besok.');
       }
 
       // Read current economy
@@ -561,9 +557,7 @@ export async function executeDailySpin(userId: string): Promise<{
     // In-memory atomic check
     const existing = memoryStore.spins.get(userId);
     if (existing && existing.lastSpinDate === todayStr) {
-      const err = new Error('SPIN_COOLDOWN');
-      (err as any).code = 'SPIN_COOLDOWN';
-      throw err;
+      throw new ApiError(429, 'SPIN_COOLDOWN', 'Putaran harian sudah digunakan hari ini. Silakan kembali besok.');
     }
 
     memoryStore.spins.set(userId, {
@@ -640,9 +634,7 @@ export async function executeScoreSubmission({
   assertPersistenceOperational();
 
   if (idempotencyKey && !isValidIdempotencyKey(idempotencyKey)) {
-    const err = new Error('Format idempotency key tidak valid.');
-    (err as any).code = 'INVALID_IDEMPOTENCY_KEY';
-    throw err;
+    throw ApiError.badRequest('Format idempotency key tidak valid.', 'INVALID_IDEMPOTENCY_KEY');
   }
 
   // Check idempotency cache
@@ -667,23 +659,18 @@ export async function executeScoreSubmission({
       reason: `Score ${score} exceeded hard ceiling ${config.maxScoreCeiling}`
     });
 
-    const err = new Error('Skor melebihi batas maksimum wajar yang diizinkan.');
-    (err as any).code = 'SCORE_CEILING_EXCEEDED';
-    throw err;
+    throw ApiError.unprocessable('Skor melebihi batas maksimum wajar yang diizinkan.', 'SCORE_CEILING_EXCEEDED');
   }
 
   // 3. MANDATORY verified session consumption
   if (!sessionId || typeof sessionId !== 'string') {
-    const err = new Error('ID Sesi permainan (sessionId) wajib disertakan untuk submission skor.');
-    (err as any).code = 'VERIFIED_SESSION_REQUIRED';
-    throw err;
+    throw ApiError.unprocessable('ID Sesi permainan (sessionId) wajib disertakan untuk submission skor.', 'VERIFIED_SESSION_REQUIRED');
   }
 
   const consumption = await consumeGameSession(sessionId, userId, canonicalId);
   if (!consumption.valid || !consumption.session) {
-    const err = new Error('Sesi game tidak valid atau sudah pernah digunakan.');
-    (err as any).code = consumption.reason || 'INVALID_SESSION';
-    throw err;
+    const errorCode = (consumption.reason as any) || 'SESSION_NOT_FOUND';
+    throw ApiError.unprocessable('Sesi game tidak valid atau sudah pernah digunakan.', errorCode);
   }
 
   // Calculate authoritative duration from server session startTime
@@ -702,9 +689,7 @@ export async function executeScoreSubmission({
       reason: `Duration ${verifiedDurationMs}ms below min ${config.minDurationMs}ms`
     });
 
-    const err = new Error('Durasi permainan terlalu singkat untuk skor ini.');
-    (err as any).code = 'ANOMALOUS_DURATION';
-    throw err;
+    throw ApiError.unprocessable('Durasi permainan terlalu singkat untuk skor ini.', 'INSUFFICIENT_DURATION');
   }
 
   if (score > 100 && scoreVelocity > config.maxScorePerSec) {
@@ -718,9 +703,7 @@ export async function executeScoreSubmission({
       reason: `Velocity ${scoreVelocity.toFixed(1)}/s exceeded limit ${config.maxScorePerSec}/s`
     });
 
-    const err = new Error('Laju perolehan skor melebihi batas wajar.');
-    (err as any).code = 'ANOMALOUS_VELOCITY';
-    throw err;
+    throw ApiError.unprocessable('Laju perolehan skor melebihi batas wajar.', 'SCORE_CEILING_EXCEEDED');
   }
 
   // Authoritative reward calculation
@@ -805,7 +788,7 @@ export async function executeScoreSubmission({
     memoryStore.ledger.push(ledgerEntry);
 
     // Save leaderboard entry in memory
-    let list = memoryStore.leaderboards.get(canonicalId) || [];
+    const list = memoryStore.leaderboards.get(canonicalId) || [];
     const idx = list.findIndex(e => e.userId === userId);
     if (idx >= 0) {
       if (score > list[idx].score) {

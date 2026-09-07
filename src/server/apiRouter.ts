@@ -10,11 +10,12 @@ import { Router, Request, Response } from 'express';
 import { authenticateToken, requireAuth, requireAdmin } from './authMiddleware';
 import { rateLimit } from './rateLimiter';
 import { serverLogger } from './logger';
-import { sendApiError } from './requestContext';
+import { sendApiError, handleServerException } from './requestContext';
+import { APP_VERSION } from '../config/version';
 import { isValidGameId, requireCanonicalGameId } from '../config/canonicalGames';
 import { GAME_BALANCE_CONFIG } from '../config/balanceConfig';
 import {
-  isFirestoreAvailable,
+  getPersistenceHealthStatus,
   createGameSession,
   executeScoreSubmission,
   getUserEconomy,
@@ -33,13 +34,15 @@ export const apiRouter = Router();
 apiRouter.use(authenticateToken);
 
 // ----------------------------------------------------
-// 19. MINIMAL HEALTH CHECK (No Leaks)
+// 19. MINIMAL HEALTH CHECK (No Leaks, Accurate Status)
 // ----------------------------------------------------
 apiRouter.get('/health', (_req: Request, res: Response) => {
-  return res.json({
-    status: 'ok',
-    version: '2.0.0',
-    persistence: isFirestoreAvailable() ? 'firestore' : 'memory',
+  const health = getPersistenceHealthStatus();
+  const statusCode = health.status === 'unavailable' ? 503 : 200;
+  return res.status(statusCode).json({
+    status: health.status,
+    version: APP_VERSION,
+    persistence: health.persistence,
     timestamp: new Date().toISOString()
   });
 });
@@ -92,10 +95,9 @@ apiRouter.post('/session/start', requireAuth, rateLimit(30, 60000, 'session_star
       startTime: session.startTime,
       expiresAt: session.expiresAt
     });
-  } catch (err: any) {
+  } catch (err: unknown) {
     serverLogger.error('SESSION_START_ERROR', 'Failed to initialize game session', err, undefined, req.user?.uid, req.ip, req.id);
-    const status = err?.code === 'SERVICE_UNAVAILABLE' ? 503 : 500;
-    return sendApiError(res, status, err?.code || 'INTERNAL_ERROR', err?.message || 'Gagal memulai sesi permainan.');
+    return handleServerException(err, req, res);
   }
 });
 
@@ -161,32 +163,9 @@ apiRouter.post('/submit-score', requireAuth, rateLimit(20, 60000, 'score_submit'
     }, userId, req.ip, req.id);
 
     return res.json(result);
-  } catch (err: any) {
+  } catch (err: unknown) {
     serverLogger.error('SCORE_SUBMIT_ERROR', 'Failed to submit score', err, undefined, req.user?.uid, req.ip, req.id);
-
-    // Controlled client-facing error mapping
-    const clientErrors: Record<string, { status: number; message: string }> = {
-      'INVALID_GAME_ID': { status: 400, message: 'ID Game tidak valid.' },
-      'INVALID_SCORE': { status: 400, message: 'Nilai skor tidak valid.' },
-      'INVALID_IDEMPOTENCY_KEY': { status: 400, message: 'Format idempotency key tidak valid.' },
-      'VERIFIED_SESSION_REQUIRED': { status: 422, message: 'Sesi permainan terverifikasi wajib disertakan.' },
-      'SESSION_NOT_FOUND': { status: 422, message: 'Sesi permainan tidak ditemukan.' },
-      'SESSION_USER_MISMATCH': { status: 422, message: 'Sesi permainan tidak sesuai dengan akun pengguna.' },
-      'SESSION_GAME_MISMATCH': { status: 422, message: 'Sesi permainan tidak sesuai dengan game yang dimainkan.' },
-      'SESSION_ALREADY_CONSUMED': { status: 422, message: 'Sesi permainan sudah pernah digunakan.' },
-      'SESSION_EXPIRED': { status: 422, message: 'Sesi permainan telah kadaluarsa.' },
-      'SCORE_CEILING_EXCEEDED': { status: 422, message: 'Skor melebihi batas maksimum wajar.' },
-      'ANOMALOUS_DURATION': { status: 422, message: 'Durasi permainan terlalu singkat untuk perolehan skor ini.' },
-      'ANOMALOUS_VELOCITY': { status: 422, message: 'Laju perolehan skor melebihi ambang batas wajar.' }
-    };
-
-    const mapped = clientErrors[err?.code];
-    if (mapped) {
-      return sendApiError(res, mapped.status, err.code, mapped.message);
-    }
-
-    const status = err?.code === 'SERVICE_UNAVAILABLE' ? 503 : 500;
-    return sendApiError(res, status, err?.code || 'INTERNAL_ERROR', 'Gagal memproses skor permainan.');
+    return handleServerException(err, req, res);
   }
 });
 
@@ -214,10 +193,9 @@ apiRouter.get('/economy', requireAuth, rateLimit(60, 60000, 'economy_fetch'), as
       lastSpinDate: spinCooldown.lastSpinDate,
       lastUpdated: economy.lastUpdated
     });
-  } catch (err: any) {
+  } catch (err: unknown) {
     serverLogger.error('ECONOMY_FETCH_ERROR', 'Failed to fetch economy', err, undefined, req.user?.uid, req.ip, req.id);
-    const status = err?.code === 'SERVICE_UNAVAILABLE' ? 503 : 500;
-    return sendApiError(res, status, err?.code || 'INTERNAL_ERROR', 'Gagal memuat saldo koin.');
+    return handleServerException(err, req, res);
   }
 });
 
@@ -230,8 +208,8 @@ apiRouter.get('/spin-status', requireAuth, rateLimit(60, 60000, 'spin_status'), 
     const userId = req.user!.uid;
     const cooldown = await getSpinCooldown(userId);
     return res.json({ success: true, canSpin: cooldown.canSpin, lastSpinDate: cooldown.lastSpinDate });
-  } catch (err: any) {
-    return sendApiError(res, 500, 'INTERNAL_ERROR', 'Gagal memeriksa status spin.');
+  } catch (err: unknown) {
+    return handleServerException(err, req, res);
   }
 });
 
@@ -247,7 +225,7 @@ apiRouter.post('/buy-item', requireAuth, rateLimit(20, 60000, 'shop_purchase'), 
     const { itemId, idempotencyKey } = req.body;
 
     if (!itemId || typeof itemId !== 'string') {
-      return sendApiError(res, 400, 'INVALID_PURCHASE_DATA', 'ID Item toko wajib diisi.');
+      return sendApiError(res, 400, 'MALFORMED_PAYLOAD', 'ID Item toko wajib diisi.');
     }
 
     if (!idempotencyKey || !isValidIdempotencyKey(idempotencyKey)) {
@@ -263,23 +241,9 @@ apiRouter.post('/buy-item', requireAuth, rateLimit(20, 60000, 'shop_purchase'), 
     }, userId, req.ip, req.id);
 
     return res.json(result);
-  } catch (err: any) {
-    if (err?.code === 'ITEM_NOT_FOUND') {
-      return sendApiError(res, 404, 'ITEM_NOT_FOUND', 'Item tidak ditemukan dalam katalog toko.');
-    }
-    if (err?.code === 'ITEM_ALREADY_OWNED') {
-      return sendApiError(res, 400, 'ITEM_ALREADY_OWNED', 'Item ini sudah Anda miliki.');
-    }
-    if (err?.code === 'INSUFFICIENT_FUNDS') {
-      return sendApiError(res, 400, 'INSUFFICIENT_FUNDS', 'Koin tidak mencukupi untuk melakukan pembelian ini.');
-    }
-    if (err?.code === 'INVALID_IDEMPOTENCY_KEY') {
-      return sendApiError(res, 400, 'INVALID_IDEMPOTENCY_KEY', 'Kunci idempotency tidak valid.');
-    }
-
+  } catch (err: unknown) {
     serverLogger.error('BUY_ITEM_ERROR', 'Failed to execute purchase', err, undefined, req.user?.uid, req.ip, req.id);
-    const status = err?.code === 'SERVICE_UNAVAILABLE' ? 503 : 500;
-    return sendApiError(res, status, err?.code || 'INTERNAL_ERROR', 'Gagal memproses transaksi toko.');
+    return handleServerException(err, req, res);
   }
 });
 
@@ -299,14 +263,9 @@ apiRouter.post('/spin', requireAuth, rateLimit(10, 60000, 'daily_spin'), async (
     }, userId, req.ip, req.id);
 
     return res.json(result);
-  } catch (err: any) {
-    if (err?.code === 'SPIN_COOLDOWN') {
-      return sendApiError(res, 429, 'SPIN_COOLDOWN', 'Kamu sudah melakukan spin harian hari ini. Silakan coba lagi besok!');
-    }
-
+  } catch (err: unknown) {
     serverLogger.error('SPIN_ERROR', 'Failed to process spin', err, undefined, req.user?.uid, req.ip, req.id);
-    const status = err?.code === 'SERVICE_UNAVAILABLE' ? 503 : 500;
-    return sendApiError(res, status, err?.code || 'INTERNAL_ERROR', 'Gagal memproses putaran roda.');
+    return handleServerException(err, req, res);
   }
 });
 

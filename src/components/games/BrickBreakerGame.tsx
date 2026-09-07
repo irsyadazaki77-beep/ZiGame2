@@ -1,7 +1,8 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { audio } from '../../utils/audio';
-import { Particle } from '../../types';
+import { inputManager } from '../../services/inputService';
 import { GameOverlay } from '../gameplay/GameOverlay';
+import { Sparkles, Shield, Zap } from 'lucide-react';
 
 interface BrickBreakerProps {
   onGameOver: (score: number) => void;
@@ -36,78 +37,102 @@ interface PowerUp {
   w: number;
   h: number;
   color: string;
+  label: string;
 }
+
+interface Particle {
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  radius: number;
+  color: string;
+  alpha: number;
+  decay: number;
+}
+
+interface FloatingText {
+  x: number;
+  y: number;
+  text: string;
+  color: string;
+  alpha: number;
+  vy: number;
+}
+
+interface Shockwave {
+  x: number;
+  y: number;
+  radius: number;
+  maxRadius: number;
+  color: string;
+  alpha: number;
+}
+
+const WIDTH = 400;
+const HEIGHT = 400;
 
 export default function BrickBreakerGame({ onGameOver, onScoreUpdate, highScore }: BrickBreakerProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
 
   // States
-  const [isPlaying, setIsPlaying] = useState(false);
+  const [gameState, setGameState] = useState<'ready' | 'countdown' | 'playing' | 'paused' | 'gameover'>('ready');
+  const [countdown, setCountdown] = useState(3);
   const [score, setScore] = useState(0);
-  const gameLoopRef = useRef<number | null>(null);
-  const scoreRef = useRef(0);
   const [level, setLevel] = useState(1);
-  const levelRef = useRef(1);
   const [lives, setLives] = useState(3);
+  const [combo, setCombo] = useState(0);
+  const [activeBuffs, setActiveBuffs] = useState<string[]>([]);
+
+  // Mutable Game Loop State
+  const gameStateRef = useRef(gameState);
+  const scoreRef = useRef(0);
+  const levelRef = useRef(1);
   const livesRef = useRef(3);
-  const [gameOver, setGameOver] = useState(false);
-  const isPlayingRef = useRef(false);
-  const gameOverRef = useRef(false);
+  const comboRef = useRef(0);
+  const gameLoopRef = useRef<number | null>(null);
+  const lastTimeRef = useRef<number>(0);
+  const hitStopRef = useRef<number>(0);
+  const shakeRef = useRef<number>(0);
 
-
+  // Synchronize refs
   useEffect(() => {
-    isPlayingRef.current = isPlaying;
-    gameOverRef.current = gameOver;
-    scoreRef.current = score;
-    levelRef.current = level;
-    livesRef.current = lives;
-  }, [isPlaying, gameOver, score, level, lives]);
-  const [gameWon, setGameWon] = useState(false);
-  const [muted, setMuted] = useState(audio.getMuteState());
+    gameStateRef.current = gameState;
+  }, [gameState]);
 
-  // Game assets / dynamic references
-  const paddleRef = useRef<{ x: number; y: number; w: number; h: number; speed: number }>({
+  // Entities
+  const paddleRef = useRef({
     x: 160,
     y: 375,
     w: 80,
     h: 12,
-    speed: 8,
+    speed: 7.5,
+    targetX: 160,
   });
+
   const ballsRef = useRef<Ball[]>([
-    { x: 200, y: 300, vx: 3, vy: -3, radius: 6, active: true },
+    { x: 200, y: 300, vx: 3, vy: -3.5, radius: 6, active: true },
   ]);
+
   const bricksRef = useRef<Brick[]>([]);
   const powerupsRef = useRef<PowerUp[]>([]);
   const particlesRef = useRef<Particle[]>([]);
-  const activeKeysRef = useRef<{ [key: string]: boolean }>({});
-  const shieldActiveRef = useRef<boolean>(false);
-  const shieldTimerRef = useRef<number>(0);
-  const shakeRef = useRef<number>(0);
-  const floatingTextsRef = useRef<{ x: number; y: number; text: string; color: string; alpha: number; vy: number }[]>([]);
   const trailsRef = useRef<{ x: number; y: number; color: string }[]>([]);
-  const shockwavesRef = useRef<{ x: number; y: number; radius: number; maxRadius: number; color: string; alpha: number }[]>([]);
-  const comboRef = useRef<number>(0);
+  const floatingTextsRef = useRef<FloatingText[]>([]);
+  const shockwavesRef = useRef<Shockwave[]>([]);
+  const shieldActiveRef = useRef(false);
+  const shieldTimerRef = useRef(0);
+  const expandTimerRef = useRef(0);
+  const activeKeysRef = useRef<{ [key: string]: boolean }>({});
 
-  // Initialization & cleanup
-  useEffect(() => {
-    buildLevel(1);
-    drawStatic();
-    return () => {
-      if (gameLoopRef.current) cancelAnimationFrame(gameLoopRef.current);
-    };
-  }, []);
-
-  const buildLevel = (lvl: number) => {
+  const buildLevel = useCallback((lvl: number) => {
     const columns = 8;
-    let rows = 4;
-    if (lvl === 2) rows = 5;
-    if (lvl >= 3) rows = 6;
-
+    const rows = lvl === 1 ? 4 : lvl === 2 ? 5 : 6;
     const brickWidth = 44;
     const brickHeight = 15;
     const padding = 5;
-    const offsetTop = 40;
+    const offsetTop = 45;
     const offsetLeft = 7;
 
     const colors = ['#f43f5e', '#ec4899', '#a855f7', '#6366f1', '#3b82f6', '#06b6d4'];
@@ -118,8 +143,6 @@ export default function BrickBreakerGame({ onGameOver, onScoreUpdate, highScore 
         const x = c * (brickWidth + padding) + offsetLeft;
         const y = r * (brickHeight + padding) + offsetTop;
         const colorIdx = (r + lvl) % colors.length;
-        
-        // Multi-hit bricks in higher levels
         const maxHits = lvl > 1 && r === 0 ? 2 : 1;
 
         tempBricks.push({
@@ -135,19 +158,130 @@ export default function BrickBreakerGame({ onGameOver, onScoreUpdate, highScore 
       }
     }
     bricksRef.current = tempBricks;
+  }, []);
+
+  const spawnParticles = (x: number, y: number, color: string, count = 12) => {
+    for (let i = 0; i < count; i++) {
+      const angle = (Math.PI * 2 * i) / count + (Math.random() - 0.5);
+      const speed = 1.5 + Math.random() * 3;
+      particlesRef.current.push({
+        x,
+        y,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed,
+        radius: 2 + Math.random() * 2,
+        color,
+        alpha: 1,
+        decay: 0.03 + Math.random() * 0.02,
+      });
+    }
   };
 
-  // Keyboard controls
+  const spawnFloatingText = (x: number, y: number, text: string, color = '#fbbf24') => {
+    floatingTextsRef.current.push({
+      x,
+      y,
+      text,
+      color,
+      alpha: 1,
+      vy: -1.2,
+    });
+  };
+
+  const spawnShockwave = (x: number, y: number, color: string) => {
+    shockwavesRef.current.push({
+      x,
+      y,
+      radius: 5,
+      maxRadius: 35,
+      color,
+      alpha: 0.7,
+    });
+  };
+
+  const resetBallAndPaddle = () => {
+    paddleRef.current.x = 160;
+    paddleRef.current.targetX = 160;
+    paddleRef.current.w = 80;
+    ballsRef.current = [
+      { x: 200, y: 320, vx: (Math.random() > 0.5 ? 3 : -3), vy: -3.8, radius: 6, active: true },
+    ];
+    comboRef.current = 0;
+    setCombo(0);
+  };
+
+  const resetGame = useCallback(() => {
+    levelRef.current = 1;
+    setLevel(1);
+    livesRef.current = 3;
+    setLives(3);
+    scoreRef.current = 0;
+    setScore(0);
+    onScoreUpdate(0);
+    comboRef.current = 0;
+    setCombo(0);
+    shieldActiveRef.current = false;
+    shieldTimerRef.current = 0;
+    expandTimerRef.current = 0;
+    setActiveBuffs([]);
+    particlesRef.current = [];
+    powerupsRef.current = [];
+    floatingTextsRef.current = [];
+    shockwavesRef.current = [];
+    trailsRef.current = [];
+
+    buildLevel(1);
+    resetBallAndPaddle();
+    draw();
+  }, [buildLevel, onScoreUpdate]);
+
+  const startGame = useCallback(() => {
+    resetGame();
+    setGameState('countdown');
+    setCountdown(3);
+    audio.playCountdownTick();
+
+    let count = 3;
+    const timer = setInterval(() => {
+      count--;
+      if (count > 0) {
+        setCountdown(count);
+        audio.playCountdownTick();
+      } else {
+        clearInterval(timer);
+        audio.playCountdownGo();
+        setGameState('playing');
+        lastTimeRef.current = performance.now();
+        if (gameLoopRef.current) cancelAnimationFrame(gameLoopRef.current);
+        gameLoopRef.current = requestAnimationFrame(gameLoop);
+      }
+    }, 800);
+  }, [resetGame]);
+
+  // Tab auto-pause
+  useEffect(() => {
+    const handleVis = () => {
+      if (document.hidden && gameStateRef.current === 'playing') {
+        setGameState('paused');
+      }
+    };
+    document.addEventListener('visibilitychange', handleVis);
+    return () => document.removeEventListener('visibilitychange', handleVis);
+  }, []);
+
+  // Keyboard events
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (['ArrowLeft', 'ArrowRight', 'KeyA', 'KeyD', 'Space'].includes(e.code)) {
+      if (['ArrowLeft', 'ArrowRight', 'KeyA', 'KeyD'].includes(e.code)) {
         e.preventDefault();
         activeKeysRef.current[e.code] = true;
       }
+      if (e.key === 'Escape' && gameStateRef.current === 'playing') {
+        setGameState('paused');
+      }
     };
-
     const handleKeyUp = (e: KeyboardEvent) => {
-      if (['ArrowLeft', 'ArrowRight', 'KeyA', 'KeyD', 'Space'].includes(e.code)) {
+      if (['ArrowLeft', 'ArrowRight', 'KeyA', 'KeyD'].includes(e.code)) {
         e.preventDefault();
         activeKeysRef.current[e.code] = false;
       }
@@ -161,69 +295,63 @@ export default function BrickBreakerGame({ onGameOver, onScoreUpdate, highScore 
     };
   }, []);
 
-  // Frame processing loop
-  const gameStep = () => {
-    if (!isPlayingRef.current || gameOverRef.current  || gameWon) return;
+  // Update Game Loop
+  const gameLoop = (timestamp: number) => {
+    if (gameStateRef.current !== 'playing') return;
 
-    updatePaddle();
-    updateBalls();
-    updatePowerUps();
-    updateParticles();
-    checkLevelCompletion();
+    const dt = Math.min(timestamp - lastTimeRef.current, 100);
+    lastTimeRef.current = timestamp;
 
-    render();
+    // Hit stop micro freeze
+    if (hitStopRef.current > 0) {
+      hitStopRef.current -= dt;
+      draw();
+      gameLoopRef.current = requestAnimationFrame(gameLoop);
+      return;
+    }
 
-    gameLoopRef.current = requestAnimationFrame(gameStep);
+    updatePhysics(dt);
+    draw();
+
+    if (gameStateRef.current === 'playing') {
+      gameLoopRef.current = requestAnimationFrame(gameLoop);
+    }
   };
 
-  const updatePaddle = () => {
+  const updatePhysics = (dt: number) => {
     const paddle = paddleRef.current;
-    const canvas = canvasRef.current;
-    if (!canvas) return;
 
+    // Paddle Keyboard controls
     if (activeKeysRef.current['ArrowLeft'] || activeKeysRef.current['KeyA']) {
-      paddle.x = Math.max(0, paddle.x - paddle.speed);
+      paddle.x -= paddle.speed;
     }
     if (activeKeysRef.current['ArrowRight'] || activeKeysRef.current['KeyD']) {
-      paddle.x = Math.min(canvas.width - paddle.w, paddle.x + paddle.speed);
+      paddle.x += paddle.speed;
     }
-  };
 
-  const movePaddleTouch = (dir: 'left' | 'right') => {
-    const paddle = paddleRef.current;
-    const canvas = canvasRef.current;
-    if (!canvas) return;
+    // Clamp paddle within bounds
+    paddle.x = Math.max(0, Math.min(WIDTH - paddle.w, paddle.x));
 
-    if (dir === 'left') {
-      paddle.x = Math.max(0, paddle.x - 22);
-    } else {
-      paddle.x = Math.min(canvas.width - paddle.w, paddle.x + 22);
+    // Shield Timer
+    if (shieldActiveRef.current) {
+      shieldTimerRef.current -= dt;
+      if (shieldTimerRef.current <= 0) {
+        shieldActiveRef.current = false;
+        setActiveBuffs(prev => prev.filter(b => b !== 'SHIELD'));
+      }
     }
-  };
 
-  const createParticles = (x: number, y: number, color: string) => {
-    const pCount = 10;
-    for (let i = 0; i < pCount; i++) {
-      particlesRef.current.push({
-        x,
-        y,
-        vx: (Math.random() - 0.5) * 5,
-        vy: (Math.random() - 0.5) * 5,
-        color,
-        radius: Math.random() * 2.5 + 1,
-        alpha: 1.0,
-        decay: Math.random() * 0.04 + 0.03,
-      });
+    // Expand Timer
+    if (expandTimerRef.current > 0) {
+      expandTimerRef.current -= dt;
+      if (expandTimerRef.current <= 0) {
+        paddle.w = 80;
+        setActiveBuffs(prev => prev.filter(b => b !== 'EXPAND'));
+      }
     }
-  };
 
-  const updateBalls = () => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-
-    const paddle = paddleRef.current;
-    let activeBalls = ballsRef.current.filter(b => b.active);
-
+    // Update Balls
+    const activeBalls = ballsRef.current.filter(b => b.active);
     if (activeBalls.length === 0) {
       handleLifeLoss();
       return;
@@ -233,47 +361,30 @@ export default function BrickBreakerGame({ onGameOver, onScoreUpdate, highScore 
       ball.x += ball.vx;
       ball.y += ball.vy;
 
-      // Pushing to ball trails for motion blur
-      trailsRef.current.push({ x: ball.x, y: ball.y, color: '#ec4899' });
-      if (trailsRef.current.length > 15) {
-        trailsRef.current.shift();
+      // Ball Trails
+      if (Math.random() < 0.4) {
+        trailsRef.current.push({ x: ball.x, y: ball.y, color: '#38bdf8' });
       }
 
-      // Wall Bounce (Horizontal)
+      // Wall Bounce (Left & Right)
       if (ball.x - ball.radius <= 0) {
         ball.x = ball.radius;
-        ball.vx = -ball.vx;
-        shakeRef.current = 2;
-        audio.playHit();
-      } else if (ball.x + ball.radius >= canvas.width) {
-        ball.x = canvas.width - ball.radius;
-        ball.vx = -ball.vx;
-        shakeRef.current = 2;
-        audio.playHit();
+        ball.vx = Math.abs(ball.vx);
+        audio.playReflect();
+        spawnParticles(ball.x, ball.y, '#38bdf8', 4);
+      } else if (ball.x + ball.radius >= WIDTH) {
+        ball.x = WIDTH - ball.radius;
+        ball.vx = -Math.abs(ball.vx);
+        audio.playReflect();
+        spawnParticles(ball.x, ball.y, '#38bdf8', 4);
       }
 
       // Ceiling Bounce
       if (ball.y - ball.radius <= 0) {
         ball.y = ball.radius;
-        ball.vy = -ball.vy;
-        shakeRef.current = 2;
-        audio.playHit();
-      }
-
-      // Bottom Wall Collision
-      if (ball.y + ball.radius >= canvas.height) {
-        if (shieldActiveRef.current) {
-          // Bounce off bottom shield
-          ball.vy = -ball.vy;
-          shieldActiveRef.current = false; // consume shield
-          audio.playLevelUp();
-          shakeRef.current = 6;
-          createParticles(ball.x, canvas.height - 4, '#3b82f6');
-        } else {
-          ball.active = false; // lose ball
-          shakeRef.current = 8;
-          return;
-        }
+        ball.vy = Math.abs(ball.vy);
+        audio.playReflect();
+        spawnParticles(ball.x, ball.y, '#38bdf8', 4);
       }
 
       // Paddle Collision
@@ -281,442 +392,376 @@ export default function BrickBreakerGame({ onGameOver, onScoreUpdate, highScore 
         ball.y + ball.radius >= paddle.y &&
         ball.y - ball.radius <= paddle.y + paddle.h &&
         ball.x + ball.radius >= paddle.x &&
-        ball.x - ball.radius <= paddle.x + paddle.w
+        ball.x - ball.radius <= paddle.x + paddle.w &&
+        ball.vy > 0
       ) {
-        audio.playScore();
-        shakeRef.current = 3;
-        comboRef.current = 0; // Reset combo
+        // Dynamic Reflection Angle based on hit location
+        const hitOffset = (ball.x - (paddle.x + paddle.w / 2)) / (paddle.w / 2);
+        const speed = Math.hypot(ball.vx, ball.vy);
+        ball.vx = hitOffset * 5.2;
+        ball.vy = -Math.sqrt(Math.max(4, speed * speed - ball.vx * ball.vx));
+        ball.y = paddle.y - ball.radius;
 
-        // Redirect angle depending on where ball hits paddle
-        const hitPos = (ball.x - (paddle.x + paddle.w / 2)) / (paddle.w / 2);
-        const maxAngle = Math.PI / 3; // 60 degrees max
-        const angle = hitPos * maxAngle;
-        const currentSpeed = Math.sqrt(ball.vx * ball.vx + ball.vy * ball.vy);
+        audio.playReflect();
+        inputManager.vibrateGamepad(50, 0.3);
+        spawnParticles(ball.x, paddle.y, '#10b981', 8);
 
-        ball.vx = currentSpeed * Math.sin(angle);
-        ball.vy = -currentSpeed * Math.cos(angle);
-        ball.y = paddle.y - ball.radius; // reset to top of paddle
-        
-        // Safety lock vertical lock
-        if (Math.abs(ball.vy) < 1.5) {
-          ball.vy = ball.vy < 0 ? -2 : 2;
-        }
+        // Reset rally combo when ball touches paddle
+        comboRef.current = 0;
+        setCombo(0);
       }
 
-      // Brick Collision
-      const bricks = bricksRef.current;
-      for (let i = 0; i < bricks.length; i++) {
-        const brick = bricks[i];
-        if (
-          ball.x + ball.radius >= brick.x &&
-          ball.x - ball.radius <= brick.x + brick.w &&
-          ball.y + ball.radius >= brick.y &&
-          ball.y - ball.radius <= brick.y + brick.h
-        ) {
-          brick.hits++;
-          comboRef.current++; // Increase combo
-          createParticles(brick.x + brick.w / 2, brick.y + brick.h / 2, brick.color);
-          
-          const comboMultiplier = Math.min(5, 1 + (comboRef.current - 1) * 0.5); // Max 5x
-
-          if (brick.hits >= brick.maxHits) {
-            audio.playHit();
-            shakeRef.current = 7 + (comboRef.current > 2 ? 3 : 0); // Bigger shake for combo
-            
-            const comboPoints = Math.floor(brick.points * comboMultiplier);
-            
-            floatingTextsRef.current.push({
-              x: brick.x + brick.w / 2,
-              y: brick.y,
-              text: comboRef.current > 1 ? `+${comboPoints} (${comboRef.current}x)` : `+${comboPoints}`,
-              color: comboRef.current > 1 ? '#eab308' : brick.color,
-              alpha: 1.0,
-              vy: -1.2
-            });
-            shockwavesRef.current.push({
-              x: brick.x + brick.w / 2,
-              y: brick.y + brick.h / 2,
-              radius: 2,
-              maxRadius: 25 + (comboRef.current * 5),
-              color: brick.color,
-              alpha: 0.8
-            });
-            // Award score
-            setScore(prev => {
-              const next = prev + comboPoints;
-              onScoreUpdate(next);
-              return next;
-            });
-            // Spawn PowerUp chance (18%)
-            if (Math.random() < 0.18) {
-              spawnPowerUp(brick.x + brick.w / 2, brick.y + brick.h);
-            }
-            bricks.splice(i, 1);
-          } else {
-            audio.playScore();
-            shakeRef.current = 4;
-            floatingTextsRef.current.push({
-              x: brick.x + brick.w / 2,
-              y: brick.y,
-              text: "HIT!",
-              color: '#ffffff',
-              alpha: 0.8,
-              vy: -0.6
-            });
-          }
-
-          // Bounce ball
-          ball.vy = -ball.vy;
-          break; // break to avoid multiple brick hits at once
-        }
+      // Shield Bounce
+      if (shieldActiveRef.current && ball.y + ball.radius >= HEIGHT - 8) {
+        ball.vy = -Math.abs(ball.vy);
+        ball.y = HEIGHT - 8 - ball.radius;
+        audio.playShield();
+        spawnShockwave(ball.x, HEIGHT - 8, '#06b6d4');
+        shakeRef.current = 4;
+      } else if (ball.y - ball.radius > HEIGHT) {
+        ball.active = false;
       }
+
+      // Brick Collisions
+      checkBrickCollisions(ball);
     });
 
-    // Check lives & ball count again
-    const surviving = activeBalls.filter(b => b.active);
-    ballsRef.current = surviving;
-    if (surviving.length === 0) {
-      handleLifeLoss();
+    // Update Powerups
+    updatePowerups();
+
+    // Update visual effects
+    updateEffects();
+
+    // Check Level Complete
+    if (bricksRef.current.length === 0) {
+      handleLevelComplete();
     }
   };
 
-  const spawnPowerUp = (x: number, y: number) => {
+  const checkBrickCollisions = (ball: Ball) => {
+    const bricks = bricksRef.current;
+
+    for (let i = bricks.length - 1; i >= 0; i--) {
+      const b = bricks[i];
+
+      // Axis-aligned bounding box collision
+      if (
+        ball.x + ball.radius >= b.x &&
+        ball.x - ball.radius <= b.x + b.w &&
+        ball.y + ball.radius >= b.y &&
+        ball.y - ball.radius <= b.y + b.h
+      ) {
+        // Determine collision side
+        const prevX = ball.x - ball.vx;
+        const prevY = ball.y - ball.vy;
+
+        if (prevX + ball.radius <= b.x || prevX - ball.radius >= b.x + b.w) {
+          ball.vx = -ball.vx;
+        } else {
+          ball.vy = -ball.vy;
+        }
+
+        b.hits++;
+
+        // Increase Combo
+        const newCombo = comboRef.current + 1;
+        comboRef.current = newCombo;
+        setCombo(newCombo);
+
+        if (b.hits >= b.maxHits) {
+          // Brick Shattered
+          bricks.splice(i, 1);
+          const pointsEarned = b.points * (newCombo > 1 ? newCombo : 1);
+          const nextScore = scoreRef.current + pointsEarned;
+          scoreRef.current = nextScore;
+          setScore(nextScore);
+          onScoreUpdate(nextScore);
+
+          audio.playCombo(newCombo);
+          inputManager.vibrateGamepad(80, 0.45);
+          spawnParticles(b.x + b.w / 2, b.y + b.h / 2, b.color, 14);
+          spawnShockwave(b.x + b.w / 2, b.y + b.h / 2, b.color);
+          spawnFloatingText(b.x + b.w / 2, b.y, `+${pointsEarned} ${newCombo > 1 ? `(${newCombo}x)` : ''}`, b.color);
+
+          shakeRef.current = 3;
+          hitStopRef.current = 40; // Satisfying micro hit-stop!
+
+          // Powerup drop chance (15%)
+          if (Math.random() < 0.16) {
+            spawnPowerup(b.x + b.w / 2, b.y + b.h / 2);
+          }
+        } else {
+          // Brick Damaged
+          audio.playHit();
+          spawnParticles(ball.x, ball.y, b.color, 6);
+          b.color = '#ffffff'; // Flash white
+        }
+
+        break; // Process one brick per frame
+      }
+    }
+  };
+
+  const spawnPowerup = (x: number, y: number) => {
     const types: PowerUp['type'][] = ['expand', 'multiball', 'slow', 'shield'];
     const type = types[Math.floor(Math.random() * types.length)];
-    const colors = {
-      expand: '#ec4899', // pink
-      multiball: '#eab308', // yellow
-      slow: '#a855f7', // purple
-      shield: '#3b82f6', // blue
+    const colorMap: Record<PowerUp['type'], { color: string; label: string }> = {
+      expand: { color: '#10b981', label: 'LEBAR' },
+      multiball: { color: '#f59e0b', label: 'MULTI' },
+      slow: { color: '#8b5cf6', label: 'SLOW' },
+      shield: { color: '#06b6d4', label: 'SHIELD' },
     };
 
     powerupsRef.current.push({
-      x,
+      x: x - 12,
       y,
       type,
-      w: 16,
-      h: 16,
-      color: colors[type],
+      w: 24,
+      h: 12,
+      color: colorMap[type].color,
+      label: colorMap[type].label,
     });
   };
 
-  const updatePowerUps = () => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-
+  const updatePowerups = () => {
     const paddle = paddleRef.current;
     const powerups = powerupsRef.current;
 
     for (let i = powerups.length - 1; i >= 0; i--) {
       const pu = powerups[i];
-      pu.y += 2.5; // slow drift down
+      pu.y += 2.2;
 
-      // Check boundary
-      if (pu.y > canvas.height) {
-        powerups.splice(i, 1);
-        continue;
-      }
-
-      // Check Paddle collision
+      // Paddle Catch
       if (
         pu.y + pu.h >= paddle.y &&
         pu.y <= paddle.y + paddle.h &&
         pu.x + pu.w >= paddle.x &&
         pu.x <= paddle.x + paddle.w
       ) {
-        audio.playLevelUp();
-        applyPowerUp(pu.type);
+        audio.playPowerup();
+        applyPowerup(pu.type);
+        spawnParticles(pu.x, pu.y, pu.color, 12);
+        spawnFloatingText(paddle.x + paddle.w / 2, paddle.y - 10, `${pu.label}!`, pu.color);
+        powerups.splice(i, 1);
+        continue;
+      }
+
+      if (pu.y > HEIGHT) {
         powerups.splice(i, 1);
       }
     }
   };
 
-  const applyPowerUp = (type: PowerUp['type']) => {
+  const applyPowerup = (type: PowerUp['type']) => {
     const paddle = paddleRef.current;
 
     if (type === 'expand') {
-      paddle.w = 120; // make wide
-      setTimeout(() => {
-        paddle.w = 80; // revert
-      }, 10000);
-    } 
-    else if (type === 'multiball') {
-      // Add 2 extra balls
-      const baseBall = ballsRef.current[0] || { x: 200, y: 300, vx: 3, vy: -3, radius: 6, active: true };
+      paddle.w = 120;
+      expandTimerRef.current = 10000;
+      setActiveBuffs(prev => Array.from(new Set([...prev, 'EXPAND'])));
+    } else if (type === 'multiball') {
+      const active = ballsRef.current.filter(b => b.active)[0] || { x: 200, y: 300, vx: 3, vy: -3.5, radius: 6, active: true };
       ballsRef.current.push(
-        { x: baseBall.x, y: baseBall.y, vx: baseBall.vx + 1.5, vy: -Math.abs(baseBall.vy), radius: 6, active: true },
-        { x: baseBall.x, y: baseBall.y, vx: baseBall.vx - 1.5, vy: -Math.abs(baseBall.vy), radius: 6, active: true }
+        { x: active.x, y: active.y, vx: active.vx + 1.2, vy: -Math.abs(active.vy), radius: 6, active: true },
+        { x: active.x, y: active.y, vx: active.vx - 1.2, vy: -Math.abs(active.vy), radius: 6, active: true }
       );
-    } 
-    else if (type === 'slow') {
+    } else if (type === 'slow') {
       ballsRef.current.forEach(b => {
-        b.vx *= 0.65;
-        b.vy *= 0.65;
+        b.vx *= 0.7;
+        b.vy *= 0.7;
       });
       setTimeout(() => {
         ballsRef.current.forEach(b => {
-          b.vx /= 0.65;
-          b.vy /= 0.65;
+          b.vx /= 0.7;
+          b.vy /= 0.7;
         });
-      }, 8000);
-    } 
-    else if (type === 'shield') {
+      }, 7000);
+      setActiveBuffs(prev => Array.from(new Set([...prev, 'SLOW'])));
+    } else if (type === 'shield') {
       shieldActiveRef.current = true;
-      shieldTimerRef.current = 15000; // 15 seconds shield
+      shieldTimerRef.current = 12000;
+      setActiveBuffs(prev => Array.from(new Set([...prev, 'SHIELD'])));
     }
   };
 
-  const updateParticles = () => {
-    particlesRef.current = particlesRef.current
-      .map(p => {
-        p.x += p.vx;
-        p.y += p.vy;
-        p.alpha -= p.decay;
-        return p;
-      })
-      .filter(p => p.alpha > 0);
+  const updateEffects = () => {
+    // Particles
+    for (let i = particlesRef.current.length - 1; i >= 0; i--) {
+      const p = particlesRef.current[i];
+      p.x += p.vx;
+      p.y += p.vy;
+      p.alpha -= p.decay;
+      if (p.alpha <= 0) particlesRef.current.splice(i, 1);
+    }
 
-    floatingTextsRef.current = floatingTextsRef.current
-      .map(t => {
-        t.y += t.vy;
-        t.alpha -= 0.025;
-        return t;
-      })
-      .filter(t => t.alpha > 0);
+    // Floating Texts
+    for (let i = floatingTextsRef.current.length - 1; i >= 0; i--) {
+      const t = floatingTextsRef.current[i];
+      t.y += t.vy;
+      t.alpha -= 0.025;
+      if (t.alpha <= 0) floatingTextsRef.current.splice(i, 1);
+    }
 
-    shockwavesRef.current = shockwavesRef.current
-      .map(s => {
-        s.radius += 1.8;
-        s.alpha -= 0.04;
-        return s;
-      })
-      .filter(s => s.alpha > 0);
-  };
+    // Shockwaves
+    for (let i = shockwavesRef.current.length - 1; i >= 0; i--) {
+      const s = shockwavesRef.current[i];
+      s.radius += 1.8;
+      s.alpha -= 0.035;
+      if (s.alpha <= 0 || s.radius >= s.maxRadius) shockwavesRef.current.splice(i, 1);
+    }
 
-  const checkLevelCompletion = () => {
-    if (bricksRef.current.length === 0) {
-      if (levelRef.current < 3) {
-        audio.playLevelUp();
-        const nextLevel = levelRef.current + 1;
-        setLevel(nextLevel);
-        buildLevel(nextLevel);
-        resetBallAndPaddle();
-      } else {
-        setIsPlaying(false);
-        setGameWon(true);
-        audio.playLevelUp();
-        onGameOver(score + 100); // 100 bonus for beating all levels
-      }
+    // Trails decay
+    if (trailsRef.current.length > 20) {
+      trailsRef.current.shift();
     }
   };
 
   const handleLifeLoss = () => {
     audio.playHit();
+    shakeRef.current = 8;
+    hitStopRef.current = 60;
+    inputManager.vibrateGamepad(180, 0.6);
+
     const nextLives = livesRef.current - 1;
+    livesRef.current = nextLives;
     setLives(nextLives);
-    
+
     if (nextLives <= 0) {
-      setIsPlaying(false);
-      setGameOver(true);
-      audio.playGameOver();
+      setGameState('gameover');
+      audio.playExplosion();
       onGameOver(scoreRef.current);
     } else {
       resetBallAndPaddle();
     }
   };
 
-  const resetBallAndPaddle = () => {
-    paddleRef.current = {
-      x: 160,
-      y: 375,
-      w: 80,
-      h: 12,
-      speed: 8,
-    };
-    ballsRef.current = [
-      { x: 200, y: 300, vx: 3, vy: -3, radius: 6, active: true },
-    ];
-    powerupsRef.current = [];
-    shieldActiveRef.current = false;
+  const handleLevelComplete = () => {
+    audio.playLevelUp();
+    shakeRef.current = 6;
+    if (levelRef.current < 3) {
+      const nextLevel = levelRef.current + 1;
+      levelRef.current = nextLevel;
+      setLevel(nextLevel);
+      buildLevel(nextLevel);
+      resetBallAndPaddle();
+      spawnFloatingText(WIDTH / 2, HEIGHT / 2, `LEVEL ${nextLevel}!`, '#10b981');
+    } else {
+      // Completed all levels!
+      const bonusScore = scoreRef.current + 200;
+      scoreRef.current = bonusScore;
+      setScore(bonusScore);
+      onScoreUpdate(bonusScore);
+      setGameState('gameover');
+      onGameOver(bonusScore);
+    }
   };
 
-  const startGame = () => {
-    audio.playCoin();
-    setScore(0);
-    setLevel(1);
-    setLives(3);
-    setGameOver(false);
-    setGameWon(false);
-    resetBallAndPaddle();
-    buildLevel(1);
-    
-    // Explicitly update ref states to guarantee synchronous start
-    isPlayingRef.current = true;
-    gameOverRef.current = false;
-    
-    setIsPlaying(true);
-
-    // Run animator loop
-    if (gameLoopRef.current) cancelAnimationFrame(gameLoopRef.current);
-    gameLoopRef.current = requestAnimationFrame(gameStep);
-  };
-
-;
-
-  const toggleSound = () => {
-    audio.toggleMute();
-    setMuted(audio.getMuteState());
-  };
-
-  // Canvas Drawing
-  const drawStatic = () => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.fillStyle = '#09090b';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-    ctx.fillStyle = '#ec4899';
-    ctx.font = '14px "Press Start 2P", monospace';
-    ctx.textAlign = 'center';
-    ctx.shadowBlur = 10;
-    ctx.shadowColor = '#ec4899';
-    ctx.fillText('TEKAN MULAI UNTUK MAIN', canvas.width / 2, canvas.height / 2);
-    ctx.shadowBlur = 0;
-  };
-
-  const render = () => {
+  const draw = () => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
     ctx.save();
+
+    // Decaying Screen Shake
     if (shakeRef.current > 0) {
-      const dx = (Math.random() - 0.5) * shakeRef.current;
-      const dy = (Math.random() - 0.5) * shakeRef.current;
-      ctx.translate(dx, dy);
-      shakeRef.current *= 0.85;
-      if (shakeRef.current < 0.5) shakeRef.current = 0;
+      const sx = (Math.random() - 0.5) * shakeRef.current;
+      const sy = (Math.random() - 0.5) * shakeRef.current;
+      ctx.translate(sx, sy);
+      shakeRef.current = Math.max(0, shakeRef.current - 0.4);
     }
 
-    // Background
-    ctx.fillStyle = '#09090b';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    // Dark Arcade Arena Background
+    ctx.fillStyle = '#080a0f';
+    ctx.fillRect(0, 0, WIDTH, HEIGHT);
 
-    // Decorative side glow
-    ctx.strokeStyle = 'rgba(236, 72, 153, 0.05)';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.strokeRect(0, 0, canvas.width, canvas.height);
+    // Arena border
+    ctx.strokeStyle = '#1e293b';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(1, 1, WIDTH - 2, HEIGHT - 2);
 
-    // Draw bottom shield if active
-    if (shieldActiveRef.current) {
-      ctx.shadowBlur = 15;
-      ctx.shadowColor = '#3b82f6';
-      ctx.strokeStyle = '#3b82f6';
-      ctx.lineWidth = 4;
-      ctx.beginPath();
-      ctx.moveTo(0, canvas.height - 2);
-      ctx.lineTo(canvas.width, canvas.height - 2);
-      ctx.stroke();
-      ctx.shadowBlur = 0;
-    }
-
-    // Draw bricks
-    bricksRef.current.forEach(brick => {
-      ctx.fillStyle = brick.color;
-      ctx.shadowBlur = 4;
-      ctx.shadowColor = brick.color;
-      ctx.fillRect(brick.x, brick.y, brick.w, brick.h);
-      
-      // Highlight borders for pixel feel
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.35)';
-      ctx.lineWidth = 1;
-      ctx.strokeRect(brick.x, brick.y, brick.w, brick.h);
-
-      // Hit cracks on multi-hits
-      if (brick.hits > 0) {
-        ctx.strokeStyle = 'rgba(0, 0, 0, 0.6)';
-        ctx.beginPath();
-        ctx.moveTo(brick.x + 5, brick.y + 2);
-        ctx.lineTo(brick.x + brick.w - 5, brick.y + brick.h - 2);
-        ctx.stroke();
-      }
-    });
-
-    // Draw Paddle
-    const paddle = paddleRef.current;
-    ctx.fillStyle = '#ec4899';
-    ctx.shadowBlur = 12;
-    ctx.shadowColor = '#ec4899';
-    ctx.beginPath();
-    // Rounded paddle
-    ctx.roundRect(paddle.x, paddle.y, paddle.w, paddle.h, 6);
-    ctx.fill();
-
-    // Draw active balls
-    ballsRef.current.forEach(ball => {
-      ctx.fillStyle = '#ffffff';
-      ctx.shadowBlur = 10;
-      ctx.shadowColor = '#ffffff';
-      ctx.beginPath();
-      ctx.arc(ball.x, ball.y, ball.radius, 0, Math.PI * 2);
-      ctx.fill();
-    });
-
-    // Draw PowerUps
-    powerupsRef.current.forEach(pu => {
-      ctx.fillStyle = pu.color;
-      ctx.shadowBlur = 12;
-      ctx.shadowColor = pu.color;
-      ctx.beginPath();
-      // Retro falling gem style (diamond)
-      ctx.moveTo(pu.x + pu.w / 2, pu.y);
-      ctx.lineTo(pu.x + pu.w, pu.y + pu.h / 2);
-      ctx.lineTo(pu.x + pu.w / 2, pu.y + pu.h);
-      ctx.lineTo(pu.x, pu.y + pu.h / 2);
-      ctx.closePath();
-      ctx.fill();
-
-      // Text icon in center of power-up
-      ctx.fillStyle = '#000';
-      ctx.font = 'bold 8px monospace';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      let sym = 'P';
-      if (pu.type === 'expand') sym = '+';
-      if (pu.type === 'multiball') sym = '3';
-      if (pu.type === 'slow') sym = 'S';
-      if (pu.type === 'shield') sym = 'Ω';
-      ctx.fillText(sym, pu.x + pu.w / 2, pu.y + pu.h / 2 + 0.5);
-    });
-
-    // Draw ball trails for glowing speed effect
-    ctx.shadowBlur = 0;
-    trailsRef.current.forEach((t, index) => {
-      const alpha = (index / trailsRef.current.length) * 0.35;
+    // Ball Trails
+    trailsRef.current.forEach((t, i) => {
       ctx.fillStyle = t.color;
-      ctx.globalAlpha = alpha;
+      ctx.globalAlpha = (i / trailsRef.current.length) * 0.3;
       ctx.beginPath();
       ctx.arc(t.x, t.y, 4, 0, Math.PI * 2);
       ctx.fill();
     });
-    ctx.globalAlpha = 1.0;
+    ctx.globalAlpha = 1;
 
-    // Draw shockwaves
-    shockwavesRef.current.forEach(s => {
-      ctx.strokeStyle = s.color;
-      ctx.globalAlpha = s.alpha;
-      ctx.lineWidth = 1.5;
+    // Bricks
+    bricksRef.current.forEach(b => {
+      ctx.fillStyle = b.color;
       ctx.beginPath();
-      ctx.arc(s.x, s.y, s.radius, 0, Math.PI * 2);
+      ctx.roundRect(b.x, b.y, b.w, b.h, 3);
+      ctx.fill();
+
+      // Top Highlight
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
+      ctx.fillRect(b.x, b.y, b.w, 3);
+
+      // Cracked indicator for multi-hit bricks
+      if (b.maxHits > 1 && b.hits > 0) {
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(b.x + 6, b.y + 2);
+        ctx.lineTo(b.x + b.w - 6, b.y + b.h - 2);
+        ctx.stroke();
+      }
+    });
+
+    // Paddle
+    const paddle = paddleRef.current;
+    ctx.fillStyle = '#10b981';
+    ctx.beginPath();
+    ctx.roundRect(paddle.x, paddle.y, paddle.w, paddle.h, 6);
+    ctx.fill();
+
+    // Paddle center jewel indicator
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath();
+    ctx.arc(paddle.x + paddle.w / 2, paddle.y + paddle.h / 2, 3, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Shield Laser Barrier at bottom
+    if (shieldActiveRef.current) {
+      ctx.strokeStyle = '#06b6d4';
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.moveTo(0, HEIGHT - 4);
+      ctx.lineTo(WIDTH, HEIGHT - 4);
+      ctx.stroke();
+    }
+
+    // Powerups
+    powerupsRef.current.forEach(pu => {
+      ctx.fillStyle = pu.color;
+      ctx.beginPath();
+      ctx.roundRect(pu.x, pu.y, pu.w, pu.h, 3);
+      ctx.fill();
+
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 8px monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText(pu.label[0], pu.x + pu.w / 2, pu.y + 9);
+    });
+
+    // Balls
+    ballsRef.current.forEach(ball => {
+      if (!ball.active) return;
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.arc(ball.x, ball.y, ball.radius, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Soft glow
+      ctx.strokeStyle = 'rgba(56, 189, 248, 0.5)';
+      ctx.lineWidth = 2;
       ctx.stroke();
     });
-    ctx.globalAlpha = 1.0;
 
     // Particles
     particlesRef.current.forEach(p => {
@@ -726,82 +771,112 @@ export default function BrickBreakerGame({ onGameOver, onScoreUpdate, highScore 
       ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
       ctx.fill();
     });
-    ctx.globalAlpha = 1.0;
+    ctx.globalAlpha = 1;
 
-    // Draw floating texts
+    // Shockwaves
+    shockwavesRef.current.forEach(s => {
+      ctx.strokeStyle = s.color;
+      ctx.globalAlpha = s.alpha;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, s.radius, 0, Math.PI * 2);
+      ctx.stroke();
+    });
+    ctx.globalAlpha = 1;
+
+    // Floating Texts
     floatingTextsRef.current.forEach(t => {
       ctx.fillStyle = t.color;
       ctx.globalAlpha = t.alpha;
-      ctx.font = 'bold 9px "Press Start 2P", monospace';
+      ctx.font = 'bold 11px monospace';
       ctx.textAlign = 'center';
       ctx.fillText(t.text, t.x, t.y);
     });
-    ctx.globalAlpha = 1.0;
+    ctx.globalAlpha = 1;
 
     ctx.restore();
   };
 
-  const getGameState = () => {
-    if (gameWon) return 'gameover'; // Uses the same game over overlay but we could customize it if we want
-    if (!isPlaying && !gameOver && !gameWon) return 'ready';
-    if (!isPlaying) return 'gameover';
-    return 'playing';
+  // Direct Pointer / Touch Paddle Navigation
+  const handlePointerMove = (e: React.PointerEvent) => {
+    if (gameStateRef.current !== 'playing') return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const rect = canvas.getBoundingClientRect();
+    const clientX = e.clientX - rect.left;
+    const scaleX = WIDTH / rect.width;
+    const targetX = clientX * scaleX - paddleRef.current.w / 2;
+
+    paddleRef.current.x = Math.max(0, Math.min(WIDTH - paddleRef.current.w, targetX));
   };
 
+  useEffect(() => {
+    buildLevel(1);
+    draw();
+  }, [buildLevel]);
+
   return (
-    <div className="relative flex flex-col h-full w-full min-h-0 items-center justify-center overflow-hidden p-2 bg-[#090b10]">
-      {/* Clean HUD Bar */}
-      <div className="w-full flex-none flex justify-between items-center mb-2 px-3 text-xs">
-        <div className="text-zinc-400 font-medium">
-          Level: <span className="text-indigo-400 font-semibold">{level}</span>
+    <div 
+      ref={containerRef}
+      className="relative flex flex-col h-full w-full min-h-0 items-center justify-center overflow-hidden p-2 bg-[#090b10]"
+    >
+      {/* Clean In-Game HUD */}
+      <div className="w-full max-w-[400px] flex-none flex justify-between items-center mb-2 px-3 py-1 bg-[#121622]/80 border border-white/[0.06] rounded-xl text-xs font-mono">
+        <div className="flex items-center gap-1.5">
+          <span className="text-zinc-400">LVL:</span>
+          <span className="text-indigo-400 font-bold">{level}</span>
         </div>
-        <div className="text-zinc-400 font-medium">
-          Nyawa: <span className="text-rose-400 font-semibold">{'❤️'.repeat(Math.max(0, lives))}</span>
+
+        <div className="flex items-center gap-1">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <span key={i} className={`text-xs ${i < lives ? 'text-rose-500' : 'text-zinc-700'}`}>
+              ❤️
+            </span>
+          ))}
         </div>
-        <div className="text-zinc-400 font-medium">
-          Skor: <span className="text-white font-bold">{score}</span>
+
+        {combo > 1 && (
+          <div className="flex items-center gap-1 text-amber-400 font-bold animate-pulse">
+            <Sparkles size={12} />
+            <span>{combo}x</span>
+          </div>
+        )}
+
+        {activeBuffs.map(buff => (
+          <span key={buff} className="px-1.5 py-0.5 bg-emerald-500/20 text-emerald-400 text-[10px] rounded font-bold">
+            {buff}
+          </span>
+        ))}
+
+        <div className="flex items-center gap-1.5">
+          <span className="text-zinc-400">SKOR:</span>
+          <span className="text-white font-bold">{score}</span>
         </div>
       </div>
 
       {/* Canvas Wrapper */}
-      <div className="relative flex-1 min-h-0 w-full flex items-center justify-center bg-[#090b10] rounded-2xl border border-white/[0.08] shadow-inner overflow-hidden">
+      <div 
+        className="relative flex-1 min-h-0 w-full max-w-[400px] max-h-[400px] flex items-center justify-center bg-[#090b10] rounded-2xl border border-white/[0.08] shadow-2xl overflow-hidden touch-none"
+        onPointerMove={handlePointerMove}
+        onPointerDown={handlePointerMove}
+      >
         <canvas
           ref={canvasRef}
-          width={400}
-          height={400}
-          className="max-w-full max-h-full object-contain"
+          width={WIDTH}
+          height={HEIGHT}
+          className="w-full h-full object-contain block cursor-ew-resize select-none"
         />
-        
+
         <GameOverlay
-          gameState={getGameState()}
-          score={scoreRef.current}
+          gameState={gameState}
+          countdown={countdown}
+          score={score}
           highScore={highScore}
           onStart={startGame}
           onRestart={startGame}
-          instructions="Pantulkan bola menggunakan papan untuk menghancurkan barisan balok. Tangkap permata kekuatan yang jatuh!"
+          instructions="Geser pointer atau gunakan tombol panah untuk memantulkan bola dan hancurkan balok neon!"
         />
-
-        {/* Interactive touch zones on canvas sides for mobile controls */}
-        {isPlaying && (
-          <div className="absolute inset-0 flex">
-            <div 
-              className="flex-1 h-full cursor-pointer select-none active:bg-white/[0.01] touch-none"
-              onTouchStart={(e) => { e.preventDefault(); activeKeysRef.current['ArrowLeft'] = true; }}
-              onTouchEnd={(e) => { e.preventDefault(); activeKeysRef.current['ArrowLeft'] = false; }}
-              onMouseDown={() => { activeKeysRef.current['ArrowLeft'] = true; }}
-              onMouseUp={() => { activeKeysRef.current['ArrowLeft'] = false; }}
-              onMouseLeave={() => { activeKeysRef.current['ArrowLeft'] = false; }}
-            />
-            <div 
-              className="flex-1 h-full cursor-pointer select-none active:bg-white/[0.01] touch-none"
-              onTouchStart={(e) => { e.preventDefault(); activeKeysRef.current['ArrowRight'] = true; }}
-              onTouchEnd={(e) => { e.preventDefault(); activeKeysRef.current['ArrowRight'] = false; }}
-              onMouseDown={() => { activeKeysRef.current['ArrowRight'] = true; }}
-              onMouseUp={() => { activeKeysRef.current['ArrowRight'] = false; }}
-              onMouseLeave={() => { activeKeysRef.current['ArrowRight'] = false; }}
-            />
-          </div>
-        )}
       </div>
     </div>
   );

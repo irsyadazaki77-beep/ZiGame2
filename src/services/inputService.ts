@@ -199,6 +199,7 @@ class InputManager {
         this.prevGamepadButtons[idx] = isDown;
         const action = buttonActions[idx];
         if (action) {
+          this.dispatchSyntheticKeyEvent(action, isDown);
           this.activeSubscribers.forEach((sub) => {
             if (isDown && sub.onActionDown) sub.onActionDown(action);
             if (!isDown && sub.onActionUp) sub.onActionUp(action);
@@ -246,11 +247,58 @@ class InputManager {
     }
   }
 
+  private dispatchSyntheticKeyEvent(action: InputAction, isDown: boolean) {
+    if (typeof window === 'undefined') return;
+    const actionKeyMap: Record<InputAction, { key: string; code: string }> = {
+      UP: { key: 'ArrowUp', code: 'ArrowUp' },
+      DOWN: { key: 'ArrowDown', code: 'ArrowDown' },
+      LEFT: { key: 'ArrowLeft', code: 'ArrowLeft' },
+      RIGHT: { key: 'ArrowRight', code: 'ArrowRight' },
+      PRIMARY: { key: ' ', code: 'Space' },
+      SECONDARY: { key: 'Shift', code: 'ShiftLeft' },
+      PAUSE: { key: 'Escape', code: 'Escape' },
+      RESTART: { key: 'r', code: 'KeyR' }
+    };
+
+    const target = actionKeyMap[action];
+    if (target) {
+      try {
+        const event = new KeyboardEvent(isDown ? 'keydown' : 'keyup', {
+          key: target.key,
+          code: target.code,
+          bubbles: true,
+          cancelable: true
+        });
+        window.dispatchEvent(event);
+      } catch {}
+    }
+  }
+
   private triggerStickAction(action: InputAction, isDown: boolean) {
+    this.dispatchSyntheticKeyEvent(action, isDown);
     this.activeSubscribers.forEach((sub) => {
       if (isDown && sub.onActionDown) sub.onActionDown(action);
       if (!isDown && sub.onActionUp) sub.onActionUp(action);
     });
+  }
+
+  public vibrateGamepad(duration = 100, intensity = 0.5) {
+    if (typeof navigator === 'undefined' || !navigator.getGamepads) return;
+    const gamepads = navigator.getGamepads();
+    const gp = gamepads ? Array.from(gamepads).find((g) => g && g.connected) : null;
+    if (!gp) return;
+
+    try {
+      const actuator = (gp as any).vibrationActuator;
+      if (actuator && typeof actuator.playEffect === 'function') {
+        actuator.playEffect('dual-rumble', {
+          startDelay: 0,
+          duration,
+          weakMagnitude: intensity,
+          strongMagnitude: intensity
+        });
+      }
+    } catch {}
   }
 
   public setActiveSource(source: InputSource) {

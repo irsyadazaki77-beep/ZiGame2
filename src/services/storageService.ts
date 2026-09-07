@@ -175,23 +175,39 @@ export const storageService = {
   getSessionAutolock: (): string => {
     try {
       return localStorage.getItem(KEYS.AUTOLOCK) || 'off';
-    } catch (e) {
+    } catch {
       return 'off';
+    }
+  },
+
+  setSessionAutolock: (value: string): void => {
+    try {
+      localStorage.setItem(KEYS.AUTOLOCK, value);
+    } catch (e) {
+      logger.error("Failed to save session autolock setting", { error: e as Error });
     }
   },
 
   getActiveUser: (): string | null => {
     try {
       return localStorage.getItem(KEYS.ACTIVE_USER);
-    } catch (e) {
+    } catch {
       return null;
+    }
+  },
+
+  setActiveUser: (userId: string): void => {
+    try {
+      localStorage.setItem(KEYS.ACTIVE_USER, userId);
+    } catch (e) {
+      logger.error("Failed to save active user", { error: e as Error });
     }
   },
 
   clearActiveUser: (): void => {
     try {
       localStorage.removeItem(KEYS.ACTIVE_USER);
-    } catch (e) {}
+    } catch {}
   },
 
   // Offline mutation queue for resilience
