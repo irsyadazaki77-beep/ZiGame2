@@ -1,134 +1,172 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useGameEngine } from '../../hooks/useGameEngine';
 import { audio } from '../../utils/audio';
-import { Flag, Bomb } from 'lucide-react';
-import { motion } from 'motion/react';
-import { GameContainer } from '../gameplay/GameContainer';
-import { GameHUD } from '../gameplay/GameHUD';
+import { inputManager } from '../../services/inputService';
 import { GameOverlay } from '../gameplay/GameOverlay';
+import { Bomb, Flag, Eye, Sparkles } from 'lucide-react';
 
-interface CyberMinesProps {
-  onGameOver: (score: number) => void;
+interface GameProps {
   onScoreUpdate: (score: number) => void;
+  onGameOver: (score: number) => void;
   highScore: number;
 }
 
 interface Cell {
-  x: number;
-  y: number;
+  r: number;
+  c: number;
   isMine: boolean;
-  isRevealed: boolean;
+  isOpen: boolean;
   isFlagged: boolean;
   neighborMines: number;
 }
 
-const ROWS = 10;
-const COLS = 10;
-const TOTAL_MINES = 15;
+const ROWS = 9;
+const COLS = 9;
+const MINES_COUNT = 10;
 
-export default function CyberMinesGame({ onGameOver, onScoreUpdate, highScore }: CyberMinesProps) {
-  const [board, setBoard] = useState<Cell[][]>([]);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [gameOver, setGameOver] = useState(false);
-  const [won, setWon] = useState(false);
-  const [score, setScore] = useState(0);
-  const [muted, setMuted] = useState(audio.getMuteState());
-  const [flagsRemaining, setFlagsRemaining] = useState(TOTAL_MINES);
-  
-  // Create a new board
-  const initializeBoard = () => {
-    const newBoard: Cell[][] = [];
-    for (let y = 0; y < ROWS; y++) {
+export default function CyberMinesGame({ onScoreUpdate, onGameOver, highScore }: GameProps) {
+  const [grid, setGrid] = useState<Cell[][]>([]);
+  const [flagsRemaining, setFlagsRemaining] = useState(MINES_COUNT);
+  const [actionMode, setActionMode] = useState<'reveal' | 'flag'>('reveal');
+  const [firstClickDone, setFirstClickDone] = useState(false);
+
+  const longPressTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const longPressTriggeredRef = useRef(false);
+
+  const {
+    gameState,
+    score,
+    updateScore,
+    triggerGameOver,
+    startWithCountdown,
+    countdown
+  } = useGameEngine({
+    gameId: 'cyber-mines',
+    onGameOver,
+    onScoreUpdate
+  });
+
+  // Initialize empty grid
+  const initializeGrid = useCallback((): Cell[][] => {
+    const newGrid: Cell[][] = [];
+    for (let r = 0; r < ROWS; r++) {
       const row: Cell[] = [];
-      for (let x = 0; x < COLS; x++) {
+      for (let c = 0; c < COLS; c++) {
         row.push({
-          x,
-          y,
+          r,
+          c,
           isMine: false,
-          isRevealed: false,
+          isOpen: false,
           isFlagged: false,
           neighborMines: 0
         });
       }
-      newBoard.push(row);
+      newGrid.push(row);
     }
-    
-    // Plant mines
-    let minesPlanted = 0;
-    while (minesPlanted < TOTAL_MINES) {
-      const rx = Math.floor(Math.random() * COLS);
-      const ry = Math.floor(Math.random() * ROWS);
-      if (!newBoard[ry][rx].isMine) {
-        newBoard[ry][rx].isMine = true;
-        minesPlanted++;
+    return newGrid;
+  }, []);
+
+  // Place mines safely avoiding the first clicked cell
+  const placeMines = (initialGrid: Cell[][], safeR: number, safeC: number): Cell[][] => {
+    const newGrid = initialGrid.map(row => row.map(cell => ({ ...cell })));
+    let placed = 0;
+
+    while (placed < MINES_COUNT) {
+      const r = Math.floor(Math.random() * ROWS);
+      const c = Math.floor(Math.random() * COLS);
+
+      // Don't place on first click cell or adjacent neighbors
+      const isNearSafe = Math.abs(r - safeR) <= 1 && Math.abs(c - safeC) <= 1;
+      if (!newGrid[r][c].isMine && !isNearSafe) {
+        newGrid[r][c].isMine = true;
+        placed++;
       }
     }
-    
-    // Calculate neighbors
-    for (let y = 0; y < ROWS; y++) {
-      for (let x = 0; x < COLS; x++) {
-        if (!newBoard[y][x].isMine) {
+
+    // Compute neighbor counts
+    for (let r = 0; r < ROWS; r++) {
+      for (let c = 0; c < COLS; c++) {
+        if (!newGrid[r][c].isMine) {
           let count = 0;
-          for (let dy = -1; dy <= 1; dy++) {
-            for (let dx = -1; dx <= 1; dx++) {
-              if (y + dy >= 0 && y + dy < ROWS && x + dx >= 0 && x + dx < COLS) {
-                if (newBoard[y + dy][x + dx].isMine) count++;
+          for (let dr = -1; dr <= 1; dr++) {
+            for (let dc = -1; dc <= 1; dc++) {
+              const nr = r + dr;
+              const nc = c + dc;
+              if (nr >= 0 && nr < ROWS && nc >= 0 && nc < COLS && newGrid[nr][nc].isMine) {
+                count++;
               }
             }
           }
-          newBoard[y][x].neighborMines = count;
+          newGrid[r][c].neighborMines = count;
         }
       }
     }
-    
-    setBoard(newBoard);
-    setFlagsRemaining(TOTAL_MINES);
-    setScore(0);
-    setGameOver(false);
-    setWon(false);
+
+    return newGrid;
   };
 
-  useEffect(() => {
-    initializeBoard();
-  }, []);
+  // Reveal Cell Logic (with cascade)
+  const revealCell = useCallback((r: number, c: number, currentGrid?: Cell[][]) => {
+    if (gameState !== 'playing') return;
 
-  const startGame = () => {
-    initializeBoard();
-    setIsPlaying(true);
-    audio.playCoin();
-  }
+    const g = currentGrid || grid;
+    if (!g || !g[r] || !g[r][c]) return;
+    const target = g[r][c];
 
-;
+    if (target.isOpen || target.isFlagged) return;
 
-  const revealCell = (x: number, y: number) => {
-    if (!isPlaying || gameOver || won || board[y][x].isRevealed || board[y][x].isFlagged) return;
+    let activeGrid = g;
 
-    const newBoard = [...board];
-    
-    if (newBoard[y][x].isMine) {
-      // Game Over
-      newBoard[y][x].isRevealed = true;
-      setBoard(newBoard);
-      handleGameOver(false);
+    // First click safe setup
+    if (!firstClickDone) {
+      activeGrid = placeMines(g, r, c);
+      setFirstClickDone(true);
+    }
+
+    const nextGrid = activeGrid.map(row => row.map(cell => ({ ...cell })));
+    const clickedCell = nextGrid[r][c];
+
+    // Mine hit
+    if (clickedCell.isMine) {
+      clickedCell.isOpen = true;
+      audio.playExplosion();
+      inputManager.vibrateGamepad(250, 0.85);
+
+      // Open all mines
+      for (let i = 0; i < ROWS; i++) {
+        for (let j = 0; j < COLS; j++) {
+          if (nextGrid[i][j].isMine) {
+            nextGrid[i][j].isOpen = true;
+          }
+        }
+      }
+
+      setGrid(nextGrid);
+      triggerGameOver();
       return;
     }
 
-    // Flood fill to reveal
-    let revealedCount = 0;
-    const stack = [[x, y]];
-    while (stack.length > 0) {
-      const [cx, cy] = stack.pop()!;
-      if (!newBoard[cy][cx].isRevealed && !newBoard[cy][cx].isFlagged) {
-        newBoard[cy][cx].isRevealed = true;
-        revealedCount++;
-        
-        if (newBoard[cy][cx].neighborMines === 0) {
-          for (let dy = -1; dy <= 1; dy++) {
-            for (let dx = -1; dx <= 1; dx++) {
-              const nx = cx + dx;
-              const ny = cy + dy;
-              if (ny >= 0 && ny < ROWS && nx >= 0 && nx < COLS) {
-                if (!newBoard[ny][nx].isRevealed) {
-                  stack.push([nx, ny]);
+    // Cascade reveal for empty cells
+    const queue: [number, number][] = [[r, c]];
+    clickedCell.isOpen = true;
+    let newlyOpened = 1;
+
+    while (queue.length > 0) {
+      const [currR, currC] = queue.shift()!;
+      const curr = nextGrid[currR][currC];
+
+      if (curr.neighborMines === 0) {
+        for (let dr = -1; dr <= 1; dr++) {
+          for (let dc = -1; dc <= 1; dc++) {
+            const nr = currR + dr;
+            const nc = currC + dc;
+            if (nr >= 0 && nr < ROWS && nc >= 0 && nc < COLS) {
+              const neighbor = nextGrid[nr][nc];
+              if (!neighbor.isOpen && !neighbor.isFlagged && !neighbor.isMine) {
+                neighbor.isOpen = true;
+                newlyOpened++;
+                if (neighbor.neighborMines === 0) {
+                  queue.push([nr, nc]);
                 }
               }
             }
@@ -137,168 +175,199 @@ export default function CyberMinesGame({ onGameOver, onScoreUpdate, highScore }:
       }
     }
 
-    setBoard(newBoard);
-    const newScore = score + (revealedCount * 10);
-    setScore(newScore);
-    onScoreUpdate(newScore);
-    audio.playHit();
-    
-    checkWinCondition(newBoard);
-  };
+    audio.playScore();
+    setGrid(nextGrid);
 
-  const toggleFlag = (e: React.MouseEvent, x: number, y: number) => {
-    e.preventDefault();
-    if (!isPlaying || gameOver || won || board[y][x].isRevealed) return;
+    // Calculate score
+    let totalOpen = 0;
+    for (let i = 0; i < ROWS; i++) {
+      for (let j = 0; j < COLS; j++) {
+        if (nextGrid[i][j].isOpen && !nextGrid[i][j].isMine) totalOpen++;
+      }
+    }
 
-    const newBoard = [...board];
-    if (newBoard[y][x].isFlagged) {
-      newBoard[y][x].isFlagged = false;
-      setFlagsRemaining(prev => prev + 1);
-      audio.playJump();
+    const points = totalOpen * 15;
+    updateScore(points);
+
+    // Check Win Condition
+    const nonMineCount = ROWS * COLS - MINES_COUNT;
+    if (totalOpen >= nonMineCount) {
+      audio.playPowerup();
+      updateScore(points + 500); // Win bonus
+      triggerGameOver();
+    }
+  }, [firstClickDone, gameState, grid, triggerGameOver, updateScore]);
+
+  // Toggle Flag Logic
+  const toggleFlag = useCallback((r: number, c: number) => {
+    if (gameState !== 'playing' || !grid[r] || !grid[r][c]) return;
+    const target = grid[r][c];
+    if (target.isOpen) return;
+
+    const nextGrid = grid.map(row => row.map(cell => ({ ...cell })));
+    const nextFlagged = !target.isFlagged;
+
+    if (nextFlagged && flagsRemaining <= 0) return;
+
+    nextGrid[r][c].isFlagged = nextFlagged;
+    setGrid(nextGrid);
+    setFlagsRemaining(prev => nextFlagged ? prev - 1 : prev + 1);
+    audio.playLaser();
+    inputManager.vibrateGamepad(40, 0.3);
+  }, [flagsRemaining, gameState, grid]);
+
+  // Click / Touch Handler
+  const handleCellClick = (r: number, c: number) => {
+    if (longPressTriggeredRef.current) {
+      longPressTriggeredRef.current = false;
+      return;
+    }
+
+    if (actionMode === 'flag') {
+      toggleFlag(r, c);
     } else {
-      if (flagsRemaining > 0) {
-        newBoard[y][x].isFlagged = true;
-        setFlagsRemaining(prev => prev - 1);
-        audio.playLaser();
-      }
-    }
-    setBoard(newBoard);
-    checkWinCondition(newBoard);
-  };
-
-  const checkWinCondition = (currentBoard: Cell[][]) => {
-    let unrevealedSafeCells = 0;
-    let correctlyFlaggedMines = 0;
-
-    for (let y = 0; y < ROWS; y++) {
-      for (let x = 0; x < COLS; x++) {
-        if (!currentBoard[y][x].isMine && !currentBoard[y][x].isRevealed) {
-          unrevealedSafeCells++;
-        }
-        if (currentBoard[y][x].isMine && currentBoard[y][x].isFlagged) {
-          correctlyFlaggedMines++;
-        }
-      }
-    }
-
-    if (unrevealedSafeCells === 0 || correctlyFlaggedMines === TOTAL_MINES) {
-      handleGameOver(true);
+      revealCell(r, c);
     }
   };
 
-  const handleGameOver = (isWin: boolean) => {
-    setGameOver(true);
-    setIsPlaying(false);
-    setWon(isWin);
-    
-    // Reveal all mines
-    const finalBoard = [...board];
-    for (let y = 0; y < ROWS; y++) {
-      for (let x = 0; x < COLS; x++) {
-        if (finalBoard[y][x].isMine) {
-          finalBoard[y][x].isRevealed = true;
-        }
-      }
-    }
-    setBoard(finalBoard);
-    
-    const finalScore = isWin ? score + 500 : score;
-    setScore(finalScore);
-    if (isWin) {
-      audio.playLevelUp();
-    } else {
-      audio.playExplosion();
-    }
-    setTimeout(() => {
-      onGameOver(finalScore);
-    }, 1500);
+  // Long press for touch mobile flag
+  const handleTouchStart = (r: number, c: number) => {
+    longPressTriggeredRef.current = false;
+    longPressTimerRef.current = setTimeout(() => {
+      longPressTriggeredRef.current = true;
+      toggleFlag(r, c);
+    }, 450);
   };
 
-  const toggleMute = () => {
-    const newMute = !muted;
-    setMuted(newMute);
-    audio.toggleMute();
-  };
-
-  const getNumberColor = (count: number) => {
-    switch (count) {
-      case 1: return 'text-blue-400';
-      case 2: return 'text-green-400';
-      case 3: return 'text-red-400';
-      case 4: return 'text-purple-400';
-      case 5: return 'text-yellow-400';
-      case 6: return 'text-cyan-400';
-      case 7: return 'text-orange-400';
-      case 8: return 'text-pink-400';
-      default: return 'text-white';
+  const handleTouchEnd = () => {
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
     }
   };
 
-  const getGameState = () => {
-    if (!isPlaying && score === 0 && !gameOver && !won) return 'ready';
-    if (!isPlaying) return 'gameover';
-    return 'playing';
-  };
+  // Start lifecycle
+  const startGame = useCallback(() => {
+    const fresh = initializeGrid();
+    setGrid(fresh);
+    setFlagsRemaining(MINES_COUNT);
+    setFirstClickDone(false);
+    updateScore(0);
+
+    startWithCountdown(() => {});
+  }, [initializeGrid, startWithCountdown, updateScore]);
+
+  useEffect(() => {
+    setGrid(initializeGrid());
+  }, [initializeGrid]);
 
   return (
-    <GameContainer aspect="square" maxWidth="sm">
-      {isPlaying && (
-        <GameHUD 
-          stats={[
-            { id: 'flags', label: 'BENDERA', value: flagsRemaining, icon: <Flag size={14} className="text-red-400" /> },
-            { id: 'score', label: 'SKOR', value: score, emphasized: true }
-          ]} 
-        />
-      )}
+    <div className="relative flex flex-col h-full w-full min-h-0 items-center justify-center overflow-hidden p-2 bg-[#090b14]">
+      {/* HUD */}
+      <div className="w-full max-w-[360px] flex-none flex justify-between items-center mb-2 px-3 py-1 bg-[#121622]/80 border border-white/[0.06] rounded-xl text-xs font-mono">
+        <div className="flex items-center gap-1.5">
+          <Flag size={14} className="text-rose-400" />
+          <span className="text-zinc-400">BENDERA:</span>
+          <span className="text-rose-400 font-bold">{flagsRemaining}</span>
+        </div>
 
-      <GameOverlay
-        gameState={getGameState()}
-        score={score}
-        onStart={startGame}
-        onRestart={startGame}
-        instructions="Klik kiri untuk membuka area, klik kanan (atau tahan di HP) untuk memasang bendera."
-      />
-
-      <div className="w-full h-full p-4 flex flex-col items-center justify-center">
-        <div className="w-full max-w-sm aspect-square bg-zinc-950/80 p-2 sm:p-4 rounded-xl border border-zinc-800 shadow-2xl">
-          <div className="grid gap-1 w-full h-full" style={{ gridTemplateColumns: `repeat(${COLS}, minmax(0, 1fr))` }}>
-            {board.map((row, y) => (
-              row.map((cell, x) => (
-                <div 
-                  key={`${x}-${y}`}
-                  onClick={() => revealCell(x, y)}
-                  onContextMenu={(e) => toggleFlag(e, x, y)}
-                  className={`
-                    aspect-square rounded flex items-center justify-center font-bold text-xs sm:text-sm cursor-pointer transition-colors duration-200
-                    ${!cell.isRevealed 
-                      ? 'bg-zinc-800 hover:bg-zinc-700 border border-zinc-700/50 shadow-[inset_0_2px_4px_rgba(255,255,255,0.1)]' 
-                      : cell.isMine 
-                        ? 'bg-red-900/50 border border-red-500' 
-                        : 'bg-zinc-900 border border-zinc-800/50 shadow-inner'
-                    }
-                  `}
-                >
-                  <motion.div
-                    initial={cell.isRevealed || cell.isFlagged ? { scale: 0.5, opacity: 0 } : false}
-                    animate={{ scale: 1, opacity: 1 }}
-                    transition={{ type: "spring", stiffness: 400, damping: 25 }}
-                  >
-                    {cell.isRevealed ? (
-                      cell.isMine ? (
-                        <Bomb size={16} className="text-red-500 drop-shadow-[0_0_5px_rgba(239,68,68,0.8)]" />
-                      ) : cell.neighborMines > 0 ? (
-                        <span className={getNumberColor(cell.neighborMines)}>{cell.neighborMines}</span>
-                      ) : null
-                    ) : cell.isFlagged ? (
-                      <Flag size={14} className="text-red-500 drop-shadow-[0_0_5px_rgba(239,68,68,0.8)]" />
-                    ) : null}
-                  </motion.div>
-                </div>
-              ))
-            ))}
-          </div>
+        <div className="flex items-center gap-2">
+          <span className="text-zinc-400">SKOR:</span>
+          <span className="text-white font-bold">{score}</span>
         </div>
       </div>
-    </GameContainer>
+
+      {/* Mode Switcher Toggle */}
+      <div className="w-full max-w-[360px] flex-none flex gap-2 mb-2">
+        <button
+          onClick={() => setActionMode('reveal')}
+          className={`flex-1 py-1.5 px-3 rounded-xl border text-xs font-bold flex items-center justify-center gap-1.5 transition-all ${
+            actionMode === 'reveal'
+              ? 'bg-cyan-600 text-white border-cyan-400 shadow-md shadow-cyan-600/30'
+              : 'bg-white/[0.04] text-zinc-400 border-white/[0.06] hover:bg-white/[0.08]'
+          }`}
+        >
+          <Eye size={14} /> Buka Petak
+        </button>
+        <button
+          onClick={() => setActionMode('flag')}
+          className={`flex-1 py-1.5 px-3 rounded-xl border text-xs font-bold flex items-center justify-center gap-1.5 transition-all ${
+            actionMode === 'flag'
+              ? 'bg-rose-600 text-white border-rose-400 shadow-md shadow-rose-600/30'
+              : 'bg-white/[0.04] text-zinc-400 border-white/[0.06] hover:bg-white/[0.08]'
+          }`}
+        >
+          <Flag size={14} /> Pasang Bendera
+        </button>
+      </div>
+
+      {/* Grid Container */}
+      <div className="relative flex-none w-full max-w-[360px] aspect-square bg-[#101424] p-2.5 rounded-2xl border border-white/[0.08] shadow-2xl overflow-hidden select-none">
+        <div className="grid grid-cols-9 grid-rows-9 gap-1 w-full h-full">
+          {grid.map((row, r) =>
+            row.map((cell, c) => {
+              let cellContent: React.ReactNode = null;
+              let cellStyle = 'bg-white/[0.05] border-white/[0.06] hover:bg-white/[0.1] text-zinc-300';
+
+              if (cell.isOpen) {
+                if (cell.isMine) {
+                  cellStyle = 'bg-rose-900/80 border-rose-500 text-rose-300 animate-pulse';
+                  cellContent = <Bomb size={16} className="text-rose-400" />;
+                } else {
+                  cellStyle = 'bg-[#090d18] border-white/[0.04] text-white';
+                  if (cell.neighborMines > 0) {
+                    const colors = [
+                      'text-sky-400',
+                      'text-emerald-400',
+                      'text-amber-400',
+                      'text-indigo-400',
+                      'text-rose-400',
+                      'text-pink-400',
+                      'text-purple-400',
+                      'text-white'
+                    ];
+                    cellContent = (
+                      <span className={`font-black text-sm ${colors[cell.neighborMines - 1]}`}>
+                        {cell.neighborMines}
+                      </span>
+                    );
+                  }
+                }
+              } else if (cell.isFlagged) {
+                cellStyle = 'bg-rose-950/60 border-rose-600/50 text-rose-400';
+                cellContent = <Flag size={14} className="text-rose-400" />;
+              }
+
+              return (
+                <button
+                  key={`${r}-${c}`}
+                  onClick={() => handleCellClick(r, c)}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    toggleFlag(r, c);
+                  }}
+                  onTouchStart={() => handleTouchStart(r, c)}
+                  onTouchEnd={handleTouchEnd}
+                  onTouchCancel={handleTouchEnd}
+                  className={`flex items-center justify-center rounded-lg border transition-all duration-100 font-bold select-none cursor-pointer ${cellStyle}`}
+                >
+                  {cellContent}
+                </button>
+              );
+            })
+          )}
+        </div>
+
+        <GameOverlay
+          gameState={gameState}
+          score={score}
+          highScore={highScore}
+          countdown={countdown}
+          onStart={startGame}
+          onRestart={startGame}
+          instructions="Bongkar seluruh ladang ranjau siber tanpa meledakkan bom! Gunakan mode bendera atau tekan lama untuk menandai ranjau."
+        />
+      </div>
+    </div>
   );
 }

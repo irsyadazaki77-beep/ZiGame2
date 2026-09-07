@@ -311,6 +311,60 @@ describe('ZiGame 2.0 Backend Authority & Security Tests', () => {
     });
   });
 
+  describe('Authoritative Economy: Gamble, Gacha & Claim Reward', () => {
+    it('should process gamble coin flip atomically on server', async () => {
+      const testUid = `gambler-${Date.now()}`;
+      const res = await request(app)
+        .post('/api/economy/gamble')
+        .set('x-test-uid', testUid)
+        .send({ bet: 20, choice: 'heads' });
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(typeof res.body.won).toBe('boolean');
+      expect(['heads', 'tails']).toContain(res.body.outcomeSide);
+      expect(typeof res.body.remainingCoins).toBe('number');
+      expect(res.body.transactionId).toBeDefined();
+    });
+
+    it('should reject gamble when balance is insufficient', async () => {
+      const testUid = `poor-gambler-${Date.now()}`;
+      const res = await request(app)
+        .post('/api/economy/gamble')
+        .set('x-test-uid', testUid)
+        .send({ bet: 500, choice: 'heads' }); // Default balance is 100
+
+      expect(res.status).toBe(400);
+      expect(res.body.code).toBe('INSUFFICIENT_FUNDS');
+    });
+
+    it('should process gacha pull atomically on server', async () => {
+      const testUid = `gacha-puller-${Date.now()}`;
+      const res = await request(app)
+        .post('/api/economy/gacha')
+        .set('x-test-uid', testUid)
+        .send({});
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.rewardId).toBeDefined();
+      expect(res.body.remainingCoins).toBe(50); // 100 - 50 = 50
+    });
+
+    it('should process reward claim atomically on server', async () => {
+      const testUid = `claimer-${Date.now()}`;
+      const res = await request(app)
+        .post('/api/economy/claim')
+        .set('x-test-uid', testUid)
+        .send({ amount: 50, reason: 'DAILY_MISSION_COMPLETED' });
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.newBalance).toBe(150); // 100 + 50 = 150
+      expect(res.body.transactionId).toBeDefined();
+    });
+  });
+
   describe('Standardized API Error Contract', () => {
     it('should return standardized error contract on invalid routes or inputs', async () => {
       const res = await request(app)

@@ -188,6 +188,111 @@ export const GAME_TUTORIALS: Record<string, GameTutorialConfig> = {
     proTips: [
       'Jaga tumpukan tetap rata dan hindari lubang tersembunyi di bawah'
     ]
+  },
+  'neon-heist': {
+    gameId: 'neon-heist',
+    title: 'Neon Heist',
+    icon: '🥷',
+    objective: 'Infiltrasi fasilitas berkeamanan tinggi, retas seluruh terminal data tanpa tertangkap CCTV atau penjaga patroli, dan capai titik ekstraksi.',
+    scoring: [
+      '+150 Poin per terminal data diretas',
+      '+50 Poin per keycard diperoleh',
+      '+1000 Poin ekstraksi sukses + bonus stealth'
+    ],
+    controls: {
+      keyboard: ['WASD / Panah (Arah Gerak)', 'Spasi (Hack Terminal)', 'Shift (Jalan Mengendap)'],
+      touch: ['Joystick Sentuh Virtual + Tombol Retas']
+    },
+    firstPlayHint: 'Amati sudut kerucut pandang (FOV) senter penjaga dan CCTV. Jika status alarm naik, segera bersembunyi di balik dinding.',
+    advancedMechanic: 'Pancing penjaga untuk meninggalkan pos patroli dengan mendekati tepi radius pendengaran mereka.',
+    proTips: [
+      'Hafalkan rute patroli sebelum melangkah maju',
+      'Nonaktifkan laser sebelum melintas'
+    ]
+  },
+  'void-survivor': {
+    gameId: 'void-survivor',
+    title: 'Void Survivor',
+    objective: 'Bertahan hidup dari kepungan tanpa henti ribuan monster void, kumpulkan permata energi XP, dan perkuat build senjata otomatis.',
+    icon: '⚔️',
+    scoring: [
+      '+10-100 Poin per monster void dikalahkan',
+      '+250 Poin per boss void tereliminasi',
+      'Bonus skor kelipatan waktu bertahan hidup'
+    ],
+    controls: {
+      keyboard: ['WASD / Panah (Bergerak)', 'Senjata menembak otomatis ke musuh terdekat'],
+      touch: ['Joystick Sentuh Virtual']
+    },
+    firstPlayHint: 'Terus bergerak membentuk lingkaran agar kawanan musuh tidak mengepung dari segala arah.',
+    advancedMechanic: 'Fokuskan upgrade awal pada area-of-effect (Nova/Plasma) untuk mempermudah farming XP massal.',
+    proTips: [
+      'Jangan biarkan kristal XP tertinggal jauh di belakang',
+      'Ambil upgrade kecepatan gerak minimal tier 1'
+    ]
+  },
+  'orbital-defense': {
+    gameId: 'orbital-defense',
+    title: 'Orbital Defense',
+    icon: '🛰️',
+    objective: 'Bangun menara pertahanan taktis di grid stasiun luar angkasa dan cegah drone penyerang mencapai reaktor orbital.',
+    scoring: [
+      '+15-60 Poin per drone hancur',
+      '+500 Poin bonus penyelesaian gelombang tanpa kebocoran',
+      'Bonus kredit efisiensi energi sisa'
+    ],
+    controls: {
+      keyboard: ['Klik / Tap (Pilih & Bangun Menara)', 'Spasi (Mulai Wave)'],
+      touch: ['Ketuk Grid untuk Membangun']
+    },
+    firstPlayHint: 'Tempatkan Pulse Laser di tikungan tajam pertama untuk memaksimalkan waktu jangkauan tembak.',
+    advancedMechanic: 'Kombinasikan Cryo Emitter (perlambat) dengan Plasma Cannon (ledakan area) untuk kombo maut.',
+    proTips: [
+      'Upgrade menara yang berada di posisi strategis daripada membangun terlalu banyak menara level 1',
+      'Perhatikan tipe musuh cepat di wave ganjil'
+    ]
+  },
+  'gravity-shift': {
+    gameId: 'gravity-shift',
+    title: 'Gravity Shift',
+    icon: '🌌',
+    objective: 'Navigasikan pelari berkecepatan tinggi melewati labirin rintangan berbahaya dengan membalikkan gravitasi ke langit-langit dan lantai.',
+    scoring: [
+      '+200 Poin per Energy Shard dikumpulkan',
+      '+1000 Poin per penyelesaian level portal',
+      'Bonus waktu ekstra untuk speedrun tanpa kematian'
+    ],
+    controls: {
+      keyboard: ['A / D atau Panah Kiri/Kanan (Lari)', 'Spasi / Panah Atas (Balik Gravitasi)'],
+      touch: ['Tombol Kiri/Kanan + Tombol Flip Gravitasi']
+    },
+    firstPlayHint: 'Gravitasi hanya dapat dibalik saat Anda sedang menapak di permukaan (lantai/atap) atau saat menyentuh Inversion Orb.',
+    advancedMechanic: 'Gunakan Speed Boost Pads untuk meluncur melewati koridor duri berkecepatan tinggi.',
+    proTips: [
+      'Perhatikan siklus kedipan laser sebelum melakukan lompatan flip',
+      'Sentuh checkpoint hijau untuk mengamankan progres'
+    ]
+  },
+  'hex-dominion': {
+    gameId: 'hex-dominion',
+    title: 'Hex Dominion',
+    icon: '🔷',
+    objective: 'Kuasai peta pertempuran heksagonal, rebut node energi, rekrut armada pasukan siber, dan hancurkan HQ musuh.',
+    scoring: [
+      '+100 Poin per perebutan Hex Node',
+      '+250 Poin per unit musuh dihancurkan',
+      '+2000 Poin per kemenangan perang dominasi'
+    ],
+    controls: {
+      keyboard: ['Klik Hex Unit untuk Memilih', 'Klik Hex Target untuk Bergerak / Menyerang'],
+      touch: ['Ketuk Unit & Hex Target']
+    },
+    firstPlayHint: 'Kirim Scout Drone di giliran awal untuk merebut Energy Well (simbol petir) demi mendongkrak pemasukan energi per giliran.',
+    advancedMechanic: 'Posisikan Support Aegis di belakang Siege Tank agar tank mendapat regenerasi +20 HP setiap ronde.',
+    proTips: [
+      'Lindungi HQ utama Anda dengan menempatkan unit garda depan di celah sempit',
+      'Fokuskan tembakan gabungan beberapa unit ke satu target terkuat musuh'
+    ]
   }
 };
 

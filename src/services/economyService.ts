@@ -115,43 +115,39 @@ export const economyService = {
         headers,
         body: JSON.stringify({ amount, reason })
       });
+      const data = await res.json();
       if (res.ok) {
-        const data = await res.json();
-        return { success: true, newBalance: data.coins, remainingCoins: data.coins };
+        return { success: true, newBalance: data.newBalance, remainingCoins: data.newBalance };
       }
-    } catch (e) {
+      return { success: false, message: data.message };
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : 'Gagal mengklaim reward';
       logger.warn('Failed to claim reward on server', { error: e });
+      return { success: false, message: msg };
     }
-    return { success: true };
   },
 
   gacha: async (_legacyUserOrName?: string): Promise<EconomyActionResult> => {
-    const cost = 50;
-    const items = [
-      'avatar_alien', 'avatar_ninja', 'avatar_robot', 'avatar_wizard', 'avatar_dragon',
-      'theme_cyberpunk', 'theme_retro', 'theme_matrix', 'theme_synthwave'
-    ];
-    const pickedReward = items[Math.floor(Math.random() * items.length)];
-
     try {
       const headers = await getAuthHeaders();
-      const res = await fetch('/api/buy-item', {
+      const res = await fetch('/api/economy/gacha', {
         method: 'POST',
         headers,
-        body: JSON.stringify({
-          itemId: `gacha_${pickedReward}`,
-          cost,
-          itemType: pickedReward.startsWith('avatar_') ? 'avatar' : 'theme',
-          value: pickedReward
-        })
+        body: JSON.stringify({})
       });
       const data = await res.json();
       if (res.ok) {
-        return { success: true, rewardId: pickedReward, remainingCoins: data.remainingCoins };
+        return {
+          success: true,
+          rewardId: data.rewardId,
+          remainingCoins: data.remainingCoins,
+          item: data.item
+        };
       }
       return { success: false, message: data.message };
-    } catch (e: any) {
-      return { success: false, message: e.message };
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : 'Gagal menarik gacha';
+      return { success: false, message: msg };
     }
   },
 
@@ -160,34 +156,28 @@ export const economyService = {
     choice: 'heads' | 'tails',
     _legacyUserOrName?: string
   ): Promise<EconomyActionResult> => {
-    const isWin = Math.random() < 0.48; // 48% win probability
-    const outcomeSide: 'heads' | 'tails' = isWin ? choice : (choice === 'heads' ? 'tails' : 'heads');
-    const change = isWin ? bet : -bet;
-
     try {
       const headers = await getAuthHeaders();
-      if (isWin) {
-        await fetch('/api/economy/claim', {
-          method: 'POST',
-          headers,
-          body: JSON.stringify({ amount: bet, reason: 'GAMBLE_WIN' })
-        });
-      } else {
-        await fetch('/api/buy-item', {
-          method: 'POST',
-          headers,
-          body: JSON.stringify({ itemId: 'gamble_loss', cost: bet })
-        });
+      const res = await fetch('/api/economy/gamble', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ bet, choice })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        return {
+          success: true,
+          won: data.won,
+          changeCoins: data.changeCoins,
+          remainingCoins: data.remainingCoins,
+          outcomeSide: data.outcomeSide
+        };
       }
-    } catch (e) {
-      logger.warn('Gamble transaction handled locally', { error: e });
+      return { success: false, message: data.message };
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : 'Gagal memproses taruhan';
+      logger.warn('Gamble transaction failed', { error: e });
+      return { success: false, message: msg };
     }
-
-    return {
-      success: true,
-      won: isWin,
-      changeCoins: change,
-      outcomeSide
-    };
   }
 };

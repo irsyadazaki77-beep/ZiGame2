@@ -46,10 +46,21 @@ describe('Frontend Utilities & Configuration Tests', () => {
     });
   });
 
-  describe('Game Balance Multipliers', () => {
-    it('should have valid balance config for canonical games', () => {
-      const canonicalIds = ['snake', 'cyber-tetris', 'cosmic-dodge', 'flappy-pixel', 'neon-2048', 'cyber-mines', 'brick-breaker'];
-      for (const id of canonicalIds) {
+    describe('Canonical Game Registry & 32 Games Integrity', () => {
+    it('should have valid canonical ID and balance config for all 32 games', () => {
+      const all32Games = [
+        'snake', 'brick-breaker', 'flappy-pixel', 'space-defender', 'memory-grid',
+        'cyber-runner', 'neon-pong', 'neon-stacker', 'vaporwave-racer', 'lock-breaker',
+        'sine-rider', 'cosmic-dodge', 'laser-grid', 'cyber-simon', 'plinko-neo',
+        'cosmic-asteroid', 'cyber-slasher', 'cyber-clicker', 'block-match', 'cyber-typer',
+        'maze-runner', 'memory-path', 'rhythm-tap', 'pixel-golf', 'pixel-dino',
+        'cyber-tetris', 'archery-neo', 'cyber-mines', 'neon-2048', 'whack-a-drone',
+        'jump-rope', 'neon-drift'
+      ];
+
+      expect(all32Games.length).toBe(32);
+
+      for (const id of all32Games) {
         expect(isValidGameId(id)).toBe(true);
         expect(toCanonicalGameId(id)).toBe(id);
         const config = GAME_BALANCE_CONFIG[id as keyof typeof GAME_BALANCE_CONFIG];
@@ -57,6 +68,18 @@ describe('Frontend Utilities & Configuration Tests', () => {
         expect(config.baseCoinMultiplier).toBeGreaterThan(0);
         expect(config.maxScoreCeiling).toBeGreaterThan(0);
       }
+    });
+
+    it('should resolve legacy aliases cleanly to their canonical counterparts', () => {
+      expect(toCanonicalGameId('brick')).toBe('brick-breaker');
+      expect(toCanonicalGameId('flappy')).toBe('flappy-pixel');
+      expect(toCanonicalGameId('2048')).toBe('neon-2048');
+      expect(toCanonicalGameId('mines')).toBe('cyber-mines');
+      expect(toCanonicalGameId('jumprope')).toBe('jump-rope');
+      expect(toCanonicalGameId('neondrift')).toBe('neon-drift');
+      expect(toCanonicalGameId('racer')).toBe('vaporwave-racer');
+      expect(toCanonicalGameId('dinorun')).toBe('pixel-dino');
+      expect(toCanonicalGameId('typer')).toBe('cyber-typer');
     });
   });
 });

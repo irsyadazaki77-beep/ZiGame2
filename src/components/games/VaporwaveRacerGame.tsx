@@ -1,157 +1,126 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useRef, useEffect, useCallback } from 'react';
+import { useGameEngine } from '../../hooks/useGameEngine';
 import { audio } from '../../utils/audio';
-import { Particle } from '../../types';
+import { inputManager } from '../../services/inputService';
 import { GameOverlay } from '../gameplay/GameOverlay';
+import { Sparkles, Flame } from 'lucide-react';
 
-interface VaporwaveRacerGameProps {
-  onGameOver: (score: number) => void;
+interface GameProps {
   onScoreUpdate: (score: number) => void;
+  onGameOver: (score: number) => void;
   highScore: number;
 }
 
 interface ObstacleCar {
-  id: number;
   x: number;
-  y: number;
-  width: number;
-  height: number;
+  z: number; // 0 (horizon) to 1 (near camera)
   speed: number;
+  lane: number;
   color: string;
+  passed: boolean;
 }
 
-interface RacerCoin {
+interface SparkParticle {
   x: number;
   y: number;
+  vx: number;
+  vy: number;
   size: number;
-  collected: boolean;
+  color: string;
+  alpha: number;
+  decay: number;
 }
 
-export default function VaporwaveRacerGame({ onGameOver, onScoreUpdate, highScore }: VaporwaveRacerGameProps) {
+interface FloatingText {
+  x: number;
+  y: number;
+  text: string;
+  color: string;
+  alpha: number;
+  vy: number;
+}
+
+const CANVAS_WIDTH = 550;
+const CANVAS_HEIGHT = 380;
+const HORIZON_Y = 140;
+
+export default function VaporwaveRacerGame({ onScoreUpdate, onGameOver, highScore }: GameProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [score, setScore] = useState(0);
-  const gameLoopRef = useRef<number | null>(null);
-  const scoreRef = useRef(0);
-  const [gameOver, setGameOver] = useState(false);
-  const isPlayingRef = useRef(false);
-  const gameOverRef = useRef(false);
 
+  const {
+    gameState,
+    score,
+    updateScore,
+    startLoop,
+    triggerGameOver,
+    startWithCountdown,
+    countdown,
+    setupCanvasContext
+  } = useGameEngine({
+    gameId: 'vaporwave-racer',
+    onGameOver,
+    onScoreUpdate
+  });
 
-  useEffect(() => {
-    isPlayingRef.current = isPlaying;
-    gameOverRef.current = gameOver;
-    scoreRef.current = score;
-  }, [isPlaying, gameOver, score]);
-  const [muted, setMuted] = useState(audio.getMuteState());
-
-  const CANVAS_WIDTH = 400;
-  const CANVAS_HEIGHT = 500;
-
-  const playerXRef = useRef(180);
-  const CAR_WIDTH = 34;
-  const CAR_HEIGHT = 55;
-
+  // Game loop state refs
+  const playerLaneRef = useRef(1); // 0 (left), 1 (center), 2 (right)
+  const playerXRef = useRef(0); // smooth interpolated x
+  const roadScrollRef = useRef(0);
+  const baseSpeedRef = useRef(0.012);
+  const isBoostingRef = useRef(false);
+  const boostEnergyRef = useRef(100);
   const obstaclesRef = useRef<ObstacleCar[]>([]);
-  const coinsRef = useRef<RacerCoin[]>([]);
-  const particlesRef = useRef<Particle[]>([]);
-  const shakeRef = useRef<number>(0);
-  const floatingTextsRef = useRef<{ x: number; y: number; text: string; color: string; alpha: number; vy: number }[]>([]);
-  const lastTimeRef = useRef<number>(0);
-  const lastFpsTimeRef = useRef<number>(0);
-  const obstacleTimerRef = useRef(0);
-  const coinTimerRef = useRef(0);
-  const roadOffsetRef = useRef(0);
-  const keysPressedRef = useRef<{ [key: string]: boolean }>({});
+  const particlesRef = useRef<SparkParticle[]>([]);
+  const floatingTextsRef = useRef<FloatingText[]>([]);
+  const spawnTimerRef = useRef(0);
+  const comboRef = useRef(0);
+  const shakeRef = useRef(0);
 
-  useEffect(() => {
-    drawStatic();
-    return () => {
-      if (gameLoopRef.current) cancelAnimationFrame(gameLoopRef.current);
-    };
-  }, []);
+  // Active steer keys
+  const keysRef = useRef<{ left: boolean; right: boolean; boost: boolean }>({
+    left: false,
+    right: false,
+    boost: false
+  });
 
-  const drawStatic = () => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    // Vaporwave sky sunset background
-    const grad = ctx.createLinearGradient(0, 0, 0, CANVAS_HEIGHT);
-    grad.addColorStop(0, '#701a75');
-    grad.addColorStop(0.5, '#4a044e');
-    grad.addColorStop(1, '#09090b');
-    ctx.fillStyle = grad;
-    ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
-
-    // Grid wires
-    ctx.strokeStyle = '#f43f5e';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    for (let i = -100; i <= CANVAS_WIDTH + 100; i += 40) {
-      ctx.moveTo(CANVAS_WIDTH / 2, 120);
-      ctx.lineTo(i, CANVAS_HEIGHT);
+  // Handle steering inputs
+  const steerLeft = useCallback(() => {
+    if (gameState !== 'playing') return;
+    if (playerLaneRef.current > 0) {
+      playerLaneRef.current -= 1;
+      audio.playLaser();
+      inputManager.vibrateGamepad(30, 0.2);
     }
-    ctx.stroke();
+  }, [gameState]);
 
-    // Outrun sun in center
-    ctx.fillStyle = '#f59e0b';
-    ctx.beginPath();
-    ctx.arc(CANVAS_WIDTH / 2, 120, 45, Math.PI, 0);
-    ctx.fill();
+  const steerRight = useCallback(() => {
+    if (gameState !== 'playing') return;
+    if (playerLaneRef.current < 2) {
+      playerLaneRef.current += 1;
+      audio.playLaser();
+      inputManager.vibrateGamepad(30, 0.2);
+    }
+  }, [gameState]);
 
-    // Title text
-    ctx.fillStyle = '#ffffff';
-    ctx.font = "bold 20px 'Space Grotesk', sans-serif";
-    ctx.textAlign = 'center';
-    ctx.fillText('VAPORWAVE RACER', CANVAS_WIDTH / 2, 230);
-
-    ctx.fillStyle = '#f43f5e';
-    ctx.font = "12px 'JetBrains Mono', monospace";
-    ctx.fillText('HINDARI TABRAKAN MOBIL NEON', CANVAS_WIDTH / 2, 255);
-
-    ctx.fillStyle = '#71717a';
-    ctx.font = "11px 'JetBrains Mono', monospace";
-    ctx.fillText('Gunakan PANAH KIRI / KANAN untuk menyetir', CANVAS_WIDTH / 2, 290);
-  };
-
-  const startNewGame = () => {
-    audio.playCoin();
-    
-    // Explicitly update ref states to guarantee synchronous start
-    isPlayingRef.current = true;
-    gameOverRef.current = false;
-    
-    setIsPlaying(true);
-    setGameOver(false);
-    setScore(0);
-    onScoreUpdate(0);
-
-    playerXRef.current = 180;
-    obstaclesRef.current = [];
-    coinsRef.current = [];
-    particlesRef.current = [];
-    obstacleTimerRef.current = 0;
-    coinTimerRef.current = 0;
-    roadOffsetRef.current = 0;
-    lastTimeRef.current = performance.now();
-
-    if (gameLoopRef.current) cancelAnimationFrame(gameLoopRef.current);
-    gameLoopRef.current = requestAnimationFrame(update);
-  };
-
-  // Keyboard events
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'a' || e.key === 'd') {
+      if (gameState !== 'playing') return;
+
+      if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') {
         e.preventDefault();
-        keysPressedRef.current[e.key] = true;
+        steerLeft();
+      } else if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') {
+        e.preventDefault();
+        steerRight();
+      } else if (e.code === 'Space' || e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W') {
+        e.preventDefault();
+        keysRef.current.boost = true;
       }
     };
+
     const handleKeyUp = (e: KeyboardEvent) => {
-      if (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'a' || e.key === 'd') {
-        e.preventDefault();
-        keysPressedRef.current[e.key] = false;
+      if (e.code === 'Space' || e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W') {
+        keysRef.current.boost = false;
       }
     };
 
@@ -161,532 +130,398 @@ export default function VaporwaveRacerGame({ onGameOver, onScoreUpdate, highScor
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
-  }, []);
+  }, [gameState, steerLeft, steerRight]);
 
-  const moveLeft = () => {
-    playerXRef.current = Math.max(50, playerXRef.current - 18);
-  };
-
-  const moveRight = () => {
-    playerXRef.current = Math.min(CANVAS_WIDTH - 50 - CAR_WIDTH, playerXRef.current + 18);
-  };
-
-  const createSparkParticles = (x: number, y: number, color: string) => {
-    const quality = localStorage.getItem('zigame-graphics') || 'high';
-    const pCount = quality === 'low' ? 3 : quality === 'medium' ? 6 : 12;
-    for (let i = 0; i < pCount; i++) {
-      particlesRef.current.push({
-        x,
-        y,
-        vx: (Math.random() - 0.5) * 5,
-        vy: (Math.random() - 0.5) * 5,
-        color,
-        radius: Math.random() * 2 + 1,
-        alpha: 1,
-        decay: Math.random() * 0.05 + 0.02,
-      });
-    }
-  };
-
-  const update = (timestamp: number) => {
+  // Render Frame
+  const draw = useCallback(() => {
     const canvas = canvasRef.current;
-    if (!canvas || !isPlayingRef.current || gameOverRef.current ) return;
+    if (!canvas) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    // FPS Limiter implementation
-    const fpsPref = localStorage.getItem('zigame-fps') || 'auto';
-    if (fpsPref !== 'auto') {
-      const targetFps = parseInt(fpsPref, 10);
-      const interval = 1000 / targetFps;
-      const elapsed = timestamp - lastFpsTimeRef.current;
-      
-      if (elapsed < interval - 1) {
-        gameLoopRef.current = requestAnimationFrame(update);
-        return;
-      }
-      
-      lastFpsTimeRef.current = timestamp - (elapsed % interval);
-    } else {
-      lastFpsTimeRef.current = timestamp;
-    }
-
-    const delta = (timestamp - lastTimeRef.current) / 16.666;
-    lastTimeRef.current = timestamp;
-
-    const graphicsQuality = localStorage.getItem('zigame-graphics') || 'high';
-    const dpr = graphicsQuality === 'low' ? 1.0 : graphicsQuality === 'medium' ? 1.5 : Math.max(window.devicePixelRatio || 2, 2.5);
-
-    const targetWidth = Math.round(CANVAS_WIDTH * dpr);
-    const targetHeight = Math.round(CANVAS_HEIGHT * dpr);
-    if (canvas.width !== targetWidth || canvas.height !== targetHeight) {
-      canvas.width = targetWidth;
-      canvas.height = targetHeight;
-    }
-
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.scale(dpr, dpr);
-
     ctx.save();
+
+    // Screen Shake
     if (shakeRef.current > 0) {
-      const dx = (Math.random() - 0.5) * shakeRef.current;
-      const dy = (Math.random() - 0.5) * shakeRef.current;
-      ctx.translate(dx, dy);
-      shakeRef.current *= 0.85;
-      if (shakeRef.current < 0.5) shakeRef.current = 0;
+      const sx = (Math.random() - 0.5) * shakeRef.current;
+      const sy = (Math.random() - 0.5) * shakeRef.current;
+      ctx.translate(sx, sy);
+      shakeRef.current = Math.max(0, shakeRef.current - 0.5);
     }
 
-    const enableShadows = graphicsQuality !== 'low';
-    const shadowScale = graphicsQuality === 'medium' ? 0.4 : 1.0;
-
-    const setShadow = (blur: number, color: string) => {
-      if (!enableShadows) {
-        ctx.shadowBlur = 0;
-        return;
-      }
-      ctx.shadowBlur = blur * shadowScale;
-      ctx.shadowColor = color;
-    };
-
-    const gameSpeed = 5 + scoreRef.current * 0.01;
-
-    // Movement Physics
-    if (keysPressedRef.current['ArrowLeft'] || keysPressedRef.current['a']) {
-      playerXRef.current = Math.max(50, playerXRef.current - 4 * delta);
-    }
-    if (keysPressedRef.current['ArrowRight'] || keysPressedRef.current['d']) {
-      playerXRef.current = Math.min(CANVAS_WIDTH - 50 - CAR_WIDTH, playerXRef.current + 4 * delta);
-    }
-
-    // Scroll road texture offset
-    roadOffsetRef.current = (roadOffsetRef.current + gameSpeed * delta) % 60;
-
-    // Spawn Obstacle Cars
-    obstacleTimerRef.current += delta;
-    if (obstacleTimerRef.current > Math.max(35, 60 - scoreRef.current * 0.05)) {
-      obstacleTimerRef.current = 0;
-      
-      const lanesX = [60, 140, 220, 300];
-      const randomLane = lanesX[Math.floor(Math.random() * lanesX.length)];
-      
-      obstaclesRef.current.push({
-        id: Math.random(),
-        x: randomLane - CAR_WIDTH / 2,
-        y: -CAR_HEIGHT,
-        width: CAR_WIDTH,
-        height: CAR_HEIGHT,
-        speed: gameSpeed * 0.4 + Math.random() * 1.5,
-        color: Math.random() < 0.5 ? '#f43f5e' : '#e0f2fe',
-      });
-    }
-
-    // Spawn Coins
-    coinTimerRef.current += delta;
-    if (coinTimerRef.current > 30) {
-      coinTimerRef.current = 0;
-      if (Math.random() < 0.5) {
-        const lanesX = [70, 150, 230, 310];
-        coinsRef.current.push({
-          x: lanesX[Math.floor(Math.random() * lanesX.length)],
-          y: -15,
-          size: 6,
-          collected: false,
-        });
-      }
-    }
-
-    // 1. Draw Sky background
-    const skyGrad = ctx.createLinearGradient(0, 0, 0, 180);
-    skyGrad.addColorStop(0, '#120024');
-    skyGrad.addColorStop(0.5, '#2e1065');
-    skyGrad.addColorStop(0.85, '#701a75');
-    skyGrad.addColorStop(1, '#db2777');
+    // Sky Vaporwave Gradient
+    const skyGrad = ctx.createLinearGradient(0, 0, 0, HORIZON_Y);
+    skyGrad.addColorStop(0, '#190a2e');
+    skyGrad.addColorStop(0.7, '#4a0e4e');
+    skyGrad.addColorStop(1, '#9b1b75');
     ctx.fillStyle = skyGrad;
-    ctx.fillRect(0, 0, CANVAS_WIDTH, 180);
+    ctx.fillRect(0, 0, CANVAS_WIDTH, HORIZON_Y);
 
-    // Neon Outrun Sun with neon glow
-    ctx.shadowBlur = 25;
-    ctx.shadowColor = '#f43f5e';
-    ctx.fillStyle = '#f43f5e';
+    // Glowing Synthwave Sun
+    const sunX = CANVAS_WIDTH / 2;
+    const sunY = HORIZON_Y - 10;
+    const sunGrad = ctx.createRadialGradient(sunX, sunY, 10, sunX, sunY, 55);
+    sunGrad.addColorStop(0, '#fef08a');
+    sunGrad.addColorStop(0.5, '#f43f5e');
+    sunGrad.addColorStop(1, 'rgba(217, 70, 239, 0)');
+    ctx.fillStyle = sunGrad;
     ctx.beginPath();
-    ctx.arc(CANVAS_WIDTH / 2, 120, 38, Math.PI, 0);
+    ctx.arc(sunX, sunY, 55, 0, Math.PI * 2);
     ctx.fill();
-    ctx.shadowBlur = 0; // reset
 
-    // Draw Sun stripes (outrun style)
-    ctx.fillStyle = '#2e1065';
-    for (let sy = 90; sy < 125; sy += 7) {
-      ctx.fillRect(CANVAS_WIDTH / 2 - 42, sy, 84, 2.5);
+    // Sun horizontal scan lines
+    ctx.fillStyle = '#190a2e';
+    for (let i = 0; i < 6; i++) {
+      const lineY = sunY + i * 5;
+      ctx.fillRect(sunX - 45, lineY, 90, 2);
     }
 
-    // Distant Synthwave Vector Mountains Outline
-    ctx.fillStyle = '#0f051d';
-    ctx.strokeStyle = '#db2777';
+    // Road Ground Gradient
+    const roadGrad = ctx.createLinearGradient(0, HORIZON_Y, 0, CANVAS_HEIGHT);
+    roadGrad.addColorStop(0, '#090817');
+    roadGrad.addColorStop(1, '#020205');
+    ctx.fillStyle = roadGrad;
+    ctx.fillRect(0, HORIZON_Y, CANVAS_WIDTH, CANVAS_HEIGHT - HORIZON_Y);
+
+    // 3D Perspective Grid
+    const numLines = 8;
     ctx.lineWidth = 1.5;
-    ctx.shadowBlur = 6;
-    ctx.shadowColor = '#db2777';
-    ctx.beginPath();
-    ctx.moveTo(0, 180);
-    ctx.lineTo(35, 145);
-    ctx.lineTo(75, 180);
-    ctx.lineTo(120, 135);
-    ctx.lineTo(165, 180);
-    ctx.lineTo(205, 148);
-    ctx.lineTo(245, 180);
-    ctx.lineTo(285, 130);
-    ctx.lineTo(330, 180);
-    ctx.lineTo(370, 140);
-    ctx.lineTo(400, 180);
-    ctx.closePath();
-    ctx.fill();
-    ctx.stroke();
-    ctx.shadowBlur = 0; // reset
+    ctx.strokeStyle = 'rgba(217, 70, 239, 0.4)';
 
-    // Horizon glowing line
-    ctx.strokeStyle = '#f43f5e';
-    ctx.lineWidth = 3;
-    ctx.shadowBlur = 10;
-    ctx.shadowColor = '#f43f5e';
-    ctx.beginPath();
-    ctx.moveTo(0, 180);
-    ctx.lineTo(CANVAS_WIDTH, 180);
-    ctx.stroke();
-    ctx.shadowBlur = 0;
-
-    // 2. Draw Road
-    ctx.fillStyle = '#08070d';
-    ctx.beginPath();
-    ctx.moveTo(40, CANVAS_HEIGHT);
-    ctx.lineTo(150, 180);
-    ctx.lineTo(250, 180);
-    ctx.lineTo(360, CANVAS_HEIGHT);
-    ctx.closePath();
-    ctx.fill();
-
-    // 3D Scrolling Perspective Grid Lines on Road
-    ctx.strokeStyle = 'rgba(217, 70, 239, 0.45)';
-    ctx.lineWidth = 1.5;
-    setShadow(4, '#d946ef');
-    const numHorizontalLines = 9;
-    for (let i = 0; i < numHorizontalLines; i++) {
-      // Perspective progress using an exponential scaling mapping
-      const progress = ((i + (roadOffsetRef.current / 60)) / numHorizontalLines) % 1;
-      const y = 180 + Math.pow(progress, 2.2) * (CANVAS_HEIGHT - 180);
-
-      // Interpolate horizontal width for 3D perspective trapezoid
-      const ratio = (y - 180) / (CANVAS_HEIGHT - 180);
-      const xLeft = 150 + ratio * (40 - 150);
-      const xRight = 250 + ratio * (360 - 250);
-
+    // Vanishing perspective rays
+    for (let i = 0; i <= numLines; i++) {
+      const bottomX = (CANVAS_WIDTH / numLines) * i;
       ctx.beginPath();
-      ctx.moveTo(xLeft, y);
-      ctx.lineTo(xRight, y);
+      ctx.moveTo(CANVAS_WIDTH / 2, HORIZON_Y);
+      ctx.lineTo(bottomX, CANVAS_HEIGHT);
       ctx.stroke();
     }
-    ctx.shadowBlur = 0;
 
-    // Side Neon barriers (fuchsia)
-    ctx.strokeStyle = '#d946ef';
-    ctx.lineWidth = 4;
-    setShadow(12, '#d946ef');
-    ctx.beginPath();
-    ctx.moveTo(40, CANVAS_HEIGHT);
-    ctx.lineTo(150, 180);
-    ctx.moveTo(360, CANVAS_HEIGHT);
-    ctx.lineTo(250, 180);
-    ctx.stroke();
-    ctx.shadowBlur = 0;
+    // Perspective moving horizontal stripes
+    const speed = baseSpeedRef.current * (isBoostingRef.current ? 1.8 : 1.0);
+    roadScrollRef.current = (roadScrollRef.current + speed) % 1;
 
-    // Center divider lines moving down (perspective aligned)
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.85)';
-    ctx.lineWidth = 2;
-    setShadow(5, '#ffffff');
-    ctx.setLineDash([12, 18]);
-    ctx.lineDashOffset = -roadOffsetRef.current * 1.8;
-    ctx.beginPath();
-    ctx.moveTo(CANVAS_WIDTH / 2, 180);
-    ctx.lineTo(CANVAS_WIDTH / 2, CANVAS_HEIGHT);
-    ctx.stroke();
-    ctx.setLineDash([]); // reset
-    ctx.shadowBlur = 0;
-
-    // 3. Move & Draw Coins
-    coinsRef.current.forEach(coin => {
-      coin.y += gameSpeed * delta;
-
-      // Draw neon gold coin
-      setShadow(8, '#eab308');
-      ctx.fillStyle = '#eab308';
+    for (let i = 1; i <= 14; i++) {
+      const z = Math.pow((i + roadScrollRef.current) / 14, 2.5);
+      const y = HORIZON_Y + (CANVAS_HEIGHT - HORIZON_Y) * z;
+      ctx.strokeStyle = `rgba(34, 211, 238, ${0.15 + z * 0.6})`;
+      ctx.lineWidth = 1 + z * 2;
       ctx.beginPath();
-      ctx.arc(coin.x, coin.y, coin.size, 0, Math.PI * 2);
+      ctx.moveTo(0, y);
+      ctx.lineTo(CANVAS_WIDTH, y);
+      ctx.stroke();
+    }
+
+    // Helper: calculate screen coords for lane & z depth
+    const getScreenPos = (lane: number, z: number) => {
+      const horizonRoadWidth = 40;
+      const nearRoadWidth = 420;
+      const roadW = horizonRoadWidth + (nearRoadWidth - horizonRoadWidth) * z;
+      const roadCenterX = CANVAS_WIDTH / 2;
+      const laneOffset = (lane - 1) * (roadW / 3);
+      const screenX = roadCenterX + laneOffset;
+      const screenY = HORIZON_Y + (CANVAS_HEIGHT - HORIZON_Y) * z;
+      const scale = 0.2 + z * 0.9;
+      return { x: screenX, y: screenY, scale };
+    };
+
+    // Obstacle Vehicles
+    for (const obs of obstaclesRef.current) {
+      const { x, y, scale } = getScreenPos(obs.lane, obs.z);
+      const carW = 44 * scale;
+      const carH = 26 * scale;
+
+      ctx.shadowBlur = 10 * scale;
+      ctx.shadowColor = obs.color;
+      ctx.fillStyle = obs.color;
+      ctx.beginPath();
+      ctx.roundRect(x - carW / 2, y - carH, carW, carH, 4 * scale);
+      ctx.fill();
+
+      // Taillights
+      ctx.fillStyle = '#ef4444';
+      ctx.fillRect(x - carW / 2 + 2, y - 6 * scale, 5 * scale, 4 * scale);
+      ctx.fillRect(x + carW / 2 - 7 * scale, y - 6 * scale, 5 * scale, 4 * scale);
+      ctx.shadowBlur = 0;
+    }
+
+    // Player Vehicle
+    const targetLaneX = (playerLaneRef.current - 1);
+    playerXRef.current += (targetLaneX - playerXRef.current) * 0.2; // Smooth lane interpolation
+
+    const playerRoadW = 420;
+    const playerScreenX = CANVAS_WIDTH / 2 + playerXRef.current * (playerRoadW / 3);
+    const playerScreenY = CANVAS_HEIGHT - 35;
+    const pW = 52;
+    const pH = 28;
+
+    // Boost Exhaust Fire
+    if (isBoostingRef.current) {
+      ctx.shadowBlur = 16;
+      ctx.shadowColor = '#38bdf8';
+      ctx.fillStyle = '#38bdf8';
+      ctx.beginPath();
+      ctx.moveTo(playerScreenX - 12, playerScreenY);
+      ctx.lineTo(playerScreenX - 8, playerScreenY + 16 + Math.random() * 6);
+      ctx.lineTo(playerScreenX - 4, playerScreenY);
+      ctx.moveTo(playerScreenX + 4, playerScreenY);
+      ctx.lineTo(playerScreenX + 8, playerScreenY + 16 + Math.random() * 6);
+      ctx.lineTo(playerScreenX + 12, playerScreenY);
       ctx.fill();
       ctx.shadowBlur = 0;
+    }
 
-      // Collect Check
-      const playerCenterX = playerXRef.current + CAR_WIDTH / 2;
-      const playerCenterY = CANVAS_HEIGHT - 80 + CAR_HEIGHT / 2;
-      const dist = Math.hypot(coin.x - playerCenterX, coin.y - playerCenterY);
-      if (dist < coin.size + 16 && !coin.collected) {
-        coin.collected = true;
-        audio.playCoin();
-        shakeRef.current = 4;
-        floatingTextsRef.current.push({
-          x: coin.x,
-          y: coin.y - 10,
-          text: "+30",
-          color: '#fbbf24',
-          alpha: 1.0,
-          vy: -0.8
-        });
-        createSparkParticles(coin.x, coin.y, '#eab308');
-        setScore(prev => {
-          const next = prev + 30;
-          onScoreUpdate(next);
-          return next;
-        });
-      }
-    });
-    coinsRef.current = coinsRef.current.filter(c => c.y < CANVAS_HEIGHT + 10 && !c.collected);
+    // Player Car Chassis
+    ctx.shadowBlur = 16;
+    ctx.shadowColor = '#d946ef';
+    ctx.fillStyle = '#d946ef';
+    ctx.beginPath();
+    ctx.roundRect(playerScreenX - pW / 2, playerScreenY - pH, pW, pH, 6);
+    ctx.fill();
 
-    // 4. Move & Draw Obstacle Cars
-    obstaclesRef.current.forEach(car => {
-      car.y += car.speed * delta;
+    // Cabin
+    ctx.fillStyle = '#181824';
+    ctx.fillRect(playerScreenX - pW / 2 + 6, playerScreenY - pH + 5, pW - 12, 12);
 
-      // Neon sports car styling
-      setShadow(10, car.color);
-      ctx.fillStyle = car.color;
-      ctx.fillRect(car.x, car.y, car.width, car.height);
-      ctx.shadowBlur = 0;
-
-      // Headlights / taillights
-      ctx.fillStyle = '#ef4444';
-      ctx.fillRect(car.x + 3, car.y + 2, 5, 3);
-      ctx.fillRect(car.x + car.width - 8, car.y + 2, 5, 3);
-
-      // Windows
-      ctx.fillStyle = '#1e293b';
-      ctx.fillRect(car.x + 4, car.y + 12, car.width - 8, 14);
-
-      // Collision check
-      const playerX = playerXRef.current;
-      const playerY = CANVAS_HEIGHT - 80;
-      const collided = (
-        playerX < car.x + car.width &&
-        playerX + CAR_WIDTH > car.x &&
-        playerY < car.y + car.height &&
-        playerY + CAR_HEIGHT > car.y
-      );
-
-      if (collided) {
-        audio.playExplosion();
-        shakeRef.current = 24;
-        floatingTextsRef.current.push({
-          x: playerX + CAR_WIDTH / 2,
-          y: playerY,
-          text: "CRASH!!",
-          color: '#ef4444',
-          alpha: 1.0,
-          vy: -1.2
-        });
-        // Create massive burst of cyber explosion sparks
-        for (let i = 0; i < 30; i++) {
-          particlesRef.current.push({
-            x: playerX + CAR_WIDTH / 2,
-            y: playerY + CAR_HEIGHT / 2,
-            vx: (Math.random() - 0.5) * 10,
-            vy: (Math.random() - 0.5) * 10,
-            color: i % 2 === 0 ? '#ef4444' : '#f97316',
-            radius: Math.random() * 3 + 1,
-            alpha: 1.0,
-            decay: Math.random() * 0.04 + 0.02
-          });
-        }
-        setGameOver(true);
-        setIsPlaying(false);
-        onGameOver(scoreRef.current);
-      }
-    });
-    obstaclesRef.current = obstaclesRef.current.filter(c => c.y < CANVAS_HEIGHT + 20);
-
-    // 5. Render Player's Neon Blue Sports Car
-    const pX = playerXRef.current;
-    const pY = CANVAS_HEIGHT - 80;
-
-    // Glow
-    setShadow(12, '#06b6d4');
-    ctx.fillStyle = '#06b6d4';
-    ctx.fillRect(pX, pY, CAR_WIDTH, CAR_HEIGHT);
+    // Neon cyan highlights
+    ctx.fillStyle = '#22d3ee';
+    ctx.fillRect(playerScreenX - pW / 2 + 4, playerScreenY - 4, 8, 3);
+    ctx.fillRect(playerScreenX + pW / 2 - 12, playerScreenY - 4, 8, 3);
     ctx.shadowBlur = 0;
 
-    // Glowing front cyan highlights
-    ctx.fillStyle = '#a5f3fc';
-    ctx.fillRect(pX + 3, pY + CAR_HEIGHT - 5, 6, 4);
-    ctx.fillRect(pX + CAR_WIDTH - 9, pY + CAR_HEIGHT - 5, 6, 4);
+    // Particles
+    for (let i = particlesRef.current.length - 1; i >= 0; i--) {
+      const p = particlesRef.current[i];
+      p.x += p.vx;
+      p.y += p.vy;
+      p.alpha -= p.decay;
+      if (p.alpha <= 0) {
+        particlesRef.current.splice(i, 1);
+        continue;
+      }
+      ctx.globalAlpha = Math.max(0, p.alpha);
+      ctx.fillStyle = p.color;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1.0;
 
-    // Windshield
-    ctx.fillStyle = '#0f172a';
-    ctx.fillRect(pX + 4, pY + 15, CAR_WIDTH - 8, 15);
+    // Floating Texts
+    for (let i = floatingTextsRef.current.length - 1; i >= 0; i--) {
+      const ft = floatingTextsRef.current[i];
+      ft.y += ft.vy;
+      ft.alpha -= 0.02;
+      if (ft.alpha <= 0) {
+        floatingTextsRef.current.splice(i, 1);
+        continue;
+      }
+      ctx.save();
+      ctx.globalAlpha = Math.max(0, ft.alpha);
+      ctx.font = 'bold 12px monospace';
+      ctx.fillStyle = ft.color;
+      ctx.textAlign = 'center';
+      ctx.fillText(ft.text, ft.x, ft.y);
+      ctx.restore();
+    }
 
-    // Thruster fire behind player car
-    const fireHeight = 5 + Math.random() * 8;
-    ctx.fillStyle = '#d946ef';
-    ctx.fillRect(pX + 10, pY - fireHeight, 4, fireHeight);
-    ctx.fillRect(pX + CAR_WIDTH - 14, pY - fireHeight, 4, fireHeight);
+    ctx.restore();
+  }, []);
 
-    // Emit tire smoke trailing behind
-    if (Math.random() < 0.3) {
-      particlesRef.current.push({
-        x: pX + 5,
-        y: pY,
-        vx: (Math.random() - 0.5) * 1.5,
-        vy: -Math.random() * 2 - 1,
-        color: '#d946ef',
-        radius: Math.random() * 2 + 1,
-        alpha: 0.7,
-        decay: 0.04
-      });
-      particlesRef.current.push({
-        x: pX + CAR_WIDTH - 9,
-        y: pY,
-        vx: (Math.random() - 0.5) * 1.5,
-        vy: -Math.random() * 2 - 1,
-        color: '#06b6d4',
-        radius: Math.random() * 2 + 1,
-        alpha: 0.7,
-        decay: 0.04
+  // Main Delta-Time Loop
+  const gameStep = useCallback((timestamp: number, deltaTime: number) => {
+    const dt = Math.min(deltaTime / 16.666, 3.0); // 60fps normalized
+
+    // 1. Handle Turbo Boost
+    if (keysRef.current.boost && boostEnergyRef.current > 0) {
+      isBoostingRef.current = true;
+      boostEnergyRef.current = Math.max(0, boostEnergyRef.current - 0.6 * dt);
+    } else {
+      isBoostingRef.current = false;
+      boostEnergyRef.current = Math.min(100, boostEnergyRef.current + 0.2 * dt);
+    }
+
+    const currentSpeed = (baseSpeedRef.current * (isBoostingRef.current ? 1.8 : 1.0)) * dt;
+
+    // 2. Spawn Oncoming Vehicles
+    spawnTimerRef.current += dt;
+    const spawnThreshold = Math.max(40, 85 - (score || 0) / 35);
+    if (spawnTimerRef.current >= spawnThreshold) {
+      spawnTimerRef.current = 0;
+      const lane = Math.floor(Math.random() * 3);
+      const colors = ['#f43f5e', '#38bdf8', '#fbbf24', '#a855f7'];
+      const color = colors[Math.floor(Math.random() * colors.length)];
+
+      obstaclesRef.current.push({
+        x: 0,
+        z: 0.05, // start from horizon
+        speed: 0.008 + Math.random() * 0.005,
+        lane,
+        color,
+        passed: false
       });
     }
 
-    // 6. Draw particles
-    particlesRef.current.forEach(p => {
-      p.x += p.vx * delta;
-      p.y += p.vy * delta;
-      p.alpha -= p.decay * delta;
+    // 3. Move Obstacles & Check Collision
+    for (let i = obstaclesRef.current.length - 1; i >= 0; i--) {
+      const obs = obstaclesRef.current[i];
+      obs.z += (obs.speed + currentSpeed) * 0.8;
 
-      ctx.fillStyle = p.color;
-      ctx.globalAlpha = Math.max(0, p.alpha);
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
-      ctx.fill();
+      // Check collision at near camera (z >= 0.85)
+      if (obs.z >= 0.84 && obs.z <= 0.98) {
+        if (obs.lane === playerLaneRef.current) {
+          audio.playExplosion();
+          shakeRef.current = 22;
+          inputManager.vibrateGamepad(300, 0.9);
+
+          const playerRoadW = 420;
+          const pScreenX = CANVAS_WIDTH / 2 + (playerLaneRef.current - 1) * (playerRoadW / 3);
+
+          for (let j = 0; j < 25; j++) {
+            particlesRef.current.push({
+              x: pScreenX,
+              y: CANVAS_HEIGHT - 40,
+              vx: (Math.random() - 0.5) * 10,
+              vy: (Math.random() - 0.5) * 10,
+              size: Math.random() * 4 + 2,
+              color: j % 2 === 0 ? '#d946ef' : '#f43f5e',
+              alpha: 1.0,
+              decay: 0.035
+            });
+          }
+
+          draw();
+          triggerGameOver();
+          return;
+        }
+      }
+
+      // Check Pass & Score
+      if (!obs.passed && obs.z > 0.98) {
+        obs.passed = true;
+        comboRef.current += 1;
+        const pts = (isBoostingRef.current ? 25 : 15) * Math.min(5, Math.floor(comboRef.current / 3) + 1);
+        updateScore((score || 0) + pts);
+        audio.playScore();
+
+        floatingTextsRef.current.push({
+          x: CANVAS_WIDTH / 2,
+          y: CANVAS_HEIGHT - 60,
+          text: `+${pts}`,
+          color: '#22d3ee',
+          alpha: 1.0,
+          vy: -1.0
+        });
+      }
+
+      // Remove passed vehicles
+      if (obs.z > 1.2) {
+        obstaclesRef.current.splice(i, 1);
+      }
+    }
+
+    // Accelerate gradually
+    baseSpeedRef.current = Math.min(0.024, 0.012 + (score || 0) / 4000);
+
+    draw();
+  }, [draw, score, triggerGameOver, updateScore]);
+
+  // Lifecycle Start
+  const startGame = useCallback(() => {
+    playerLaneRef.current = 1;
+    playerXRef.current = 0;
+    obstaclesRef.current = [];
+    particlesRef.current = [];
+    floatingTextsRef.current = [];
+    boostEnergyRef.current = 100;
+    spawnTimerRef.current = 0;
+    comboRef.current = 0;
+    baseSpeedRef.current = 0.012;
+    updateScore(0);
+
+    startWithCountdown(() => {
+      startLoop(gameStep);
     });
-    ctx.globalAlpha = 1.0;
-    particlesRef.current = particlesRef.current.filter(p => p.alpha > 0);
+  }, [startWithCountdown, startLoop, gameStep, updateScore]);
 
-    // Render floating texts
-    floatingTextsRef.current.forEach(t => {
-      t.y += t.vy * delta;
-      t.alpha -= 0.025 * delta;
-
-      ctx.fillStyle = t.color;
-      ctx.globalAlpha = Math.max(0, t.alpha);
-      ctx.font = 'bold 9px "Press Start 2P", monospace';
-      ctx.textAlign = 'center';
-      ctx.fillText(t.text, t.x, t.y);
-    });
-    ctx.globalAlpha = 1.0;
-    floatingTextsRef.current = floatingTextsRef.current.filter(t => t.alpha > 0);
-
-    ctx.restore();
-
-    // HUD Text
-    ctx.fillStyle = '#ffffff';
-    ctx.font = "bold 11px 'JetBrains Mono', monospace";
-    ctx.textAlign = 'left';
-    ctx.fillText(`MPH: ${Math.floor(100 + scoreRef.current * 0.5)}`, 15, 30);
-    ctx.textAlign = 'right';
-    ctx.fillText(`SKOR: ${score}`, CANVAS_WIDTH - 15, 30);
-
-    gameLoopRef.current = requestAnimationFrame(update);
-  };
-
-  const toggleMute = () => {
-    const nextMuted = audio.toggleMute();
-    setMuted(nextMuted);
-  };
-
-  const getGameState = () => {
-    if (!isPlaying && score === 0) return 'ready';
-    if (!isPlaying) return 'gameover';
-    return 'playing';
-  };
+  // DPR Setup
+  useEffect(() => {
+    setupCanvasContext(canvasRef.current, CANVAS_WIDTH, CANVAS_HEIGHT);
+    draw();
+  }, [setupCanvasContext, draw]);
 
   return (
-    <div className="relative flex flex-col h-full w-full min-h-0 items-center justify-center overflow-hidden p-2 bg-zinc-950">
-      {/* HUD Bar inside the flex layout to prevent overlap */}
-      <div className="w-full flex-none flex justify-between items-center mb-2 px-2 font-mono text-xs">
-        <div className="text-pink-500 font-bold uppercase tracking-wider">
-          KECEPATAN: <span className="text-white">{Math.floor(100 + score * 0.5)} MPH</span>
-        </div>
-        <div className="text-purple-400 font-bold uppercase tracking-wider">
-          STATUS: <span className="text-white">OUTRUN</span>
-        </div>
-        <div className="text-yellow-400 font-bold uppercase tracking-wider">
-          SKOR: <span className="text-white">{score}</span>
-        </div>
-      </div>
-
-      {/* Canvas Wrapper */}
-      <div className="relative flex-1 min-h-0 w-full flex items-center justify-center bg-[#08070d] rounded-xl border border-zinc-800 shadow-[0_0_20px_rgba(0,0,0,0.5)] overflow-hidden">
-        <canvas
-          ref={canvasRef}
-          width={CANVAS_WIDTH}
-          height={CANVAS_HEIGHT}
-          className="max-w-full max-h-full object-contain block bg-[#08070d]"
-        />
-
-        {/* Interactive touch zones for mobile */}
-        {isPlaying && (
-          <div className="absolute inset-0 flex select-none touch-none">
+    <div className="relative flex flex-col h-full w-full min-h-0 items-center justify-center overflow-hidden p-2 bg-[#0a0815]">
+      {/* HUD */}
+      <div className="w-full max-w-[550px] flex-none flex justify-between items-center mb-2 px-3 py-1 bg-[#140d24]/80 border border-white/[0.06] rounded-xl text-xs font-mono">
+        <div className="flex items-center gap-1.5">
+          <Flame size={14} className={isBoostingRef.current ? 'text-sky-400 animate-pulse' : 'text-fuchsia-400'} />
+          <span className="text-zinc-400">BOOST:</span>
+          <div className="w-16 h-2 bg-zinc-800 rounded-full overflow-hidden border border-white/10">
             <div 
-              className="flex-1 h-full cursor-pointer active:bg-white/[0.01]"
-              onTouchStart={(e) => { e.preventDefault(); keysPressedRef.current['ArrowLeft'] = true; }} 
-              onTouchEnd={(e) => { e.preventDefault(); keysPressedRef.current['ArrowLeft'] = false; }}
-              onMouseDown={() => { keysPressedRef.current['ArrowLeft'] = true; }}
-              onMouseUp={() => { keysPressedRef.current['ArrowLeft'] = false; }}
-              onMouseLeave={() => { keysPressedRef.current['ArrowLeft'] = false; }}
+              className="h-full bg-gradient-to-r from-fuchsia-500 to-sky-400 transition-all duration-75"
+              style={{ width: `${boostEnergyRef.current}%` }}
             />
-            <div 
-              className="flex-1 h-full cursor-pointer active:bg-white/[0.01]"
-              onTouchStart={(e) => { e.preventDefault(); keysPressedRef.current['ArrowRight'] = true; }} 
-              onTouchEnd={(e) => { e.preventDefault(); keysPressedRef.current['ArrowRight'] = false; }}
-              onMouseDown={() => { keysPressedRef.current['ArrowRight'] = true; }}
-              onMouseUp={() => { keysPressedRef.current['ArrowRight'] = false; }}
-              onMouseLeave={() => { keysPressedRef.current['ArrowRight'] = false; }}
-            />
+          </div>
+        </div>
+
+        {comboRef.current > 3 && (
+          <div className="flex items-center gap-1 text-amber-400 font-bold animate-pulse">
+            <Sparkles size={12} />
+            <span>KOMBO {comboRef.current}x</span>
           </div>
         )}
 
+        <div className="flex items-center gap-2">
+          <span className="text-zinc-400">SKOR:</span>
+          <span className="text-white font-bold">{score}</span>
+        </div>
+      </div>
+
+      {/* Canvas container */}
+      <div 
+        className="relative flex-1 min-h-0 w-full max-w-[550px] max-h-[380px] flex items-center justify-center bg-[#0a0815] rounded-2xl border border-white/[0.08] shadow-2xl overflow-hidden select-none"
+      >
+        <canvas
+          ref={canvasRef}
+          style={{ width: '100%', height: '100%' }}
+          className="object-contain block touch-none"
+        />
+
         <GameOverlay
-          gameState={getGameState()}
+          gameState={gameState}
           score={score}
-          onStart={startNewGame}
-          onRestart={startNewGame}
-          instructions="Tekan PANAH KIRI / KANAN atau ketuk sisi kiri/kanan layar untuk menyetir mobil neon dan mengumpulkan koin!"
+          highScore={highScore}
+          countdown={countdown}
+          onStart={startGame}
+          onRestart={startGame}
+          instructions="Kemudikan mobil synthwave di jalan raya 3D! Tekan Kiri/Kanan (A/D) untuk pindah jalur, dan tahan SPASI untuk Turbo Boost."
         />
       </div>
 
-      {/* Visual touch indicators for accessibility on mobile */}
-      {isPlaying && (
-        <div className="flex-none mt-2 w-full max-w-xs flex gap-4 md:hidden">
+      {/* Mobile Steer Buttons */}
+      {gameState === 'playing' && (
+        <div className="flex-none mt-2 w-full max-w-[550px] flex gap-2 md:hidden">
           <button
-            onTouchStart={(e) => { e.preventDefault(); keysPressedRef.current['ArrowLeft'] = true; }} 
-            onTouchEnd={(e) => { e.preventDefault(); keysPressedRef.current['ArrowLeft'] = false; }}
-            onMouseDown={() => { keysPressedRef.current['ArrowLeft'] = true; }}
-            onMouseUp={() => { keysPressedRef.current['ArrowLeft'] = false; }}
-            onMouseLeave={() => { keysPressedRef.current['ArrowLeft'] = false; }}
-            className="flex-1 py-3 bg-zinc-800 hover:bg-zinc-700 active:bg-zinc-600 rounded-xl flex justify-center items-center text-white select-none touch-none text-xs font-mono font-bold"
+            onTouchStart={(e) => { e.preventDefault(); steerLeft(); }}
+            onClick={steerLeft}
+            className="flex-1 py-3.5 bg-fuchsia-700 active:bg-fuchsia-600 rounded-xl text-white font-bold text-sm tracking-wider uppercase select-none min-h-[44px]"
           >
-            KIRI
+            ◀ JALUR KIRI
           </button>
           <button
-            onTouchStart={(e) => { e.preventDefault(); keysPressedRef.current['ArrowRight'] = true; }} 
-            onTouchEnd={(e) => { e.preventDefault(); keysPressedRef.current['ArrowRight'] = false; }}
-            onMouseDown={() => { keysPressedRef.current['ArrowRight'] = true; }}
-            onMouseUp={() => { keysPressedRef.current['ArrowRight'] = false; }}
-            onMouseLeave={() => { keysPressedRef.current['ArrowRight'] = false; }}
-            className="flex-1 py-3 bg-zinc-800 hover:bg-zinc-700 active:bg-zinc-600 rounded-xl flex justify-center items-center text-white select-none touch-none text-xs font-mono font-bold"
+            onTouchStart={(e) => { e.preventDefault(); keysRef.current.boost = true; }}
+            onTouchEnd={(e) => { e.preventDefault(); keysRef.current.boost = false; }}
+            className="py-3.5 px-4 bg-sky-600 active:bg-sky-500 rounded-xl text-white font-bold text-xs tracking-wider uppercase select-none min-h-[44px]"
           >
-            KANAN
+            ⚡ BOOST
+          </button>
+          <button
+            onTouchStart={(e) => { e.preventDefault(); steerRight(); }}
+            onClick={steerRight}
+            className="flex-1 py-3.5 bg-fuchsia-700 active:bg-fuchsia-600 rounded-xl text-white font-bold text-sm tracking-wider uppercase select-none min-h-[44px]"
+          >
+            JALUR KANAN ▶
           </button>
         </div>
       )}

@@ -596,6 +596,383 @@ export async function executeDailySpin(userId: string): Promise<{
 }
 
 // ==========================================
+// SECURE SERVER-SIDE GAMBLE & GACHA
+// ==========================================
+
+export async function executeGamble(
+  userId: string,
+  bet: number,
+  choice: 'heads' | 'tails',
+  idempotencyKey?: string
+): Promise<{
+  success: boolean;
+  won: boolean;
+  outcomeSide: 'heads' | 'tails';
+  remainingCoins: number;
+  changeCoins: number;
+  transactionId: string;
+}> {
+  assertPersistenceOperational();
+
+  if (idempotencyKey && !isValidIdempotencyKey(idempotencyKey)) {
+    throw ApiError.badRequest('Kunci idempotency tidak valid.', 'INVALID_IDEMPOTENCY_KEY');
+  }
+
+  if (idempotencyKey) {
+    const existing = await getProcessedAction(`gamble_${userId}_${idempotencyKey}`);
+    if (existing) return existing;
+  }
+
+  const validBets = [10, 20, 50, 100];
+  if (!validBets.includes(bet) && (typeof bet !== 'number' || bet <= 0 || bet > 500)) {
+    throw ApiError.badRequest('Nilai taruhan tidak valid.', 'INVALID_BET_AMOUNT');
+  }
+
+  if (choice !== 'heads' && choice !== 'tails') {
+    throw ApiError.badRequest('Pilihan lempar koin harus "heads" atau "tails".', 'INVALID_CHOICE');
+  }
+
+  // Cryptographically secure RNG (48% win probability)
+  const randNum = crypto.randomInt(0, 100);
+  const isWin = randNum < 48;
+  const outcomeSide: 'heads' | 'tails' = isWin ? choice : (choice === 'heads' ? 'tails' : 'heads');
+  const change = isWin ? bet : -bet;
+  const transactionId = `tx_${Date.now()}_${crypto.randomBytes(8).toString('hex')}`;
+  const nowIso = new Date().toISOString();
+
+  let remainingCoins = 0;
+
+  if (isFirestoreAvailable()) {
+    const db = getDb();
+    const ecoRef = db.collection('userEconomy').doc(userId);
+    const ledgerRef = db.collection('economyTransactions').doc(transactionId);
+
+    await db.runTransaction(async (tx) => {
+      const ecoDoc = await tx.get(ecoRef);
+      if (!ecoDoc.exists) {
+        throw new ApiError(400, 'INSUFFICIENT_FUNDS', 'Saldo koin tidak mencukupi.');
+      }
+      const current = ecoDoc.data() as StoredEconomy;
+      if (current.coins < bet) {
+        throw new ApiError(400, 'INSUFFICIENT_FUNDS', 'Saldo koin tidak mencukupi untuk bertaruh.');
+      }
+
+      const updatedCoins = current.coins + change;
+      const updatedEco: StoredEconomy = {
+        userId,
+        coins: updatedCoins,
+        totalEarned: isWin ? current.totalEarned + bet : current.totalEarned,
+        totalSpent: !isWin ? current.totalSpent + bet : current.totalSpent,
+        lastUpdated: Date.now()
+      };
+
+      tx.set(ecoRef, updatedEco);
+
+      const ledgerEntry: StoredEconomyTransaction = {
+        transactionId,
+        userId,
+        type: isWin ? 'QUEST_REWARD' : 'PURCHASE',
+        amount: change,
+        balanceBefore: current.coins,
+        balanceAfter: updatedCoins,
+        reason: isWin ? `GAMBLE_WIN_${bet}` : `GAMBLE_LOSS_${bet}`,
+        referenceId: choice,
+        createdAt: nowIso
+      };
+      tx.set(ledgerRef, ledgerEntry);
+
+      remainingCoins = updatedCoins;
+    });
+  } else {
+    const current = await getUserEconomy(userId);
+    if (current.coins < bet) {
+      throw new ApiError(400, 'INSUFFICIENT_FUNDS', 'Saldo koin tidak mencukupi untuk bertaruh.');
+    }
+
+    const balanceBefore = current.coins;
+    current.coins += change;
+    if (isWin) {
+      current.totalEarned += bet;
+    } else {
+      current.totalSpent += bet;
+    }
+    current.lastUpdated = Date.now();
+    memoryStore.economies.set(userId, current);
+
+    const ledgerEntry: StoredEconomyTransaction = {
+      transactionId,
+      userId,
+      type: isWin ? 'QUEST_REWARD' : 'PURCHASE',
+      amount: change,
+      balanceBefore,
+      balanceAfter: current.coins,
+      reason: isWin ? `GAMBLE_WIN_${bet}` : `GAMBLE_LOSS_${bet}`,
+      referenceId: choice,
+      createdAt: nowIso
+    };
+    memoryStore.ledger.push(ledgerEntry);
+    remainingCoins = current.coins;
+  }
+
+  const result = {
+    success: true,
+    won: isWin,
+    outcomeSide,
+    remainingCoins,
+    changeCoins: change,
+    transactionId
+  };
+
+  if (idempotencyKey) {
+    await setProcessedAction(`gamble_${userId}_${idempotencyKey}`, result);
+  }
+
+  return result;
+}
+
+export const GACHA_CATALOG_ITEMS = [
+  { id: 'avatar_alien', name: 'Alien Prime', type: 'avatar', value: '👽', cost: 50 },
+  { id: 'avatar_ninja', name: 'Shadow Ninja', type: 'avatar', value: '🥷', cost: 50 },
+  { id: 'avatar_robot', name: 'Cyber Mech', type: 'avatar', value: '🤖', cost: 50 },
+  { id: 'avatar_wizard', name: 'Arcane Mage', type: 'avatar', value: '🧙', cost: 50 },
+  { id: 'avatar_dragon', name: 'Solar Dragon', type: 'avatar', value: '🐉', cost: 50 },
+  { id: 'theme_cyberpunk', name: 'Neon Cyberpunk', type: 'theme', value: '#ec4899', cost: 50 },
+  { id: 'theme_retro', name: 'Retro Amber', type: 'theme', value: '#f59e0b', cost: 50 },
+  { id: 'theme_matrix', name: 'Matrix Terminal', type: 'theme', value: '#22c55e', cost: 50 },
+  { id: 'theme_synthwave', name: 'Synthwave Sunset', type: 'theme', value: '#8b5cf6', cost: 50 }
+];
+
+export async function executeGacha(
+  userId: string,
+  idempotencyKey?: string
+): Promise<{
+  success: boolean;
+  rewardId: string;
+  item: typeof GACHA_CATALOG_ITEMS[0];
+  remainingCoins: number;
+  transactionId: string;
+}> {
+  assertPersistenceOperational();
+  const GACHA_COST = 50;
+
+  if (idempotencyKey && !isValidIdempotencyKey(idempotencyKey)) {
+    throw ApiError.badRequest('Kunci idempotency tidak valid.', 'INVALID_IDEMPOTENCY_KEY');
+  }
+
+  if (idempotencyKey) {
+    const existing = await getProcessedAction(`gacha_${userId}_${idempotencyKey}`);
+    if (existing) return existing;
+  }
+
+  // Secure random item selection
+  const randIdx = crypto.randomInt(0, GACHA_CATALOG_ITEMS.length);
+  const picked = GACHA_CATALOG_ITEMS[randIdx];
+  const transactionId = `tx_${Date.now()}_${crypto.randomBytes(8).toString('hex')}`;
+  const nowIso = new Date().toISOString();
+
+  let remainingCoins = 0;
+
+  if (isFirestoreAvailable()) {
+    const db = getDb();
+    const ecoRef = db.collection('userEconomy').doc(userId);
+    const itemRef = db.collection('userInventory').doc(userId).collection('items').doc(picked.id);
+    const ledgerRef = db.collection('economyTransactions').doc(transactionId);
+
+    await db.runTransaction(async (tx) => {
+      const ecoDoc = await tx.get(ecoRef);
+      if (!ecoDoc.exists) {
+        throw new ApiError(400, 'INSUFFICIENT_FUNDS', 'Saldo koin tidak mencukupi.');
+      }
+      const current = ecoDoc.data() as StoredEconomy;
+      if (current.coins < GACHA_COST) {
+        throw new ApiError(400, 'INSUFFICIENT_FUNDS', 'Saldo koin tidak mencukupi untuk menarik gacha (50 koin diperlukan).');
+      }
+
+      const updatedEco: StoredEconomy = {
+        userId,
+        coins: current.coins - GACHA_COST,
+        totalEarned: current.totalEarned,
+        totalSpent: current.totalSpent + GACHA_COST,
+        lastUpdated: Date.now()
+      };
+
+      tx.set(ecoRef, updatedEco);
+
+      tx.set(itemRef, {
+        itemId: picked.id,
+        name: picked.name,
+        type: picked.type,
+        value: picked.value,
+        purchasedAt: nowIso
+      });
+
+      const ledgerEntry: StoredEconomyTransaction = {
+        transactionId,
+        userId,
+        type: 'PURCHASE',
+        amount: -GACHA_COST,
+        balanceBefore: current.coins,
+        balanceAfter: updatedEco.coins,
+        reason: `GACHA_PULL_${picked.id.toUpperCase()}`,
+        referenceId: picked.id,
+        createdAt: nowIso
+      };
+      tx.set(ledgerRef, ledgerEntry);
+
+      remainingCoins = updatedEco.coins;
+    });
+  } else {
+    const current = await getUserEconomy(userId);
+    if (current.coins < GACHA_COST) {
+      throw new ApiError(400, 'INSUFFICIENT_FUNDS', 'Saldo koin tidak mencukupi untuk menarik gacha (50 koin diperlukan).');
+    }
+
+    const balanceBefore = current.coins;
+    current.coins -= GACHA_COST;
+    current.totalSpent += GACHA_COST;
+    current.lastUpdated = Date.now();
+    memoryStore.economies.set(userId, current);
+
+    const userItems = memoryStore.inventory.get(userId) || new Set<string>();
+    userItems.add(picked.id);
+    memoryStore.inventory.set(userId, userItems);
+
+    const ledgerEntry: StoredEconomyTransaction = {
+      transactionId,
+      userId,
+      type: 'PURCHASE',
+      amount: -GACHA_COST,
+      balanceBefore,
+      balanceAfter: current.coins,
+      reason: `GACHA_PULL_${picked.id.toUpperCase()}`,
+      referenceId: picked.id,
+      createdAt: nowIso
+    };
+    memoryStore.ledger.push(ledgerEntry);
+    remainingCoins = current.coins;
+  }
+
+  const result = {
+    success: true,
+    rewardId: picked.id,
+    item: picked,
+    remainingCoins,
+    transactionId
+  };
+
+  if (idempotencyKey) {
+    await setProcessedAction(`gacha_${userId}_${idempotencyKey}`, result);
+  }
+
+  return result;
+}
+
+export async function executeClaimReward(
+  userId: string,
+  amount: number,
+  reason: string,
+  idempotencyKey?: string
+): Promise<{
+  success: boolean;
+  amount: number;
+  newBalance: number;
+  transactionId: string;
+}> {
+  assertPersistenceOperational();
+
+  if (idempotencyKey && !isValidIdempotencyKey(idempotencyKey)) {
+    throw ApiError.badRequest('Kunci idempotency tidak valid.', 'INVALID_IDEMPOTENCY_KEY');
+  }
+
+  if (idempotencyKey) {
+    const existing = await getProcessedAction(`claim_${userId}_${idempotencyKey}`);
+    if (existing) return existing;
+  }
+
+  if (typeof amount !== 'number' || amount <= 0 || amount > 1000 || !Number.isFinite(amount)) {
+    throw ApiError.badRequest('Jumlah koin reward tidak valid (maksimal 1,000 koin per klaim).', 'INVALID_REWARD_AMOUNT');
+  }
+
+  const sanitizedReason = (typeof reason === 'string' && reason.trim())
+    ? reason.trim().slice(0, 64)
+    : 'QUEST_REWARD';
+
+  const transactionId = `tx_${Date.now()}_${crypto.randomBytes(8).toString('hex')}`;
+  const nowIso = new Date().toISOString();
+  let newBalance = 0;
+
+  if (isFirestoreAvailable()) {
+    const db = getDb();
+    const ecoRef = db.collection('userEconomy').doc(userId);
+    const ledgerRef = db.collection('economyTransactions').doc(transactionId);
+
+    await db.runTransaction(async (tx) => {
+      const ecoDoc = await tx.get(ecoRef);
+      const current: StoredEconomy = ecoDoc.exists
+        ? (ecoDoc.data() as StoredEconomy)
+        : { userId, coins: 100, totalEarned: 100, totalSpent: 0, lastUpdated: Date.now() };
+
+      const updatedEco: StoredEconomy = {
+        userId,
+        coins: current.coins + amount,
+        totalEarned: current.totalEarned + amount,
+        totalSpent: current.totalSpent,
+        lastUpdated: Date.now()
+      };
+
+      tx.set(ecoRef, updatedEco);
+
+      const ledgerEntry: StoredEconomyTransaction = {
+        transactionId,
+        userId,
+        type: 'QUEST_REWARD',
+        amount,
+        balanceBefore: current.coins,
+        balanceAfter: updatedEco.coins,
+        reason: sanitizedReason,
+        createdAt: nowIso
+      };
+      tx.set(ledgerRef, ledgerEntry);
+
+      newBalance = updatedEco.coins;
+    });
+  } else {
+    const current = await getUserEconomy(userId);
+    const balanceBefore = current.coins;
+    current.coins += amount;
+    current.totalEarned += amount;
+    current.lastUpdated = Date.now();
+    memoryStore.economies.set(userId, current);
+
+    const ledgerEntry: StoredEconomyTransaction = {
+      transactionId,
+      userId,
+      type: 'QUEST_REWARD',
+      amount,
+      balanceBefore,
+      balanceAfter: current.coins,
+      reason: sanitizedReason,
+      createdAt: nowIso
+    };
+    memoryStore.ledger.push(ledgerEntry);
+    newBalance = current.coins;
+  }
+
+  const result = {
+    success: true,
+    amount,
+    newBalance,
+    transactionId
+  };
+
+  if (idempotencyKey) {
+    await setProcessedAction(`claim_${userId}_${idempotencyKey}`, result);
+  }
+
+  return result;
+}
+
+// ==========================================
 // 15. ATOMIC SCORE SUBMISSION & REWARD FLOW
 // ==========================================
 

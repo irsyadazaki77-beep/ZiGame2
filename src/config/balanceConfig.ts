@@ -61,6 +61,11 @@ export const GAME_BALANCE_CONFIG: Record<string, GameBalanceConfig> = {
   'whack-a-drone': { baseCoinMultiplier: 0.1, baseXpMultiplier: 0.15, maxScoreCeiling: 80000, maxScorePerSec: 200, minDurationMs: 2000, idealPlayDurationSec: 60, masteryDifficultyWeight: 1.0 },
   'jump-rope': { baseCoinMultiplier: 0.3, baseXpMultiplier: 0.5, maxScoreCeiling: 15000, maxScorePerSec: 100, minDurationMs: 1500, idealPlayDurationSec: 40, masteryDifficultyWeight: 1.1 },
   'neon-drift': { baseCoinMultiplier: 0.15, baseXpMultiplier: 0.2, maxScoreCeiling: 120000, maxScorePerSec: 300, minDurationMs: 2000, idealPlayDurationSec: 60, masteryDifficultyWeight: 1.2 },
+  'neon-heist': { baseCoinMultiplier: 0.2, baseXpMultiplier: 0.3, maxScoreCeiling: 80000, maxScorePerSec: 250, minDurationMs: 3000, idealPlayDurationSec: 120, masteryDifficultyWeight: 1.25 },
+  'void-survivor': { baseCoinMultiplier: 0.08, baseXpMultiplier: 0.15, maxScoreCeiling: 500000, maxScorePerSec: 400, minDurationMs: 4000, idealPlayDurationSec: 180, masteryDifficultyWeight: 1.35 },
+  'orbital-defense': { baseCoinMultiplier: 0.1, baseXpMultiplier: 0.2, maxScoreCeiling: 200000, maxScorePerSec: 300, minDurationMs: 4000, idealPlayDurationSec: 180, masteryDifficultyWeight: 1.2 },
+  'gravity-shift': { baseCoinMultiplier: 0.2, baseXpMultiplier: 0.25, maxScoreCeiling: 60000, maxScorePerSec: 200, minDurationMs: 2000, idealPlayDurationSec: 90, masteryDifficultyWeight: 1.3 },
+  'hex-dominion': { baseCoinMultiplier: 0.15, baseXpMultiplier: 0.25, maxScoreCeiling: 150000, maxScorePerSec: 250, minDurationMs: 5000, idealPlayDurationSec: 240, masteryDifficultyWeight: 1.3 },
   'default': { baseCoinMultiplier: 0.1, baseXpMultiplier: 0.15, maxScoreCeiling: 250000, maxScorePerSec: 350, minDurationMs: 1500, idealPlayDurationSec: 60, masteryDifficultyWeight: 1.0 }
 };
 

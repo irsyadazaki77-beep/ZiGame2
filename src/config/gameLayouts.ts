@@ -45,5 +45,10 @@ export const GAME_LAYOUTS: Record<string, GameLayoutConfig> = {
   archery: { type: 'landscape', aspectRatio: '16 / 9', maxWidth: 1100 },
   whack: { type: 'square', aspectRatio: '1 / 1', maxWidth: 720 },
   jumprope: { type: 'landscape', aspectRatio: '16 / 9', maxWidth: 1000 },
-  neondrift: { type: 'landscape', aspectRatio: '16 / 9', maxWidth: 1100 }
+  neondrift: { type: 'landscape', aspectRatio: '16 / 9', maxWidth: 1100 },
+  'neon-heist': { type: 'landscape', aspectRatio: '16 / 9', maxWidth: 1100 },
+  'void-survivor': { type: 'landscape', aspectRatio: '16 / 9', maxWidth: 1100 },
+  'orbital-defense': { type: 'landscape', aspectRatio: '16 / 9', maxWidth: 1100 },
+  'gravity-shift': { type: 'landscape', aspectRatio: '16 / 9', maxWidth: 1100 },
+  'hex-dominion': { type: 'landscape', aspectRatio: '16 / 9', maxWidth: 1100 }
 };

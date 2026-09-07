@@ -35,7 +35,12 @@ export const CANONICAL_GAME_IDS = [
   'neon-2048',
   'whack-a-drone',
   'jump-rope',
-  'neon-drift'
+  'neon-drift',
+  'neon-heist',
+  'void-survivor',
+  'orbital-defense',
+  'gravity-shift',
+  'hex-dominion'
 ] as const;
 
 export type CanonicalGameId = typeof CANONICAL_GAME_IDS[number];
@@ -77,6 +82,11 @@ export const GAME_ID_ALIAS_MAP: Record<string, CanonicalGameId> = {
   'whack-a-drone': 'whack-a-drone',
   'jump-rope': 'jump-rope',
   'neon-drift': 'neon-drift',
+  'neon-heist': 'neon-heist',
+  'void-survivor': 'void-survivor',
+  'orbital-defense': 'orbital-defense',
+  'gravity-shift': 'gravity-shift',
+  'hex-dominion': 'hex-dominion',
 
   // Legacy shorthand & slug aliases
   'brick': 'brick-breaker',
@@ -112,7 +122,19 @@ export const GAME_ID_ALIAS_MAP: Record<string, CanonicalGameId> = {
   '2048': 'neon-2048',
   'whack': 'whack-a-drone',
   'jumprope': 'jump-rope',
-  'neondrift': 'neon-drift'
+  'neondrift': 'neon-drift',
+  'neonheist': 'neon-heist',
+  'heist': 'neon-heist',
+  'voidsurvivor': 'void-survivor',
+  'survivor': 'void-survivor',
+  'orbitaldefense': 'orbital-defense',
+  'orbital': 'orbital-defense',
+  'defense': 'orbital-defense',
+  'towerdefense': 'orbital-defense',
+  'gravityshift': 'gravity-shift',
+  'gravity': 'gravity-shift',
+  'hexdominion': 'hex-dominion',
+  'hex': 'hex-dominion'
 };
 
 /**

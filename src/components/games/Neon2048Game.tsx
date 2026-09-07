@@ -1,441 +1,346 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useGameEngine } from '../../hooks/useGameEngine';
 import { audio } from '../../utils/audio';
-import { motion, AnimatePresence } from 'motion/react';
-import { GameContainer } from '../gameplay/GameContainer';
-import { GameHUD } from '../gameplay/GameHUD';
+import { inputManager } from '../../services/inputService';
 import { GameOverlay } from '../gameplay/GameOverlay';
 import { MobileControls } from '../gameplay/MobileControls';
+import { Trophy } from 'lucide-react';
 
-interface Neon2048Props {
-  onGameOver: (score: number) => void;
+interface GameProps {
   onScoreUpdate: (score: number) => void;
+  onGameOver: (score: number) => void;
   highScore: number;
 }
 
-const GRID_SIZE = 4;
+type Board = number[][];
 
-export default function Neon2048Game({ onGameOver, onScoreUpdate, highScore }: Neon2048Props) {
-  const [board, setBoard] = useState<number[][]>([]);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [gameOver, setGameOver] = useState(false);
-  const [score, setScore] = useState(0);
-  const [muted, setMuted] = useState(audio.getMuteState());
+const BOARD_SIZE = 4;
 
-  const getEmptyCoordinates = (currentBoard: number[][]) => {
-    const emptyCoords = [];
-    for (let r = 0; r < GRID_SIZE; r++) {
-      for (let c = 0; c < GRID_SIZE; c++) {
-        if (currentBoard[r][c] === 0) {
-          emptyCoords.push({ r, c });
-        }
+const TILE_COLORS: Record<number, { bg: string; text: string; glow: string }> = {
+  2: { bg: 'bg-zinc-800 text-zinc-100 border-zinc-700', text: 'text-zinc-100', glow: 'shadow-none' },
+  4: { bg: 'bg-indigo-950 text-indigo-200 border-indigo-700', text: 'text-indigo-200', glow: 'shadow-[0_0_8px_rgba(99,102,241,0.2)]' },
+  8: { bg: 'bg-indigo-900 text-indigo-100 border-indigo-500', text: 'text-indigo-100', glow: 'shadow-[0_0_10px_rgba(99,102,241,0.3)]' },
+  16: { bg: 'bg-blue-900 text-blue-100 border-blue-500', text: 'text-blue-100', glow: 'shadow-[0_0_12px_rgba(59,130,246,0.35)]' },
+  32: { bg: 'bg-cyan-900 text-cyan-100 border-cyan-400', text: 'text-cyan-100', glow: 'shadow-[0_0_14px_rgba(6,182,212,0.4)]' },
+  64: { bg: 'bg-emerald-900 text-emerald-100 border-emerald-400', text: 'text-emerald-100', glow: 'shadow-[0_0_16px_rgba(16,185,129,0.45)]' },
+  128: { bg: 'bg-amber-900 text-amber-100 border-amber-400', text: 'text-amber-100', glow: 'shadow-[0_0_18px_rgba(245,158,11,0.5)]' },
+  256: { bg: 'bg-orange-900 text-orange-100 border-orange-400', text: 'text-orange-100', glow: 'shadow-[0_0_20px_rgba(249,115,22,0.55)]' },
+  512: { bg: 'bg-rose-900 text-rose-100 border-rose-400', text: 'text-rose-100', glow: 'shadow-[0_0_22px_rgba(244,63,94,0.6)]' },
+  1024: { bg: 'bg-pink-900 text-pink-100 border-pink-400', text: 'text-pink-100', glow: 'shadow-[0_0_24px_rgba(236,72,153,0.65)]' },
+  2048: { bg: 'bg-purple-900 text-purple-100 border-purple-300', text: 'text-purple-100', glow: 'shadow-[0_0_28px_rgba(168,85,247,0.8)]' }
+};
+
+export default function Neon2048Game({ onScoreUpdate, onGameOver, highScore }: GameProps) {
+  const [board, setBoard] = useState<Board>(() => createEmptyBoard());
+  const [highestTile, setHighestTile] = useState(2);
+  const touchStartPos = useRef<{ x: number; y: number } | null>(null);
+
+  const {
+    gameState,
+    score,
+    updateScore,
+    triggerGameOver,
+    startWithCountdown,
+    countdown
+  } = useGameEngine({
+    gameId: 'neon-2048',
+    onGameOver,
+    onScoreUpdate
+  });
+
+  function createEmptyBoard(): Board {
+    return Array.from({ length: BOARD_SIZE }, () => Array(BOARD_SIZE).fill(0));
+  }
+
+  function addRandomTile(currentBoard: Board): { board: Board; added: boolean } {
+    const emptyCells: { r: number; c: number }[] = [];
+    for (let r = 0; r < BOARD_SIZE; r++) {
+      for (let c = 0; c < BOARD_SIZE; c++) {
+        if (currentBoard[r][c] === 0) emptyCells.push({ r, c });
       }
     }
-    return emptyCoords;
-  };
 
-  const addRandomTile = (currentBoard: number[][]) => {
-    const emptyCoords = getEmptyCoordinates(currentBoard);
-    if (emptyCoords.length === 0) return currentBoard;
+    if (emptyCells.length === 0) return { board: currentBoard, added: false };
 
-    const randomCoord = emptyCoords[Math.floor(Math.random() * emptyCoords.length)];
+    const randomCell = emptyCells[Math.floor(Math.random() * emptyCells.length)];
+    const val = Math.random() < 0.9 ? 2 : 4;
     const newBoard = currentBoard.map(row => [...row]);
-    newBoard[randomCoord.r][randomCoord.c] = Math.random() < 0.9 ? 2 : 4;
-    return newBoard;
-  };
+    newBoard[randomCell.r][randomCell.c] = val;
+    return { board: newBoard, added: true };
+  }
 
-  const initializeBoard = () => {
-    let initialBoard = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(0));
-    initialBoard = addRandomTile(initialBoard);
-    initialBoard = addRandomTile(initialBoard);
-    setBoard(initialBoard);
-    setScore(0);
-    setGameOver(false);
-    setIsPlaying(true);
-  };
-
-  const startGame = () => {
-    initializeBoard();
-    audio.playCoin();
-  };
-
-  const toggleMute = () => {
-    const newMute = !muted;
-    setMuted(newMute);
-    audio.toggleMute();
-  };
-
-  const moveLeft = (currentBoard: number[][]) => {
-    const newBoard = currentBoard.map(row => [...row]);
-    let pointsAdded = 0;
-    let moved = false;
-
-    for (let r = 0; r < GRID_SIZE; r++) {
-      let row = newBoard[r].filter(val => val !== 0);
-      for (let c = 0; c < row.length - 1; c++) {
-        if (row[c] === row[c + 1]) {
-          row[c] *= 2;
-          pointsAdded += row[c];
-          row[c + 1] = 0;
-        }
-      }
-      row = row.filter(val => val !== 0);
-      while (row.length < GRID_SIZE) {
-        row.push(0);
-      }
-      if (newBoard[r].join(',') !== row.join(',')) {
-        moved = true;
-      }
-      newBoard[r] = row;
-    }
-    return { newBoard, pointsAdded, moved };
-  };
-
-  const rotateRight = (matrix: number[][]) => {
-    const result = [];
-    for (let c = 0; c < GRID_SIZE; c++) {
-      const newRow = [];
-      for (let r = GRID_SIZE - 1; r >= 0; r--) {
-        newRow.push(matrix[r][c]);
-      }
-      result.push(newRow);
-    }
-    return result;
-  };
-
-  const rotateLeft = (matrix: number[][]) => {
-    const result = [];
-    for (let c = GRID_SIZE - 1; c >= 0; c--) {
-      const newRow = [];
-      for (let r = 0; r < GRID_SIZE; r++) {
-        newRow.push(matrix[r][c]);
-      }
-      result.push(newRow);
-    }
-    return result;
-  };
-
-  const moveRight = (currentBoard: number[][]) => {
-    const rotated = rotateRight(rotateRight(currentBoard));
-    const { newBoard, pointsAdded, moved } = moveLeft(rotated);
-    return { newBoard: rotateLeft(rotateLeft(newBoard)), pointsAdded, moved };
-  };
-
-  const moveUp = (currentBoard: number[][]) => {
-    const rotated = rotateLeft(currentBoard);
-    const { newBoard, pointsAdded, moved } = moveLeft(rotated);
-    return { newBoard: rotateRight(newBoard), pointsAdded, moved };
-  };
-
-  const moveDown = (currentBoard: number[][]) => {
-    const rotated = rotateRight(currentBoard);
-    const { newBoard, pointsAdded, moved } = moveLeft(rotated);
-    return { newBoard: rotateLeft(newBoard), pointsAdded, moved };
-  };
-
-  const checkGameOver = (currentBoard: number[][]) => {
-    if (getEmptyCoordinates(currentBoard).length > 0) return false;
-
-    // Check horizontal merges
-    for (let r = 0; r < GRID_SIZE; r++) {
-      for (let c = 0; c < GRID_SIZE - 1; c++) {
-        if (currentBoard[r][c] === currentBoard[r][c + 1]) return false;
+  // Check if any valid moves remain
+  const checkHasMoves = useCallback((b: Board): boolean => {
+    // 1. Any empty cell
+    for (let r = 0; r < BOARD_SIZE; r++) {
+      for (let c = 0; c < BOARD_SIZE; c++) {
+        if (b[r][c] === 0) return true;
       }
     }
 
-    // Check vertical merges
-    for (let c = 0; c < GRID_SIZE; c++) {
-      for (let r = 0; r < GRID_SIZE - 1; r++) {
-        if (currentBoard[r][c] === currentBoard[r + 1][c]) return false;
+    // 2. Any adjacent horizontal merger
+    for (let r = 0; r < BOARD_SIZE; r++) {
+      for (let c = 0; c < BOARD_SIZE - 1; c++) {
+        if (b[r][c] === b[r][c + 1]) return true;
       }
     }
 
-    return true;
-  };
-
-  const handleKeyDown = useCallback((e: KeyboardEvent) => {
-    if (!isPlaying || gameOver) return;
-
-    let result = { newBoard: board, pointsAdded: 0, moved: false };
-
-    switch (e.key) {
-      case 'ArrowUp':
-      case 'w':
-      case 'W':
-        e.preventDefault();
-        result = moveUp(board);
-        break;
-      case 'ArrowDown':
-      case 's':
-      case 'S':
-        e.preventDefault();
-        result = moveDown(board);
-        break;
-      case 'ArrowLeft':
-      case 'a':
-      case 'A':
-        e.preventDefault();
-        result = moveLeft(board);
-        break;
-      case 'ArrowRight':
-      case 'd':
-      case 'D':
-        e.preventDefault();
-        result = moveRight(board);
-        break;
-      default:
-        return;
+    // 3. Any adjacent vertical merger
+    for (let r = 0; r < BOARD_SIZE - 1; r++) {
+      for (let c = 0; c < BOARD_SIZE; c++) {
+        if (b[r][c] === b[r + 1][c]) return true;
+      }
     }
 
-    if (result.moved) {
-      const finalBoard = addRandomTile(result.newBoard);
-      setBoard(finalBoard);
-      
-      if (result.pointsAdded > 0) {
-        const newScore = score + result.pointsAdded;
-        setScore(newScore);
-        onScoreUpdate(newScore);
-        audio.playHit();
+    return false;
+  }, []);
+
+  // Slide & Merge a single row
+  const slideRow = (row: number[]): { newRow: number[]; gainedScore: number; moved: boolean } => {
+    const nonZeros = row.filter(val => val !== 0);
+    const newRow: number[] = [];
+    let gainedScore = 0;
+    let skipNext = false;
+
+    for (let i = 0; i < nonZeros.length; i++) {
+      if (skipNext) {
+        skipNext = false;
+        continue;
+      }
+      if (i < nonZeros.length - 1 && nonZeros[i] === nonZeros[i + 1]) {
+        const mergedVal = nonZeros[i] * 2;
+        newRow.push(mergedVal);
+        gainedScore += mergedVal;
+        skipNext = true;
       } else {
-        audio.playJump();
-      }
-
-      if (checkGameOver(finalBoard)) {
-        setGameOver(true);
-        setIsPlaying(false);
-        audio.playExplosion();
-        setTimeout(() => {
-          onGameOver(score + result.pointsAdded);
-        }, 1500);
+        newRow.push(nonZeros[i]);
       }
     }
-  }, [board, isPlaying, gameOver, score]);
 
+    while (newRow.length < BOARD_SIZE) {
+      newRow.push(0);
+    }
+
+    const moved = row.some((val, idx) => val !== newRow[idx]);
+    return { newRow, gainedScore, moved };
+  };
+
+  // Move in 4 directions
+  const handleMove = useCallback((direction: 'up' | 'down' | 'left' | 'right') => {
+    if (gameState !== 'playing') return;
+
+    let movedAny = false;
+    let totalScoreGain = 0;
+    const nextBoard: Board = createEmptyBoard();
+
+    if (direction === 'left') {
+      for (let r = 0; r < BOARD_SIZE; r++) {
+        const { newRow, gainedScore, moved } = slideRow(board[r]);
+        nextBoard[r] = newRow;
+        totalScoreGain += gainedScore;
+        if (moved) movedAny = true;
+      }
+    } else if (direction === 'right') {
+      for (let r = 0; r < BOARD_SIZE; r++) {
+        const reversed = [...board[r]].reverse();
+        const { newRow, gainedScore, moved } = slideRow(reversed);
+        nextBoard[r] = newRow.reverse();
+        totalScoreGain += gainedScore;
+        if (moved) movedAny = true;
+      }
+    } else if (direction === 'up') {
+      for (let c = 0; c < BOARD_SIZE; c++) {
+        const col = [board[0][c], board[1][c], board[2][c], board[3][c]];
+        const { newRow, gainedScore, moved } = slideRow(col);
+        for (let r = 0; r < BOARD_SIZE; r++) {
+          nextBoard[r][c] = newRow[r];
+        }
+        totalScoreGain += gainedScore;
+        if (moved) movedAny = true;
+      }
+    } else if (direction === 'down') {
+      for (let c = 0; c < BOARD_SIZE; c++) {
+        const col = [board[3][c], board[2][c], board[1][c], board[0][c]];
+        const { newRow, gainedScore, moved } = slideRow(col);
+        const reversed = newRow.reverse();
+        for (let r = 0; r < BOARD_SIZE; r++) {
+          nextBoard[r][c] = reversed[r];
+        }
+        totalScoreGain += gainedScore;
+        if (moved) movedAny = true;
+      }
+    }
+
+    if (!movedAny) return;
+
+    // Play sounds & haptics
+    if (totalScoreGain > 0) {
+      audio.playPowerup();
+      inputManager.vibrateGamepad(60, 0.4);
+    } else {
+      audio.playScore();
+    }
+
+    // Add random tile
+    const { board: spawnedBoard } = addRandomTile(nextBoard);
+    setBoard(spawnedBoard);
+
+    const newScore = (score || 0) + totalScoreGain;
+    updateScore(newScore);
+
+    // Compute highest tile
+    let maxT = 2;
+    for (let r = 0; r < BOARD_SIZE; r++) {
+      for (let c = 0; c < BOARD_SIZE; c++) {
+        if (spawnedBoard[r][c] > maxT) maxT = spawnedBoard[r][c];
+      }
+    }
+    setHighestTile(maxT);
+
+    // Check game over
+    if (!checkHasMoves(spawnedBoard)) {
+      audio.playExplosion();
+      triggerGameOver();
+    }
+  }, [board, checkHasMoves, gameState, score, triggerGameOver, updateScore]);
+
+  // Keyboard navigation
   useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (gameState !== 'playing') return;
+
+      switch (e.key) {
+        case 'ArrowUp':
+        case 'w':
+        case 'W':
+          e.preventDefault();
+          handleMove('up');
+          break;
+        case 'ArrowDown':
+        case 's':
+        case 'S':
+          e.preventDefault();
+          handleMove('down');
+          break;
+        case 'ArrowLeft':
+        case 'a':
+        case 'A':
+          e.preventDefault();
+          handleMove('left');
+          break;
+        case 'ArrowRight':
+        case 'd':
+        case 'D':
+          e.preventDefault();
+          handleMove('right');
+          break;
+      }
+    };
+
     window.addEventListener('keydown', handleKeyDown);
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-    };
-  }, [handleKeyDown]);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [gameState, handleMove]);
 
-  const touchStartRef = useRef<{ x: number; y: number } | null>(null);
-
+  // Touch swipe handling
   const handleTouchStart = (e: React.TouchEvent) => {
-    touchStartRef.current = {
-      x: e.touches[0].clientX,
-      y: e.touches[0].clientY
-    };
+    if (e.touches.length === 1) {
+      touchStartPos.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+    }
   };
 
   const handleTouchEnd = (e: React.TouchEvent) => {
-    if (!touchStartRef.current || !isPlaying || gameOver) return;
+    if (!touchStartPos.current || gameState !== 'playing') return;
+    const touch = e.changedTouches[0];
+    const dx = touch.clientX - touchStartPos.current.x;
+    const dy = touch.clientY - touchStartPos.current.y;
+    const dist = Math.hypot(dx, dy);
 
-    const touchEndX = e.changedTouches[0].clientX;
-    const touchEndY = e.changedTouches[0].clientY;
-
-    const dx = touchEndX - touchStartRef.current.x;
-    const dy = touchEndY - touchStartRef.current.y;
-
-    if (Math.abs(dx) < 30 && Math.abs(dy) < 30) return; // Ignore small taps
-
-    let result = { newBoard: board, pointsAdded: 0, moved: false };
-
-    if (Math.abs(dx) > Math.abs(dy)) {
-      if (dx > 0) result = moveRight(board);
-      else result = moveLeft(board);
-    } else {
-      if (dy > 0) result = moveDown(board);
-      else result = moveUp(board);
-    }
-
-    if (result.moved) {
-      const finalBoard = addRandomTile(result.newBoard);
-      setBoard(finalBoard);
-      
-      if (result.pointsAdded > 0) {
-        const newScore = score + result.pointsAdded;
-        setScore(newScore);
-        onScoreUpdate(newScore);
-        audio.playHit();
+    if (dist > 30) {
+      if (Math.abs(dx) > Math.abs(dy)) {
+        handleMove(dx > 0 ? 'right' : 'left');
       } else {
-        audio.playJump();
-      }
-
-      if (checkGameOver(finalBoard)) {
-        setGameOver(true);
-        setIsPlaying(false);
-        audio.playExplosion();
-        setTimeout(() => {
-          onGameOver(score + result.pointsAdded);
-        }, 1500);
+        handleMove(dy > 0 ? 'down' : 'up');
       }
     }
-    
-    touchStartRef.current = null;
+    touchStartPos.current = null;
   };
 
-  const getTileColor = (val: number) => {
-    switch (val) {
-      case 2: return 'bg-zinc-800 text-zinc-300 shadow-[inset_0_0_10px_rgba(255,255,255,0.05)]';
-      case 4: return 'bg-zinc-700 text-zinc-200 shadow-[inset_0_0_15px_rgba(255,255,255,0.1)]';
-      case 8: return 'bg-orange-500/80 text-white shadow-[0_0_10px_rgba(249,115,22,0.4)]';
-      case 16: return 'bg-orange-600 text-white shadow-[0_0_15px_rgba(234,88,12,0.5)]';
-      case 32: return 'bg-red-500 text-white shadow-[0_0_20px_rgba(239,68,68,0.6)]';
-      case 64: return 'bg-red-600 text-white shadow-[0_0_25px_rgba(220,38,38,0.7)]';
-      case 128: return 'bg-yellow-400 text-black shadow-[0_0_20px_rgba(250,204,21,0.6)] text-xl font-black';
-      case 256: return 'bg-yellow-500 text-black shadow-[0_0_25px_rgba(234,179,8,0.7)] text-xl font-black';
-      case 512: return 'bg-lime-400 text-black shadow-[0_0_25px_rgba(163,230,53,0.7)] text-lg font-black';
-      case 1024: return 'bg-lime-500 text-black shadow-[0_0_30px_rgba(132,204,22,0.8)] text-lg font-black';
-      case 2048: return 'bg-cyan-400 text-black shadow-[0_0_35px_rgba(34,211,238,0.9)] text-lg font-black ';
-      case 4096: return 'bg-cyan-500 text-black shadow-[0_0_40px_rgba(6,182,212,1)] text-lg font-black ';
-      case 8192: return 'bg-purple-500 text-white shadow-[0_0_40px_rgba(168,85,247,1)] text-lg font-black ';
-      default: return 'bg-zinc-900';
-    }
-  };
+  // Start lifecycle
+  const startGame = useCallback(() => {
+    const empty = createEmptyBoard();
+    const t1 = addRandomTile(empty);
+    const t2 = addRandomTile(t1.board);
+    setBoard(t2.board);
+    setHighestTile(2);
+    updateScore(0);
 
-  // Setup initial board for display if not playing
-  useEffect(() => {
-    if (!isPlaying && board.length === 0) {
-       setBoard(Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(0)));
-    }
-  }, []);
-
-  const getGameState = () => {
-    if (!isPlaying && score === 0 && (!board || board.length === 0 || board[0][0] === 0)) return 'ready';
-    if (!isPlaying) return 'gameover';
-    return 'playing';
-  };
+    startWithCountdown(() => {});
+  }, [startWithCountdown, updateScore]);
 
   return (
-    <GameContainer aspect="square" maxWidth="sm">
-      {isPlaying && (
-        <GameHUD 
-          stats={[
-            { id: 'score', label: 'SKOR', value: score, emphasized: true }
-          ]} 
-        />
-      )}
+    <div className="relative flex flex-col h-full w-full min-h-0 items-center justify-center overflow-hidden p-2 bg-[#090b14]">
+      {/* HUD */}
+      <div className="w-full max-w-[360px] flex-none flex justify-between items-center mb-3 px-3 py-1 bg-[#121622]/80 border border-white/[0.06] rounded-xl text-xs font-mono">
+        <div className="flex items-center gap-1.5">
+          <Trophy size={14} className="text-amber-400" />
+          <span className="text-zinc-400">TERTINGGI:</span>
+          <span className="text-amber-300 font-bold">{highestTile}</span>
+        </div>
 
-      <GameOverlay
-        gameState={getGameState()}
-        score={score}
-        onStart={startGame}
-        onRestart={startGame}
-        instructions="Geser ke arah mana saja (atau gunakan panah) untuk menggabungkan ubin berangka sama dan capai 2048!"
-      />
-
-      <div 
-        className="w-full aspect-square bg-zinc-950 p-2 sm:p-4 rounded-xl border-4 border-zinc-900 shadow-2xl relative select-none"
-        onTouchStart={handleTouchStart}
-        onTouchEnd={handleTouchEnd}
-      >
-        <div className="grid grid-cols-4 gap-1.5 sm:gap-2 bg-zinc-900/50 p-1.5 sm:p-2 rounded-lg border border-zinc-800/50 shadow-inner w-full h-full">
-          {board.map((row, rowIndex) => (
-            row.map((cell, colIndex) => (
-              <motion.div
-                key={`${rowIndex}-${colIndex}-${cell}`}
-                initial={cell > 0 ? { scale: 0.5, opacity: 0 } : false}
-                animate={cell > 0 ? { scale: 1, opacity: 1 } : false}
-                transition={{ type: "spring", stiffness: 300, damping: 20 }}
-                className={`
-                  aspect-square w-full rounded-md flex items-center justify-center font-display font-bold text-lg md:text-2xl transition-colors duration-200
-                  ${cell === 0 ? 'bg-zinc-800/30' : getTileColor(cell)}
-                `}
-              >
-                {cell > 0 ? cell : ''}
-              </motion.div>
-            ))
-          ))}
+        <div className="flex items-center gap-2">
+          <span className="text-zinc-400">SKOR:</span>
+          <span className="text-white font-bold">{score}</span>
         </div>
       </div>
 
-      {isPlaying && (
-        <MobileControls
-          onUp={() => {
-            const result = moveUp(board);
-            if (result.moved) {
-               const finalBoard = addRandomTile(result.newBoard);
-               setBoard(finalBoard);
-               if (result.pointsAdded > 0) {
-                 const newScore = score + result.pointsAdded;
-                 setScore(newScore);
-                 onScoreUpdate(newScore);
-                 audio.playHit();
-               } else {
-                 audio.playJump();
-               }
-               if (checkGameOver(finalBoard)) {
-                 setGameOver(true);
-                 setIsPlaying(false);
-                 audio.playExplosion();
-                 setTimeout(() => onGameOver(score + result.pointsAdded), 1500);
-               }
-            }
-          }}
-          onDown={() => {
-            const result = moveDown(board);
-            if (result.moved) {
-               const finalBoard = addRandomTile(result.newBoard);
-               setBoard(finalBoard);
-               if (result.pointsAdded > 0) {
-                 const newScore = score + result.pointsAdded;
-                 setScore(newScore);
-                 onScoreUpdate(newScore);
-                 audio.playHit();
-               } else {
-                 audio.playJump();
-               }
-               if (checkGameOver(finalBoard)) {
-                 setGameOver(true);
-                 setIsPlaying(false);
-                 audio.playExplosion();
-                 setTimeout(() => onGameOver(score + result.pointsAdded), 1500);
-               }
-            }
-          }}
-          onLeft={() => {
-            const result = moveLeft(board);
-            if (result.moved) {
-               const finalBoard = addRandomTile(result.newBoard);
-               setBoard(finalBoard);
-               if (result.pointsAdded > 0) {
-                 const newScore = score + result.pointsAdded;
-                 setScore(newScore);
-                 onScoreUpdate(newScore);
-                 audio.playHit();
-               } else {
-                 audio.playJump();
-               }
-               if (checkGameOver(finalBoard)) {
-                 setGameOver(true);
-                 setIsPlaying(false);
-                 audio.playExplosion();
-                 setTimeout(() => onGameOver(score + result.pointsAdded), 1500);
-               }
-            }
-          }}
-          onRight={() => {
-            const result = moveRight(board);
-            if (result.moved) {
-               const finalBoard = addRandomTile(result.newBoard);
-               setBoard(finalBoard);
-               if (result.pointsAdded > 0) {
-                 const newScore = score + result.pointsAdded;
-                 setScore(newScore);
-                 onScoreUpdate(newScore);
-                 audio.playHit();
-               } else {
-                 audio.playJump();
-               }
-               if (checkGameOver(finalBoard)) {
-                 setGameOver(true);
-                 setIsPlaying(false);
-                 audio.playExplosion();
-                 setTimeout(() => onGameOver(score + result.pointsAdded), 1500);
-               }
-            }
-          }}
+      {/* Grid Container */}
+      <div
+        className="relative flex-none w-full max-w-[360px] aspect-square bg-[#101424] p-3 rounded-2xl border border-white/[0.08] shadow-2xl overflow-hidden touch-none select-none"
+        onTouchStart={handleTouchStart}
+        onTouchEnd={handleTouchEnd}
+      >
+        <div className="grid grid-cols-4 grid-rows-4 gap-2.5 w-full h-full">
+          {board.map((row, r) =>
+            row.map((val, c) => {
+              const tileStyle = TILE_COLORS[val] || {
+                bg: 'bg-purple-950 text-white border-purple-400',
+                text: 'text-white',
+                glow: 'shadow-[0_0_30px_rgba(168,85,247,0.9)]'
+              };
+
+              return (
+                <div
+                  key={`${r}-${c}`}
+                  className={`flex items-center justify-center rounded-xl border transition-all duration-150 font-black select-none ${
+                    val === 0
+                      ? 'bg-white/[0.03] border-white/[0.04]'
+                      : `${tileStyle.bg} ${tileStyle.glow} text-lg sm:text-2xl scale-100 animate-in zoom-in-50`
+                  }`}
+                >
+                  {val > 0 ? val : ''}
+                </div>
+              );
+            })
+          )}
+        </div>
+
+        <GameOverlay
+          gameState={gameState}
+          score={score}
+          highScore={highScore}
+          countdown={countdown}
+          onStart={startGame}
+          onRestart={startGame}
+          instructions="Gabungkan kotak berangka sama untuk mencapai 2048! Geser layar atau gunakan tombol panah WASD."
         />
+      </div>
+
+      {/* Mobile D-Pad */}
+      {gameState === 'playing' && (
+        <div className="flex-none mt-3 md:hidden">
+          <MobileControls onDirection={handleMove} />
+        </div>
       )}
-    </GameContainer>
+    </div>
   );
 }

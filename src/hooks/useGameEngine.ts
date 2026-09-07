@@ -1,10 +1,12 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { GameLifecycleState } from '../types';
 import { performanceService } from '../services/performanceService';
+import { audio } from '../utils/audio';
 
 export type GameEngineState = GameLifecycleState;
 
 export interface UseGameEngineOptions {
+  gameId?: string;
   onScoreUpdate?: (score: number) => void;
   onGameOver?: (finalScore: number) => void;
   onPause?: () => void;

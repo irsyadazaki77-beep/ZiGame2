@@ -367,6 +367,61 @@ export const GAME_QUALITY_MAP: Record<string, GameQualityInfo> = {
     ghostModeSupported: false,
     competitiveSupported: false,
     estimatedDuration: 'quick'
+  },
+  'neon-heist': {
+    gameId: 'neon-heist',
+    tier: 'flagship',
+    targetFps: 60,
+    mobileOptimized: true,
+    gamepadOptimized: true,
+    saveStateSupported: true,
+    ghostModeSupported: true,
+    competitiveSupported: true,
+    estimatedDuration: 'standard'
+  },
+  'void-survivor': {
+    gameId: 'void-survivor',
+    tier: 'flagship',
+    targetFps: 60,
+    mobileOptimized: true,
+    gamepadOptimized: true,
+    saveStateSupported: false,
+    ghostModeSupported: true,
+    competitiveSupported: true,
+    estimatedDuration: 'deep'
+  },
+  'orbital-defense': {
+    gameId: 'orbital-defense',
+    tier: 'flagship',
+    targetFps: 60,
+    mobileOptimized: true,
+    gamepadOptimized: false,
+    saveStateSupported: true,
+    ghostModeSupported: false,
+    competitiveSupported: true,
+    estimatedDuration: 'deep'
+  },
+  'gravity-shift': {
+    gameId: 'gravity-shift',
+    tier: 'flagship',
+    targetFps: 60,
+    mobileOptimized: true,
+    gamepadOptimized: true,
+    saveStateSupported: false,
+    ghostModeSupported: true,
+    competitiveSupported: true,
+    estimatedDuration: 'standard'
+  },
+  'hex-dominion': {
+    gameId: 'hex-dominion',
+    tier: 'flagship',
+    targetFps: 60,
+    mobileOptimized: true,
+    gamepadOptimized: false,
+    saveStateSupported: true,
+    ghostModeSupported: false,
+    competitiveSupported: true,
+    estimatedDuration: 'deep'
   }
 };
 

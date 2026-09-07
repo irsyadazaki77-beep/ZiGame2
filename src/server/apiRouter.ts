@@ -22,6 +22,9 @@ import {
   getSpinCooldown,
   executeDailySpin,
   executeShopPurchase,
+  executeGamble,
+  executeGacha,
+  executeClaimReward,
   getLeaderboardEntries,
   getRealAdminStats,
   purgeSuspectScores,
@@ -268,6 +271,95 @@ apiRouter.post('/spin', requireAuth, rateLimit(10, 60000, 'daily_spin'), async (
     return handleServerException(err, req, res);
   }
 });
+
+/**
+ * POST /api/economy/gamble
+ * Server-Authoritative 50/50 double-or-nothing coin flip with secure RNG
+ */
+apiRouter.post('/economy/gamble', requireAuth, rateLimit(30, 60000, 'gamble'), async (req: Request, res: Response) => {
+  try {
+    const userId = req.user!.uid;
+    const { bet, choice, idempotencyKey } = req.body;
+
+    if (typeof bet !== 'number' || bet <= 0) {
+      return sendApiError(res, 400, 'INVALID_BET', 'Nilai taruhan koin tidak valid.');
+    }
+
+    if (choice !== 'heads' && choice !== 'tails') {
+      return sendApiError(res, 400, 'INVALID_CHOICE', 'Pilihan harus "heads" atau "tails".');
+    }
+
+    const result = await executeGamble(userId, bet, choice, idempotencyKey);
+
+    serverLogger.info('GAMBLE', `User gambled ${bet} on ${choice} and ${result.won ? 'WON' : 'LOST'}`, {
+      bet,
+      choice,
+      won: result.won,
+      remainingCoins: result.remainingCoins,
+      transactionId: result.transactionId
+    }, userId, req.ip, req.id);
+
+    return res.json(result);
+  } catch (err: unknown) {
+    serverLogger.error('GAMBLE_ERROR', 'Failed to process gamble', err, undefined, req.user?.uid, req.ip, req.id);
+    return handleServerException(err, req, res);
+  }
+});
+
+/**
+ * POST /api/economy/gacha
+ * Server-Authoritative gacha lucky pull with secure RNG
+ */
+apiRouter.post('/economy/gacha', requireAuth, rateLimit(20, 60000, 'gacha'), async (req: Request, res: Response) => {
+  try {
+    const userId = req.user!.uid;
+    const { idempotencyKey } = req.body;
+
+    const result = await executeGacha(userId, idempotencyKey);
+
+    serverLogger.info('GACHA', `User pulled gacha and won ${result.rewardId}`, {
+      rewardId: result.rewardId,
+      remainingCoins: result.remainingCoins,
+      transactionId: result.transactionId
+    }, userId, req.ip, req.id);
+
+    return res.json(result);
+  } catch (err: unknown) {
+    serverLogger.error('GACHA_ERROR', 'Failed to process gacha pull', err, undefined, req.user?.uid, req.ip, req.id);
+    return handleServerException(err, req, res);
+  }
+});
+
+/**
+ * POST /api/economy/claim and /api/economy/claim-reward
+ * Server-Authoritative reward claim endpoint for missions, achievements, and challenges
+ */
+const handleClaimReward = async (req: Request, res: Response) => {
+  try {
+    const userId = req.user!.uid;
+    const { amount, reason, idempotencyKey } = req.body;
+
+    if (typeof amount !== 'number' || amount <= 0 || !Number.isFinite(amount)) {
+      return sendApiError(res, 400, 'INVALID_AMOUNT', 'Nilai reward koin tidak valid.');
+    }
+
+    const result = await executeClaimReward(userId, Math.floor(amount), reason, idempotencyKey);
+
+    serverLogger.info('REWARD_CLAIMED', `User claimed ${amount} coins for ${reason}`, {
+      amount: result.amount,
+      newBalance: result.newBalance,
+      transactionId: result.transactionId
+    }, userId, req.ip, req.id);
+
+    return res.json(result);
+  } catch (err: unknown) {
+    serverLogger.error('CLAIM_ERROR', 'Failed to claim reward', err, undefined, req.user?.uid, req.ip, req.id);
+    return handleServerException(err, req, res);
+  }
+};
+
+apiRouter.post('/economy/claim', requireAuth, rateLimit(30, 60000, 'reward_claim'), handleClaimReward);
+apiRouter.post('/economy/claim-reward', requireAuth, rateLimit(30, 60000, 'reward_claim'), handleClaimReward);
 
 // ----------------------------------------------------
 // LEADERBOARD

@@ -45,7 +45,7 @@ interface Bullet {
 interface PowerUp {
   x: number;
   y: number;
-  type: 'spread' | 'shield' | 'bomb' | 'rapid';
+  type: 'spread' | 'shield' | 'bomb' | 'rapid' | 'dual';
   label: string;
   color: string;
 }
@@ -84,7 +84,7 @@ export default function SpaceDefenderGame({ onGameOver, onScoreUpdate, highScore
   const [wave, setWave] = useState(1);
   const [lives, setLives] = useState(3);
   const [combo, setCombo] = useState(0);
-  const [weaponType, setWeaponType] = useState<'single' | 'dual' | 'spread'>('single');
+  const [weaponType, setWeaponType] = useState<'single' | 'dual' | 'spread' | 'rapid'>('single');
   const [hasShield, setHasShield] = useState(false);
 
   // Loop & Sync Refs
@@ -112,7 +112,7 @@ export default function SpaceDefenderGame({ onGameOver, onScoreUpdate, highScore
     h: 22,
     speed: 5.5,
     lastShot: 0,
-    weapon: 'single' as 'single' | 'dual' | 'spread',
+    weapon: 'single' as 'single' | 'dual' | 'spread' | 'rapid',
     weaponTimer: 0,
     shield: false,
     invincibleTimer: 0,
