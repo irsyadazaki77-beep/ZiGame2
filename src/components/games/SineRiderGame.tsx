@@ -1,5 +1,6 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { audio } from '../../utils/audio';
+import { useGameEngine } from '../../hooks/useGameEngine';
 import { Particle } from '../../types';
 import { GameContainer } from '../gameplay/GameContainer';
 import { GameHUD } from '../gameplay/GameHUD';
@@ -21,22 +22,29 @@ interface ObstacleWall {
 
 export default function SineRiderGame({ onGameOver, onScoreUpdate, highScore }: SineRiderGameProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [score, setScore] = useState(0);
-  const lastTimeRef = useRef<number>(0);
-  const gameLoopRef = useRef<number | null>(null);
-  const scoreRef = useRef(0);
-  const [gameOver, setGameOver] = useState(false);
-  const isPlayingRef = useRef(false);
-  const gameOverRef = useRef(false);
 
+  const {
+    gameState,
+    setGameState,
+    score,
+    updateScore,
+    addScore,
+    startLoop,
+    stopLoop,
+    triggerGameOver,
+    startWithCountdown,
+    countdown,
+  } = useGameEngine({
+    gameId: 'sinerider',
+    onGameOver,
+    onScoreUpdate,
+  });
 
+  const gameStateRef = useRef(gameState);
+  
   useEffect(() => {
-    isPlayingRef.current = isPlaying;
-    gameOverRef.current = gameOver;
-    scoreRef.current = score;
-  }, [isPlaying, gameOver, score]);
-  const [muted, setMuted] = useState(audio.getMuteState());
+    gameStateRef.current = gameState;
+  }, [gameState]);
 
   const CANVAS_WIDTH = 400;
   const CANVAS_HEIGHT = 500;
@@ -52,11 +60,10 @@ export default function SineRiderGame({ onGameOver, onScoreUpdate, highScore }: 
   const particlesRef = useRef<Particle[]>([]);
   const spawnTimerRef = useRef(0);
 
+  const lastTimeRef = useRef(0);
+
   useEffect(() => {
     drawStatic();
-    return () => {
-      if (gameLoopRef.current) cancelAnimationFrame(gameLoopRef.current);
-    };
   }, []);
 
   const drawStatic = () => {
@@ -93,27 +100,23 @@ export default function SineRiderGame({ onGameOver, onScoreUpdate, highScore }: 
     ctx.fillText('Lewati celah dinding laser bercahaya', CANVAS_WIDTH / 2, 250);
   };
 
-  const startNewGame = () => {
-    audio.playCoin();
-    setIsPlaying(true);
-    setGameOver(false);
-    setScore(0);
-    onScoreUpdate(0);
-
+  const startGame = useCallback(() => {
+    updateScore(0);
     riderYRef.current = CANVAS_HEIGHT / 2;
     riderVyRef.current = 0;
     obstaclesRef.current = [];
     particlesRef.current = [];
     spawnTimerRef.current = 0;
-    lastTimeRef.current = performance.now();
 
-    if (gameLoopRef.current) cancelAnimationFrame(gameLoopRef.current);
-    gameLoopRef.current = requestAnimationFrame(update);
-  };
+    startWithCountdown(() => {
+      lastTimeRef.current = performance.now();
+      startLoop(gameStep);
+    });
+  }, [startWithCountdown, startLoop, updateScore]);
 
   const handlePointerDown = () => {
     isHoldingRef.current = true;
-    if (isPlaying && !gameOver) {
+    if (gameStateRef.current === 'playing') {
       audio.playJump();
     }
   };
@@ -171,16 +174,13 @@ export default function SineRiderGame({ onGameOver, onScoreUpdate, highScore }: 
     }
   };
 
-  const update = (timestamp: number) => {
-    const canvas = canvasRef.current;
-    if (!canvas || !isPlayingRef.current || gameOverRef.current ) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
+  const gameStep = useCallback((timestamp: number, dt: number) => {
+    if (gameStateRef.current !== 'playing') return;
 
-    const delta = (timestamp - lastTimeRef.current) / 16.666;
-    lastTimeRef.current = timestamp;
+    // delta mapping to original 16.6ms standard for Physics
+    const delta = dt / 16.666;
 
-    const gameSpeed = 3.2 + scoreRef.current * 0.005;
+    const gameSpeed = 3.2 + score * 0.005;
 
     // Movement updates
     if (isHoldingRef.current) {
@@ -203,7 +203,7 @@ export default function SineRiderGame({ onGameOver, onScoreUpdate, highScore }: 
     if (spawnTimerRef.current > 75) {
       spawnTimerRef.current = 0;
 
-      const gapH = Math.max(105, 140 - scoreRef.current * 0.5);
+      const gapH = Math.max(105, 140 - score * 0.5);
       const gapY = 80 + Math.random() * (CANVAS_HEIGHT - 160);
 
       obstaclesRef.current.push({
@@ -217,12 +217,19 @@ export default function SineRiderGame({ onGameOver, onScoreUpdate, highScore }: 
     // Screen bound death
     if (riderYRef.current < 0 || riderYRef.current > CANVAS_HEIGHT) {
       audio.playExplosion();
-      setGameOver(true);
-      setIsPlaying(false);
       createExplosion(80, riderYRef.current);
-      onGameOver(scoreRef.current);
+      triggerGameOver();
       return;
     }
+
+    draw(delta, gameSpeed);
+  }, [score, triggerGameOver]);
+
+  const draw = (delta: number, gameSpeed: number) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
 
     // DRAW
     ctx.fillStyle = '#09090b';
@@ -244,7 +251,7 @@ export default function SineRiderGame({ onGameOver, onScoreUpdate, highScore }: 
     ctx.beginPath();
     ctx.moveTo(0, CANVAS_HEIGHT / 2);
     for (let x = 0; x < CANVAS_WIDTH; x += 10) {
-      const offsetSine = Math.sin(x * 0.02 + timestamp * 0.003) * 35;
+      const offsetSine = Math.sin(x * 0.02 + performance.now() * 0.003) * 35;
       ctx.lineTo(x, CANVAS_HEIGHT / 2 + offsetSine);
     }
     ctx.stroke();
@@ -276,11 +283,7 @@ export default function SineRiderGame({ onGameOver, onScoreUpdate, highScore }: 
       if (wall.x < 80 && !wall.passed) {
         wall.passed = true;
         audio.playScore();
-        setScore(prev => {
-          const next = prev + 10;
-          onScoreUpdate(next);
-          return next;
-        });
+        addScore(10);
       }
 
       // Collision checks
@@ -290,10 +293,8 @@ export default function SineRiderGame({ onGameOver, onScoreUpdate, highScore }: 
 
       if (withinX && (inTopGap || inBotGap)) {
         audio.playExplosion();
-        setGameOver(true);
-        setIsPlaying(false);
         createExplosion(80, riderYRef.current);
-        onGameOver(scoreRef.current);
+        triggerGameOver();
       }
     });
     obstaclesRef.current = obstaclesRef.current.filter(w => w.x > -50);
@@ -334,24 +335,11 @@ export default function SineRiderGame({ onGameOver, onScoreUpdate, highScore }: 
     ctx.fillText(`KESTABILAN: ${(100 - Math.abs(riderVyRef.current) * 12).toFixed(0)}%`, 15, 30);
     ctx.textAlign = 'right';
     ctx.fillText(`SKOR: ${score}`, CANVAS_WIDTH - 15, 30);
-
-    gameLoopRef.current = requestAnimationFrame(update);
-  };
-
-  const toggleMute = () => {
-    const nextMuted = audio.toggleMute();
-    setMuted(nextMuted);
-  };
-
-  const getGameState = () => {
-    if (!isPlaying && score === 0 && !gameOver) return 'ready';
-    if (!isPlaying) return 'gameover';
-    return 'playing';
   };
 
   return (
     <GameContainer aspect="portrait" maxWidth="sm">
-      {isPlaying && (
+      {gameState === 'playing' && (
         <GameHUD 
           stats={[
             { id: 'score', label: 'SKOR', value: score, emphasized: true }
@@ -360,10 +348,11 @@ export default function SineRiderGame({ onGameOver, onScoreUpdate, highScore }: 
       )}
 
       <GameOverlay
-        gameState={getGameState()}
+        gameState={gameState}
         score={score}
-        onStart={startNewGame}
-        onRestart={startNewGame}
+        onStart={startGame}
+        onRestart={startGame}
+        countdown={countdown}
         instructions="Tahan spasi atau ketuk layar untuk menaikkan gelombang sine. Lewati celah dinding laser bercahaya!"
       />
 
@@ -380,7 +369,7 @@ export default function SineRiderGame({ onGameOver, onScoreUpdate, highScore }: 
         />
       </div>
 
-      {isPlaying && (
+      {gameState === 'playing' && (
         <div className="mt-4 flex gap-4 w-full md:hidden">
           <button
             onMouseDown={handlePointerDown}

@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { audio } from '../../utils/audio';
-import { inputManager } from '../../services/inputService';
+import { useGameEngine } from '../../hooks/useGameEngine';
+import { useUnifiedInput } from '../../hooks/useUnifiedInput';
 import { GameOverlay } from '../gameplay/GameOverlay';
 import { Shield, Zap, Crosshair, Play, FastForward, Award, Trash2, ArrowUpCircle } from 'lucide-react';
 
@@ -150,8 +151,13 @@ const PATH_WAYPOINTS = [
 export default function OrbitalDefenseGame({ onGameOver, onScoreUpdate, highScore }: OrbitalDefenseGameProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
-  const [gameState, setGameState] = useState<'ready' | 'countdown' | 'playing' | 'paused' | 'gameover'>('ready');
-  const [countdown, setCountdown] = useState(3);
+  const {
+    gameState, setGameState, gameStateRef, countdown, score, updateScore, triggerGameOver,
+    startWithCountdown, startLoop, stopLoop, setupCanvasContext, perfSettings,
+  gameLoopRef,
+  } = useGameEngine({
+    onScoreUpdate, onGameOver
+  });
   const [wave, setWave] = useState(1);
   const [maxWaves] = useState(10);
   const [energy, setEnergy] = useState(350);
@@ -161,10 +167,7 @@ export default function OrbitalDefenseGame({ onGameOver, onScoreUpdate, highScor
   const [selectedTowerType, setSelectedTowerType] = useState<TowerType | null>('laser');
   const [selectedPlacedTower, setSelectedPlacedTower] = useState<PlacedTower | null>(null);
   const [isWaveActive, setIsWaveActive] = useState(false);
-  const [totalScore, setTotalScore] = useState(0);
 
-  const gameStateRef = useRef(gameState);
-  const totalScoreRef = useRef(0);
   const energyRef = useRef(350);
   const coreHpRef = useRef(100);
   const gameSpeedRef = useRef<1 | 2>(1);
@@ -181,7 +184,6 @@ export default function OrbitalDefenseGame({ onGameOver, onScoreUpdate, highScor
   const waveQueueRef = useRef<Enemy[]>([]);
   const spawnTimerRef = useRef(0);
   const lastTimeRef = useRef(0);
-  const gameLoopRef = useRef<number | null>(null);
 
   useEffect(() => { gameStateRef.current = gameState; }, [gameState]);
   useEffect(() => { gameSpeedRef.current = gameSpeed; }, [gameSpeed]);
@@ -342,54 +344,34 @@ export default function OrbitalDefenseGame({ onGameOver, onScoreUpdate, highScor
     setIsWaveActive(false);
     isWaveActiveRef.current = false;
     setSelectedPlacedTower(null);
-    totalScoreRef.current = 0;
-    setTotalScore(0);
+    updateScore(0);
 
-    setGameState('countdown');
-    setCountdown(3);
-    audio.playCountdown();
+    startWithCountdown();
   }, []);
 
-  // Countdown timer
-  useEffect(() => {
-    if (gameState !== 'countdown') return;
-    if (countdown > 1) {
-      const t = setTimeout(() => {
-        setCountdown((c) => c - 1);
-        audio.playCountdown();
-      }, 700);
-      return () => clearTimeout(t);
-    } else {
-      const t = setTimeout(() => {
-        setGameState('playing');
-        audio.playCoin();
-      }, 700);
-      return () => clearTimeout(t);
-    }
-  }, [gameState, countdown]);
 
   // Unified input subscription
-  useEffect(() => {
-    const unsub = inputManager.subscribe({
-      onActionDown: (action) => {
-        if (gameStateRef.current === 'ready') {
-          if (action === 'PRIMARY') startGame();
-          return;
-        }
-        if (gameStateRef.current === 'gameover') {
-          if (action === 'PRIMARY' || action === 'RESTART') startGame();
-          return;
-        }
-        if (gameStateRef.current === 'playing') {
-          if (action === 'PAUSE') setGameState('paused');
-          if (action === 'PRIMARY') startNextWave();
-        } else if (gameStateRef.current === 'paused') {
-          if (action === 'PAUSE' || action === 'PRIMARY') setGameState('playing');
-        }
-      },
-    });
-    return () => unsub();
-  }, [startGame, startNextWave]);
+    useUnifiedInput({
+    onActionDown: (action) => {
+      if (gameStateRef.current === 'ready') {
+        if (action === 'PRIMARY') startGame();
+        return;
+      }
+      if (gameStateRef.current === 'gameover') {
+        if (action === 'PRIMARY' || action === 'RESTART') startGame();
+        return;
+      }
+      if (gameStateRef.current === 'playing') {
+        if (action === 'PAUSE') setGameState('paused');
+        if (action === 'PRIMARY') startNextWave();
+      } else if (gameStateRef.current === 'paused') {
+        if (action === 'PAUSE' || action === 'PRIMARY') setGameState('playing');
+      }
+    },
+    onRawKey: (key, isDown) => {
+      // no-op for now unless keyboard mapping is needed
+    }
+  });
 
   // Handle canvas click for placement & selection
   const handleCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -479,26 +461,15 @@ export default function OrbitalDefenseGame({ onGameOver, onScoreUpdate, highScor
     audio.playCoin();
   };
 
-  // Main 60 FPS requestAnimationFrame loop
+  // Main game loop
   useEffect(() => {
-    let animId: number;
+    if (gameState === 'playing') {
+      startLoop((timestamp, dtMs) => {
+        const rawDt = Math.min(dtMs / 1000, 0.1);
+        const dt = rawDt * gameSpeedRef.current;
 
-    const loop = (timestamp: number) => {
-      animId = requestAnimationFrame(loop);
-      gameLoopRef.current = animId;
-
-      if (!lastTimeRef.current) lastTimeRef.current = timestamp;
-      const rawDt = Math.min((timestamp - lastTimeRef.current) / 1000, 0.1);
-      const dt = rawDt * gameSpeedRef.current;
-      lastTimeRef.current = timestamp;
-
-      const canvas = canvasRef.current;
-      if (!canvas) return;
-      const ctx = canvas.getContext('2d');
-      if (!ctx) return;
-
-      // UPDATE PHASE
-      if (gameStateRef.current === 'playing') {
+        const ctx = setupCanvasContext(canvasRef.current, CANVAS_WIDTH, CANVAS_HEIGHT);
+        if (!ctx) return;
         // Wave Spawning
         if (waveQueueRef.current.length > 0) {
           spawnTimerRef.current += dt;
@@ -515,9 +486,7 @@ export default function OrbitalDefenseGame({ onGameOver, onScoreUpdate, highScor
           energyRef.current += waveReward;
           setEnergy(energyRef.current);
 
-          totalScoreRef.current += wave * 300;
-          setTotalScore(totalScoreRef.current);
-          onScoreUpdate(totalScoreRef.current);
+          updateScore(score + wave * 300);
 
           if (wave < maxWaves) {
             setWave((w) => w + 1);
@@ -525,8 +494,7 @@ export default function OrbitalDefenseGame({ onGameOver, onScoreUpdate, highScor
           } else {
             // All 10 waves beaten!
             audio.playLevelUp();
-            setGameState('gameover');
-            onGameOver(totalScoreRef.current);
+            triggerGameOver();
           }
         }
 
@@ -550,8 +518,7 @@ export default function OrbitalDefenseGame({ onGameOver, onScoreUpdate, highScor
 
             if (coreHpRef.current <= 0) {
               audio.playGameOver();
-              setGameState('gameover');
-              onGameOver(totalScoreRef.current);
+              triggerGameOver();
             }
             return;
           }
@@ -673,9 +640,7 @@ export default function OrbitalDefenseGame({ onGameOver, onScoreUpdate, highScor
               if ((target as Enemy).hp <= 0) {
                 energyRef.current += (target as Enemy).reward;
                 setEnergy(energyRef.current);
-                totalScoreRef.current += (target as Enemy).reward * 5;
-                setTotalScore(totalScoreRef.current);
-                onScoreUpdate(totalScoreRef.current);
+                updateScore(score + (target as Enemy).reward * 5);
                 spawnParticles((target as Enemy).x, (target as Enemy).y, (target as Enemy).color, 10);
               }
             }
@@ -706,9 +671,7 @@ export default function OrbitalDefenseGame({ onGameOver, onScoreUpdate, highScor
                   if (e.hp <= 0) {
                     energyRef.current += e.reward;
                     setEnergy(energyRef.current);
-                    totalScoreRef.current += e.reward * 5;
-                    setTotalScore(totalScoreRef.current);
-                    onScoreUpdate(totalScoreRef.current);
+                    updateScore(score + e.reward * 5);
                   }
                 }
               });
@@ -727,7 +690,6 @@ export default function OrbitalDefenseGame({ onGameOver, onScoreUpdate, highScor
           p.alpha -= 0.025;
           return p.alpha > 0;
         });
-      }
 
       // RENDER PHASE
       ctx.fillStyle = '#07090e';
@@ -911,13 +873,9 @@ export default function OrbitalDefenseGame({ onGameOver, onScoreUpdate, highScor
         ctx.fill();
         ctx.globalAlpha = 1;
       });
-    };
-
-    animId = requestAnimationFrame(loop);
-    return () => {
-      if (animId) cancelAnimationFrame(animId);
-    };
-  }, [gameState, onGameOver, onScoreUpdate, wave, maxWaves]);
+      });
+    }
+  }, [gameState, startLoop, setupCanvasContext, onGameOver, onScoreUpdate, wave, maxWaves, score, updateScore, triggerGameOver]);
 
   return (
     <div className="relative w-full h-full flex flex-col items-center justify-between select-none bg-[#07090e] font-sans">
@@ -965,7 +923,7 @@ export default function OrbitalDefenseGame({ onGameOver, onScoreUpdate, highScor
 
           <div className="px-3 py-1 bg-zinc-900/90 border border-white/10 rounded-xl flex items-center gap-2">
             <span className="text-zinc-400">SKOR:</span>
-            <span className="text-yellow-400 font-bold">{totalScore}</span>
+            <span className="text-yellow-400 font-bold">{score}</span>
           </div>
         </div>
       </div>
@@ -1060,7 +1018,7 @@ export default function OrbitalDefenseGame({ onGameOver, onScoreUpdate, highScor
       <GameOverlay
         gameState={gameState}
         countdown={countdown}
-        score={totalScore}
+        score={score}
         highScore={highScore}
         onStart={startGame}
         onResume={() => setGameState('playing')}

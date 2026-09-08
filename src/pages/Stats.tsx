@@ -75,12 +75,7 @@ export default function Stats({ games, achievements, totalPlays }: StatsProps) {
       {/* Banner */}
       <section className="relative rounded-2xl overflow-hidden border border-white/[0.06] bg-[#0f131c] flex flex-col justify-center px-6 md:px-10 py-8 md:py-10 shadow-sm">
         <div className="absolute inset-0 bg-gradient-to-r from-[#0f131c] via-[#0f131c]/90 to-transparent z-10"></div>
-        <img 
-          src="https://images.unsplash.com/photo-1550751827-4bd374c3f58b?q=80&w=1200&auto=format&fit=crop" 
-          alt="Cyber analytics stats background"
-          referrerPolicy="no-referrer" loading="lazy"
-          className="absolute inset-0 w-full h-full object-cover opacity-20 z-0"
-        />
+        <div className="absolute inset-0 z-0 bg-gradient-to-r from-indigo-900/10 to-blue-900/10" style={{ backgroundImage: 'radial-gradient(circle at 100% 0%, rgba(59, 130, 246, 0.15), transparent 50%), radial-gradient(circle at 0% 100%, rgba(99, 102, 241, 0.1), transparent 50%)' }} />
 
         <div className="relative z-20 max-w-xl space-y-2">
           <div className="bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 text-xs font-mono font-bold px-3 py-1 rounded-md w-fit uppercase tracking-wider flex items-center gap-2">

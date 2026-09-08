@@ -1,5 +1,6 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { audio } from '../../utils/audio';
+import { useGameEngine } from '../../hooks/useGameEngine';
 import { Particle } from '../../types';
 import { GameContainer } from '../gameplay/GameContainer';
 import { GameHUD } from '../gameplay/GameHUD';
@@ -38,25 +39,39 @@ interface PlinkoBucket {
 
 export default function PlinkoNeoGame({ onGameOver, onScoreUpdate, highScore }: PlinkoNeoGameProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [score, setScore] = useState(0);
-  const lastTimeRef = useRef<number>(0);
-  const gameLoopRef = useRef<number | null>(null);
-  const scoreRef = useRef(0);
+
+  const {
+    gameState,
+    setGameState,
+    score,
+    updateScore,
+    addScore,
+    startLoop,
+    stopLoop,
+    triggerGameOver,
+    startWithCountdown,
+    countdown,
+    scoreRef,
+    gameLoopRef
+  } = useGameEngine({
+    gameId: 'plinkoneo',
+    onGameOver,
+    onScoreUpdate,
+  });
+
+  const gameStateRef = useRef(gameState);
+  useEffect(() => {
+    gameStateRef.current = gameState;
+  }, [gameState]);
+
   const [ballsLeft, setBallsLeft] = useState(5);
   const ballsLeftRef = useRef(5);
-  const [gameOver, setGameOver] = useState(false);
-  const isPlayingRef = useRef(false);
-  const gameOverRef = useRef(false);
 
-
+  
   useEffect(() => {
-    isPlayingRef.current = isPlaying;
-    gameOverRef.current = gameOver;
     scoreRef.current = score;
     ballsLeftRef.current = ballsLeft;
-  }, [isPlaying, gameOver, score, ballsLeft]);
-  const [muted, setMuted] = useState(audio.getMuteState());
+  }, [score, ballsLeft]);
 
   const CANVAS_WIDTH = 400;
   const CANVAS_HEIGHT = 500;
@@ -80,7 +95,7 @@ export default function PlinkoNeoGame({ onGameOver, onScoreUpdate, highScore }: 
     generatePegGrid();
     drawStatic();
     return () => {
-      if (gameLoopRef.current) cancelAnimationFrame(gameLoopRef.current);
+      if (gameLoopRef?.current) cancelAnimationFrame(gameLoopRef.current);
     };
   }, []);
 
@@ -156,24 +171,21 @@ export default function PlinkoNeoGame({ onGameOver, onScoreUpdate, highScore }: 
     });
   };
 
-  const startNewGame = () => {
+  const startGame = useCallback(() => {
     audio.playCoin();
-    setIsPlaying(true);
-    setGameOver(false);
-    setScore(0);
-    onScoreUpdate(0);
+    updateScore(0);
     setBallsLeft(5);
 
     activeBallsRef.current = [];
     particlesRef.current = [];
-    lastTimeRef.current = performance.now();
 
-    if (gameLoopRef.current) cancelAnimationFrame(gameLoopRef.current);
-    gameLoopRef.current = requestAnimationFrame(update);
-  };
+    startWithCountdown(() => {
+      startLoop(gameStep);
+    });
+  }, [updateScore, startWithCountdown, startLoop]);
 
   const dropBall = () => {
-    if (!isPlaying || gameOver || ballsLeft <= 0 || activeBallsRef.current.length > 0) return;
+    if (gameStateRef.current !== 'playing' || ballsLeft <= 0 || activeBallsRef.current.length > 0) return;
 
     audio.playCoin();
     setBallsLeft(prev => prev - 1);
@@ -205,15 +217,14 @@ export default function PlinkoNeoGame({ onGameOver, onScoreUpdate, highScore }: 
     }
   };
 
-  const update = (timestamp: number) => {
+  const gameStep = useCallback((timestamp: number, dt: number) => {
+    if (gameStateRef.current !== 'playing') return;
     const canvas = canvasRef.current;
-    if (!canvas || !isPlayingRef.current) return;
+    if (!canvas) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    const delta = (timestamp - lastTimeRef.current) / 16.666;
-    lastTimeRef.current = timestamp;
-
+    const delta = dt / 16.666;
     const gravity = 0.14;
     const bounceCoeff = 0.48; // bounciness factor
 
@@ -274,11 +285,7 @@ export default function PlinkoNeoGame({ onGameOver, onScoreUpdate, highScore }: 
 
         // Rewarding points based on multiplier!
         const earnedPoints = Math.floor(100 * bucket.multiplier);
-        setScore(prev => {
-          const next = prev + earnedPoints;
-          onScoreUpdate(next);
-          return next;
-        });
+        addScore(earnedPoints);
 
         audio.playLevelUp();
         createPegSparks(ball.x, 455, bucket.color);
@@ -289,9 +296,7 @@ export default function PlinkoNeoGame({ onGameOver, onScoreUpdate, highScore }: 
         // Check game end condition
         if (ballsLeftRef.current <= 0) {
           setTimeout(() => {
-            setGameOver(true);
-            setIsPlaying(false);
-            onGameOver(score + earnedPoints);
+            triggerGameOver();
           }, 1200);
         }
       }
@@ -361,27 +366,14 @@ export default function PlinkoNeoGame({ onGameOver, onScoreUpdate, highScore }: 
     ctx.fillStyle = '#ffffff';
     ctx.font = "bold 11px 'JetBrains Mono', monospace";
     ctx.textAlign = 'left';
-    ctx.fillText(`BOLA: ${ballsLeft}`, 15, 30);
+    ctx.fillText(`BOLA: ${ballsLeftRef.current}`, 15, 30);
     ctx.textAlign = 'right';
     ctx.fillText(`SKOR: ${score}`, CANVAS_WIDTH - 15, 30);
-
-    gameLoopRef.current = requestAnimationFrame(update);
-  };
-
-  const toggleMute = () => {
-    const nextMuted = audio.toggleMute();
-    setMuted(nextMuted);
-  };
-
-  const getGameState = () => {
-    if (!isPlaying && score === 0 && ballsLeft === 5 && !gameOver) return 'ready';
-    if (!isPlaying) return 'gameover';
-    return 'playing';
-  };
+  }, [addScore, triggerGameOver]);
 
   return (
     <GameContainer aspect="portrait" maxWidth="sm">
-      {isPlaying && (
+      {gameState === 'playing' && (
         <GameHUD 
           stats={[
             { id: 'score', label: 'SKOR', value: score, emphasized: true },
@@ -391,10 +383,11 @@ export default function PlinkoNeoGame({ onGameOver, onScoreUpdate, highScore }: 
       )}
 
       <GameOverlay
-        gameState={getGameState()}
+        gameState={gameState}
         score={score}
-        onStart={startNewGame}
-        onRestart={startNewGame}
+        countdown={countdown}
+        onStart={startGame}
+        onRestart={startGame}
         instructions="Jatuhkan bola neon untuk meraih multiplier. Kumpulkan skor sebanyak-banyaknya!"
       />
 
@@ -407,11 +400,11 @@ export default function PlinkoNeoGame({ onGameOver, onScoreUpdate, highScore }: 
         />
       </div>
 
-      {isPlaying && (
+      {gameState === 'playing' && (
         <div className="mt-4 flex gap-4 w-full">
           <button
             onClick={dropBall}
-            disabled={gameOver || ballsLeft <= 0 || activeBallsRef.current.length > 0}
+            disabled={ballsLeft <= 0 || activeBallsRef.current.length > 0}
             className="w-full py-4 bg-pink-600 hover:bg-pink-500 disabled:bg-zinc-800 disabled:text-zinc-500 active:scale-95 border border-pink-500 disabled:border-transparent rounded-xl text-sm font-black text-white flex items-center justify-center gap-2 cursor-pointer shadow-lg shadow-pink-600/20 transition-all uppercase tracking-wider"
           >
             <ArrowDown size={15} /> JATUHKAN BOLA ({ballsLeft})

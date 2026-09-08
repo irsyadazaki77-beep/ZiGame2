@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { audio } from '../../utils/audio';
+import { useGameEngine } from '../../hooks/useGameEngine';
 import { inputManager } from '../../services/inputService';
 import { GameOverlay } from '../gameplay/GameOverlay';
 import { Shield, Zap, Sparkles } from 'lucide-react';
@@ -32,7 +33,10 @@ interface Enemy {
   shootCooldown: number;
 }
 
-interface Bullet {
+interface Bulconst {
+  scoreRef,
+  gameLoopRef,
+  startLoop,
   x: number;
   y: number;
   vx: number;
@@ -78,9 +82,26 @@ export default function SpaceDefenderGame({ onGameOver, onScoreUpdate, highScore
   const containerRef = useRef<HTMLDivElement | null>(null);
 
   // States
-  const [gameState, setGameState] = useState<'ready' | 'countdown' | 'playing' | 'paused' | 'gameover'>('ready');
-  const [countdown, setCountdown] = useState(3);
-  const [score, setScore] = useState(0);
+  const {
+    gameState,
+    setGameState,
+    score,
+    updateScore,
+    addScore,
+    startLoop,
+    stopLoop,
+    triggerGameOver,
+    startWithCountdown,
+    countdown,
+    setScore,
+    scoreRef,
+    gameLoopRef
+  } = useGameEngine({
+    gameId: 'spacedefender',
+    onGameOver,
+    onScoreUpdate,
+  });
+
   const [wave, setWave] = useState(1);
   const [lives, setLives] = useState(3);
   const [combo, setCombo] = useState(0);
@@ -89,7 +110,6 @@ export default function SpaceDefenderGame({ onGameOver, onScoreUpdate, highScore
 
   // Loop & Sync Refs
   const gameStateRef = useRef(gameState);
-  const scoreRef = useRef(0);
   const waveRef = useRef(1);
   const livesRef = useRef(3);
   const comboRef = useRef(0);
@@ -97,8 +117,6 @@ export default function SpaceDefenderGame({ onGameOver, onScoreUpdate, highScore
   const hitStopRef = useRef(0);
   const shakeRef = useRef(0);
   const warpSpeedRef = useRef(1);
-  const gameLoopRef = useRef<number | null>(null);
-  const lastTimeRef = useRef<number>(0);
 
   useEffect(() => {
     gameStateRef.current = gameState;
@@ -120,7 +138,7 @@ export default function SpaceDefenderGame({ onGameOver, onScoreUpdate, highScore
 
   const starsRef = useRef<Star[]>([]);
   const enemiesRef = useRef<Enemy[]>([]);
-  const bulletsRef = useRef<Bullet[]>([]);
+  const bulletsRef = useRef<any[]>([]);
   const powerupsRef = useRef<PowerUp[]>([]);
   const particlesRef = useRef<Particle[]>([]);
   const floatingTextsRef = useRef<FloatingText[]>([]);
@@ -146,7 +164,7 @@ export default function SpaceDefenderGame({ onGameOver, onScoreUpdate, highScore
     generateStars();
     drawStatic();
     return () => {
-      if (gameLoopRef.current) cancelAnimationFrame(gameLoopRef.current);
+      if (gameLoopRef?.current) cancelAnimationFrame(gameLoopRef.current);
     };
   }, [generateStars]);
 
@@ -217,7 +235,7 @@ export default function SpaceDefenderGame({ onGameOver, onScoreUpdate, highScore
   };
 
   const resetGame = useCallback(() => {
-    scoreRef.current = 0;
+    // scoreRef.current = 0;
     setScore(0);
     onScoreUpdate(0);
     waveRef.current = 1;
@@ -257,26 +275,10 @@ export default function SpaceDefenderGame({ onGameOver, onScoreUpdate, highScore
 
   const startGame = useCallback(() => {
     resetGame();
-    setGameState('countdown');
-    setCountdown(3);
-    audio.playCountdownTick();
-
-    let count = 3;
-    const timer = setInterval(() => {
-      count--;
-      if (count > 0) {
-        setCountdown(count);
-        audio.playCountdownTick();
-      } else {
-        clearInterval(timer);
-        audio.playCountdownGo();
-        setGameState('playing');
-        lastTimeRef.current = performance.now();
-        if (gameLoopRef.current) cancelAnimationFrame(gameLoopRef.current);
-        gameLoopRef.current = requestAnimationFrame(gameLoop);
-      }
-    }, 800);
-  }, [resetGame]);
+    startWithCountdown(() => {
+      startLoop(gameStep);
+    });
+  }, [resetGame, startWithCountdown, startLoop]);
 
   const triggerLaser = (now: number) => {
     const player = playerRef.current;
@@ -370,26 +372,18 @@ export default function SpaceDefenderGame({ onGameOver, onScoreUpdate, highScore
     });
   };
 
-  const gameLoop = (timestamp: number) => {
+  const gameStep = useCallback((timestamp: number, dt: number) => {
     if (gameStateRef.current !== 'playing') return;
-
-    const dt = Math.min(timestamp - lastTimeRef.current, 100);
-    lastTimeRef.current = timestamp;
 
     if (hitStopRef.current > 0) {
       hitStopRef.current -= dt;
       draw();
-      gameLoopRef.current = requestAnimationFrame(gameLoop);
       return;
     }
 
     updatePhysics(dt, timestamp);
     draw();
-
-    if (gameStateRef.current === 'playing') {
-      gameLoopRef.current = requestAnimationFrame(gameLoop);
-    }
-  };
+  }, []);
 
   const updatePhysics = (dt: number, now: number) => {
     const player = playerRef.current;
@@ -443,7 +437,7 @@ export default function SpaceDefenderGame({ onGameOver, onScoreUpdate, highScore
       }
     });
 
-    // Update Bullets
+    // Update anys
     for (let i = bulletsRef.current.length - 1; i >= 0; i--) {
       const b = bulletsRef.current[i];
       b.x += b.vx;
@@ -455,7 +449,7 @@ export default function SpaceDefenderGame({ onGameOver, onScoreUpdate, highScore
         continue;
       }
 
-      // Enemy Bullet hitting player
+      // Enemy any hitting player
       if (b.isEnemy) {
         if (
           player.invincibleTimer <= 0 &&
@@ -521,7 +515,7 @@ export default function SpaceDefenderGame({ onGameOver, onScoreUpdate, highScore
         continue;
       }
 
-      // Bullet-Enemy Collisions
+      // any-Enemy Collisions
       for (let j = bulletsRef.current.length - 1; j >= 0; j--) {
         const b = bulletsRef.current[j];
         if (b.isEnemy) continue;
@@ -543,10 +537,7 @@ export default function SpaceDefenderGame({ onGameOver, onScoreUpdate, highScore
             setCombo(newCombo);
 
             const pointsEarned = enemy.points * newCombo;
-            const nextScore = scoreRef.current + pointsEarned;
-            scoreRef.current = nextScore;
-            setScore(nextScore);
-            onScoreUpdate(nextScore);
+            addScore(pointsEarned);
 
             audio.playCombo(newCombo);
             inputManager.vibrateGamepad(100, 0.4);
@@ -656,11 +647,11 @@ export default function SpaceDefenderGame({ onGameOver, onScoreUpdate, highScore
       hitStopRef.current = 70;
       enemiesRef.current.forEach(e => {
         spawnParticles(e.x + e.w / 2, e.y + e.h / 2, e.color, 12);
-        scoreRef.current += e.points;
+        addScore(e.points);
       });
       enemiesRef.current = [];
-      setScore(scoreRef.current);
-      onScoreUpdate(scoreRef.current);
+      setScore(score);
+      onScoreUpdate(score);
       spawnFloatingText(WIDTH / 2, HEIGHT / 2, 'EMP BOMB DETONATED!', '#ef4444');
     } else {
       player.weapon = 'dual';
@@ -694,15 +685,14 @@ export default function SpaceDefenderGame({ onGameOver, onScoreUpdate, highScore
     player.invincibleTimer = 1800; // 1.8s invincibility flash
 
     if (nextLives <= 0) {
-      setGameState('gameover');
       audio.playExplosion();
-      onGameOver(scoreRef.current);
+      triggerGameOver();
     }
   };
 
   const checkWaveProgress = () => {
     const nextWaveThreshold = waveRef.current * 180;
-    if (scoreRef.current >= nextWaveThreshold && waveRef.current < 8) {
+    if (score >= nextWaveThreshold && waveRef.current < 8) {
       const nextWave = waveRef.current + 1;
       waveRef.current = nextWave;
       setWave(nextWave);
@@ -755,7 +745,7 @@ export default function SpaceDefenderGame({ onGameOver, onScoreUpdate, highScore
       }
     });
 
-    // Bullets
+    // anys
     bulletsRef.current.forEach(b => {
       ctx.fillStyle = b.color;
       ctx.beginPath();

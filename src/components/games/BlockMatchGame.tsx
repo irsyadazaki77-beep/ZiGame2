@@ -31,13 +31,13 @@ const COLOR_STYLES: Record<BlockColor, string> = {
 const GRID_SIZE = 6;
 
 export default function BlockMatchGame({ onGameOver, onScoreUpdate, highScore }: GameProps) {
+  const scoreRef = useRef(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [grid, setGrid] = useState<GridCell[][]>([]);
   const [score, setScore] = useState(0);
   const [movesLeft, setMovesLeft] = useState(25);
   const [hasValidMoves, setHasValidMoves] = useState(true);
   const [combo, setCombo] = useState(1);
-  const scoreRef = useRef(0);
 
   useEffect(() => {
     scoreRef.current = score;
@@ -191,7 +191,7 @@ export default function BlockMatchGame({ onGameOver, onScoreUpdate, highScore }:
   const endGame = () => {
     setIsPlaying(false);
     audio.playGameOver();
-    onGameOver(scoreRef.current);
+    onGameOver(score);
   };
 
   useEffect(() => {
@@ -220,7 +220,7 @@ export default function BlockMatchGame({ onGameOver, onScoreUpdate, highScore }:
 
       <GameOverlay
         gameState={getGameState()}
-        score={scoreRef.current}
+        score={score}
         onStart={startNewGame}
         onRestart={startNewGame}
         instructions="Hancurkan barisan balok neon berwarna sama yang saling terhubung."

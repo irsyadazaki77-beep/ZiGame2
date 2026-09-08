@@ -4,6 +4,7 @@ import { X, Shield, Clock, Award, Star, CheckCircle, Sparkles, Gamepad2 } from '
 import { seasonService } from '../services/seasonService';
 import { GameStats } from '../types';
 import { audio } from '../utils/audio';
+import { GameArtwork } from './GameArtwork';
 
 interface SeasonalHubModalProps {
   games: GameStats[];
@@ -105,7 +106,9 @@ export default function SeasonalHubModal({ games, onClose, onSelectGame }: Seaso
                   className="p-3.5 rounded-2xl bg-zinc-950 border border-zinc-800 hover:border-indigo-500/50 transition cursor-pointer flex flex-col justify-between group"
                 >
                   <div className="flex items-center gap-2.5 mb-2">
-                    <span className="text-2xl p-1.5 bg-zinc-900 rounded-lg">{g.icon}</span>
+                    <div className="w-11 h-11 rounded-lg overflow-hidden border border-zinc-800 relative shrink-0">
+                      <GameArtwork game={g} />
+                    </div>
                     <div>
                       <div className="text-xs font-bold text-white uppercase group-hover:text-indigo-400 transition-colors">
                         {g.title}

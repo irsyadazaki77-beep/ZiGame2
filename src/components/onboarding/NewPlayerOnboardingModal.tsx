@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Gamepad2, Sparkles, Compass, Trophy, ArrowRight, Check, X, Shield, Zap, Flame } from 'lucide-react';
 import { GameStats, PlayerProfile } from '../../types';
 import { audio } from '../../utils/audio';
+import { GameArtwork } from '../GameArtwork';
 
 interface NewPlayerOnboardingModalProps {
   games: GameStats[];
@@ -137,9 +138,9 @@ export const NewPlayerOnboardingModal: React.FC<NewPlayerOnboardingModalProps> =
                   className="p-3 bg-black/40 border border-white/[0.06] hover:border-indigo-500/30 rounded-2xl flex items-center justify-between gap-3 transition group"
                 >
                   <div className="flex items-center gap-3 min-w-0">
-                    <span className="text-2xl p-2 rounded-xl bg-zinc-900 border border-white/[0.06] shrink-0">
-                      {g.icon}
-                    </span>
+                    <div className="w-12 h-12 rounded-xl overflow-hidden border border-white/[0.06] relative shrink-0">
+                      <GameArtwork game={g} />
+                    </div>
                     <div className="min-w-0">
                       <h4 className="text-xs font-bold text-white font-display truncate group-hover:text-indigo-400 transition">
                         {g.title}

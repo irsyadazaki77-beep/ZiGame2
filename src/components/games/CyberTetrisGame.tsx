@@ -35,7 +35,7 @@ const COLORS = [
 ];
 
 export default function CyberTetrisGame({ onGameOver, onScoreUpdate, highScore }: GameProps) {
-  const gameLoopRef = useRef<number | null>(null);
+  const scoreRef = useRef(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [board, setBoard] = useState<number[][]>(() => Array(ROWS).fill(null).map(() => Array(COLS).fill(0)));
   const [score, setScore] = useState(0);
@@ -43,7 +43,6 @@ export default function CyberTetrisGame({ onGameOver, onScoreUpdate, highScore }
   const [linesCleared, setLinesCleared] = useState(0);
 
   const boardRef = useRef<number[][]>([]);
-  const scoreRef = useRef(0);
   const isPlayingRef = useRef(false);
 
   // Active falling piece
@@ -349,7 +348,7 @@ export default function CyberTetrisGame({ onGameOver, onScoreUpdate, highScore }
   const endGame = () => {
     setIsPlaying(false);
     audio.playGameOver();
-    onGameOver(scoreRef.current);
+    onGameOver(score);
   };
 
   // Canvas render loop for piece settlement & line-clear particle explosions

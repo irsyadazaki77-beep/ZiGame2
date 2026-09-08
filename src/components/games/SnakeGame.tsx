@@ -55,6 +55,7 @@ export default function SnakeGame({ onGameOver, onScoreUpdate, highScore }: Snak
     score,
     setGameState,
     updateScore,
+    addScore,
     startLoop,
     stopLoop,
     triggerGameOver,
@@ -399,8 +400,7 @@ export default function SnakeGame({ onGameOver, onScoreUpdate, highScore }: Snak
       setCombo(newCombo);
 
       const earned = basePoints * newCombo;
-      const newScore = (score || 0) + earned;
-      updateScore(newScore);
+      addScore(earned);
 
       // Sound & Juice
       if (isGold) {
@@ -430,7 +430,7 @@ export default function SnakeGame({ onGameOver, onScoreUpdate, highScore }: Snak
 
     function cx(p: Point) { return p.x * cellSize + cellSize / 2; }
     function cy(p: Point) { return p.y * cellSize + cellSize / 2; }
-  }, [generateFood, score, triggerGameOver, updateScore]);
+  }, [generateFood, triggerGameOver, addScore]);
 
   // Main Engine Step
   const gameStep = useCallback((timestamp: number, deltaTime: number) => {
@@ -460,8 +460,8 @@ export default function SnakeGame({ onGameOver, onScoreUpdate, highScore }: Snak
 
     moveTimerRef.current += deltaTime;
 
-    // Smooth Difficulty Progression
-    const speedRatio = Math.min(1, (score || 0) / 400);
+    // Smooth Difficulty Progression based on snake length
+    const speedRatio = Math.min(1, (snakeRef.current.length - 3) / 40);
     let currentSpeed = BASE_SPEED - speedRatio * (BASE_SPEED - MIN_SPEED);
     
     // Turbo Boost halves move timer
@@ -475,7 +475,7 @@ export default function SnakeGame({ onGameOver, onScoreUpdate, highScore }: Snak
     }
 
     draw();
-  }, [draw, score, updateGameLogic]);
+  }, [draw, updateGameLogic]);
 
   const resetGame = useCallback(() => {
     snakeRef.current = [...INITIAL_SNAKE];

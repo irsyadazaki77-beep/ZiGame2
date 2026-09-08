@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { audio } from '../../utils/audio';
+import { useGameEngine } from '../../hooks/useGameEngine';
 import { inputManager } from '../../services/inputService';
 import { GameOverlay } from '../gameplay/GameOverlay';
 import { Sparkles, Shield, Zap } from 'lucide-react';
@@ -77,9 +78,23 @@ export default function BrickBreakerGame({ onGameOver, onScoreUpdate, highScore 
   const containerRef = useRef<HTMLDivElement | null>(null);
 
   // States
-  const [gameState, setGameState] = useState<'ready' | 'countdown' | 'playing' | 'paused' | 'gameover'>('ready');
-  const [countdown, setCountdown] = useState(3);
-  const [score, setScore] = useState(0);
+  const {
+    gameState,
+    setGameState,
+    score,
+    updateScore,
+    addScore,
+    startLoop,
+    stopLoop,
+    triggerGameOver,
+    startWithCountdown,
+    countdown,
+  } = useGameEngine({
+    gameId: 'brickbreaker',
+    onGameOver,
+    onScoreUpdate,
+  });
+
   const [level, setLevel] = useState(1);
   const [lives, setLives] = useState(3);
   const [combo, setCombo] = useState(0);
@@ -87,12 +102,9 @@ export default function BrickBreakerGame({ onGameOver, onScoreUpdate, highScore 
 
   // Mutable Game Loop State
   const gameStateRef = useRef(gameState);
-  const scoreRef = useRef(0);
   const levelRef = useRef(1);
   const livesRef = useRef(3);
   const comboRef = useRef(0);
-  const gameLoopRef = useRef<number | null>(null);
-  const lastTimeRef = useRef<number>(0);
   const hitStopRef = useRef<number>(0);
   const shakeRef = useRef<number>(0);
 
@@ -215,9 +227,7 @@ export default function BrickBreakerGame({ onGameOver, onScoreUpdate, highScore 
     setLevel(1);
     livesRef.current = 3;
     setLives(3);
-    scoreRef.current = 0;
-    setScore(0);
-    onScoreUpdate(0);
+    updateScore(0);
     comboRef.current = 0;
     setCombo(0);
     shieldActiveRef.current = false;
@@ -233,30 +243,14 @@ export default function BrickBreakerGame({ onGameOver, onScoreUpdate, highScore 
     buildLevel(1);
     resetBallAndPaddle();
     draw();
-  }, [buildLevel, onScoreUpdate]);
+  }, [buildLevel, updateScore]);
 
   const startGame = useCallback(() => {
     resetGame();
-    setGameState('countdown');
-    setCountdown(3);
-    audio.playCountdownTick();
-
-    let count = 3;
-    const timer = setInterval(() => {
-      count--;
-      if (count > 0) {
-        setCountdown(count);
-        audio.playCountdownTick();
-      } else {
-        clearInterval(timer);
-        audio.playCountdownGo();
-        setGameState('playing');
-        lastTimeRef.current = performance.now();
-        if (gameLoopRef.current) cancelAnimationFrame(gameLoopRef.current);
-        gameLoopRef.current = requestAnimationFrame(gameLoop);
-      }
-    }, 800);
-  }, [resetGame]);
+    startWithCountdown(() => {
+      startLoop(gameStep);
+    });
+  }, [resetGame, startWithCountdown, startLoop]);
 
   // Tab auto-pause
   useEffect(() => {
@@ -293,30 +287,22 @@ export default function BrickBreakerGame({ onGameOver, onScoreUpdate, highScore 
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
-  }, []);
+  }, [setGameState]);
 
   // Update Game Loop
-  const gameLoop = (timestamp: number) => {
+  const gameStep = useCallback((timestamp: number, dt: number) => {
     if (gameStateRef.current !== 'playing') return;
-
-    const dt = Math.min(timestamp - lastTimeRef.current, 100);
-    lastTimeRef.current = timestamp;
 
     // Hit stop micro freeze
     if (hitStopRef.current > 0) {
       hitStopRef.current -= dt;
       draw();
-      gameLoopRef.current = requestAnimationFrame(gameLoop);
       return;
     }
 
     updatePhysics(dt);
     draw();
-
-    if (gameStateRef.current === 'playing') {
-      gameLoopRef.current = requestAnimationFrame(gameLoop);
-    }
-  };
+  }, []);
 
   const updatePhysics = (dt: number) => {
     const paddle = paddleRef.current;
@@ -472,10 +458,7 @@ export default function BrickBreakerGame({ onGameOver, onScoreUpdate, highScore 
           // Brick Shattered
           bricks.splice(i, 1);
           const pointsEarned = b.points * (newCombo > 1 ? newCombo : 1);
-          const nextScore = scoreRef.current + pointsEarned;
-          scoreRef.current = nextScore;
-          setScore(nextScore);
-          onScoreUpdate(nextScore);
+          addScore(pointsEarned);
 
           audio.playCombo(newCombo);
           inputManager.vibrateGamepad(80, 0.45);
@@ -627,9 +610,8 @@ export default function BrickBreakerGame({ onGameOver, onScoreUpdate, highScore 
     setLives(nextLives);
 
     if (nextLives <= 0) {
-      setGameState('gameover');
       audio.playExplosion();
-      onGameOver(scoreRef.current);
+      triggerGameOver();
     } else {
       resetBallAndPaddle();
     }
@@ -647,12 +629,8 @@ export default function BrickBreakerGame({ onGameOver, onScoreUpdate, highScore 
       spawnFloatingText(WIDTH / 2, HEIGHT / 2, `LEVEL ${nextLevel}!`, '#10b981');
     } else {
       // Completed all levels!
-      const bonusScore = scoreRef.current + 200;
-      scoreRef.current = bonusScore;
-      setScore(bonusScore);
-      onScoreUpdate(bonusScore);
-      setGameState('gameover');
-      onGameOver(bonusScore);
+      addScore(200);
+      triggerGameOver();
     }
   };
 

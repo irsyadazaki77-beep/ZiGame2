@@ -4,11 +4,12 @@ import { motion, AnimatePresence } from 'motion/react';
 import { DailyMission, PlayerProfile as ProfileType } from '../types';
 import { Target, Shield, Coins, Sparkles, Check, Gift, Lock, Star, ChevronRight, Zap } from 'lucide-react';
 import { audio } from '../utils/audio';
+import { economyService } from '../services/economyService';
 
 interface QuestsProps {
   dailyMissions: DailyMission[];
   profile: ProfileType;
-  onUpdateProfile: (profile: ProfileType) => void;
+  onUpdateProfile: (updates: Partial<ProfileType> | ((prev: ProfileType) => ProfileType)) => void;
   totalPlays: number;
 }
 
@@ -22,27 +23,20 @@ interface PassTier {
 }
 
 const PASS_TIERS: PassTier[] = [
-  { level: 1, rewardName: '50 Koin Bonus', rewardType: 'coins', rewardValue: 50, costXp: 100, icon: '🪙' },
-  { level: 2, rewardName: 'Avatar Neon Slime', rewardType: 'avatar', rewardValue: '🧼', costXp: 250, icon: '🧼' },
-  { level: 3, rewardName: '100 Koin Bonus', rewardType: 'coins', rewardValue: 100, costXp: 450, icon: '🪙' },
-  { level: 4, rewardName: 'Avatar Cyber Shark', rewardType: 'avatar', rewardValue: '🦈', costXp: 700, icon: '🦈' },
-  { level: 5, rewardName: '200 Koin Bonus', rewardType: 'coins', rewardValue: 200, costXp: 1000, icon: '🪙' },
-  { level: 6, rewardName: 'Avatar Neon Overlord', rewardType: 'avatar', rewardValue: '😈', costXp: 1350, icon: '😈' },
+  { level: 1, rewardName: '50 Koin Bonus', rewardType: 'coins', rewardValue: 50, costXp: 150, icon: '🪙' },
+  { level: 2, rewardName: 'Avatar Neon Slime', rewardType: 'avatar', rewardValue: '🧼', costXp: 450, icon: '🧼' },
+  { level: 3, rewardName: '75 Koin Bonus', rewardType: 'coins', rewardValue: 75, costXp: 900, icon: '🪙' },
+  { level: 4, rewardName: 'Avatar Cyber Shark', rewardType: 'avatar', rewardValue: '🦈', costXp: 1500, icon: '🦈' },
+  { level: 5, rewardName: '100 Koin Bonus', rewardType: 'coins', rewardValue: 100, costXp: 2250, icon: '🪙' },
+  { level: 6, rewardName: 'Avatar Neon Overlord', rewardType: 'avatar', rewardValue: '😈', costXp: 3150, icon: '😈' },
+  { level: 7, rewardName: '150 Koin Bonus', rewardType: 'coins', rewardValue: 150, costXp: 4200, icon: '🪙' },
+  { level: 8, rewardName: 'Avatar Neon Phoenix', rewardType: 'avatar', rewardValue: '🦅', costXp: 5400, icon: '🦅' },
+  { level: 9, rewardName: '200 Koin Bonus', rewardType: 'coins', rewardValue: 200, costXp: 6750, icon: '🪙' },
+  { level: 10, rewardName: 'Avatar Neon Emperor', rewardType: 'avatar', rewardValue: '👑', costXp: 8250, icon: '👑' },
 ];
 
 export default function Quests({ dailyMissions, profile, onUpdateProfile, totalPlays }: QuestsProps) {
-  // Battle pass XP state, persist locally
-  const [xp, setXp] = useState<number>(() => {
-    try {
-      const saved = localStorage.getItem('arcade_battle_pass_xp');
-      if (!saved) {
-        return totalPlays * 15; // 15 XP per play
-      }
-      return parseInt(saved, 10);
-    } catch {
-      return totalPlays * 15;
-    }
-  });
+  const xp = profile.xp || 0;
 
   // Persist claimed rewards
   const [claimedTiers, setClaimedTiers] = useState<number[]>(() => {
@@ -59,27 +53,11 @@ export default function Quests({ dailyMissions, profile, onUpdateProfile, totalP
 
   useEffect(() => {
     try {
-      localStorage.setItem('arcade_battle_pass_xp', xp.toString());
-    } catch (e) {
-      console.error(e);
-    }
-  }, [xp]);
-
-  useEffect(() => {
-    try {
       localStorage.setItem('arcade_claimed_pass_tiers', JSON.stringify(claimedTiers));
     } catch (e) {
       console.error(e);
     }
   }, [claimedTiers]);
-
-  // Sync plays to XP if plays increase
-  useEffect(() => {
-    const computedMinXp = totalPlays * 15;
-    if (computedMinXp > xp) {
-      setXp(computedMinXp);
-    }
-  }, [totalPlays, xp]);
 
   // Compute Battle Pass Level
   const playerPassLevel = useMemo(() => {
@@ -89,7 +67,7 @@ export default function Quests({ dailyMissions, profile, onUpdateProfile, totalP
         currentLvl = tier.level + 1;
       }
     }
-    return currentLvl;
+    return Math.min(currentLvl, 10);
   }, [xp]);
 
   // Next tier details
@@ -105,7 +83,6 @@ export default function Quests({ dailyMissions, profile, onUpdateProfile, totalP
     const currentProgress = xp - baseLimit;
     return Math.min(Math.max((currentProgress / requiredForNext) * 100, 0), 100);
   }, [xp, nextTier]);
-
 
   const spawnCelebrationParticles = () => {
     const emojis = ['🌟', '🪙', '✨', '⚡', '👑', '🎉'];
@@ -131,31 +108,38 @@ export default function Quests({ dailyMissions, profile, onUpdateProfile, totalP
       return;
     }
 
-    const updatedProfile = { ...profile };
-    if (tier.rewardType === 'coins') {
-      updatedProfile.coins += tier.rewardValue;
-      audio.playLevelUp();
-      spawnCelebrationParticles();
-      showToast('Klaim Berhasil', `+${tier.rewardValue} koin ditambahkan ke dompet Anda.`, 'success', '🪙');
-    } else if (tier.rewardType === 'avatar') {
-      try {
-        const savedAvs = localStorage.getItem('arcade_unlocked_avatars');
-        const unlockedAvs = savedAvs ? JSON.parse(savedAvs) : [];
-        if (!unlockedAvs.includes(tier.rewardValue)) {
-          unlockedAvs.push(tier.rewardValue);
-          localStorage.setItem('arcade_unlocked_avatars', JSON.stringify(unlockedAvs));
-        }
-      } catch (e) {
-        console.error(e);
-      }
-      updatedProfile.avatar = tier.rewardValue;
-      audio.playLevelUp();
-      spawnCelebrationParticles();
-      showToast('Klaim Berhasil', `Avatar premium "${tier.rewardValue}" dipasang.`, 'success', '✨');
-    }
+    // Call server-side authoritative claim reward!
+    economyService.claimReward(`quest_tier_${tier.level}`, 'quest_tier', profile.name).then(res => {
+      if (res.success && res.newBalance !== undefined) {
+        audio.playLevelUp();
+        spawnCelebrationParticles();
+        
+        onUpdateProfile(prev => {
+          const next = { ...prev, coins: res.newBalance };
+          if (tier.rewardType === 'avatar') {
+            try {
+              const savedAvs = localStorage.getItem('arcade_unlocked_avatars');
+              const unlockedAvs = savedAvs ? JSON.parse(savedAvs) : [];
+              if (!unlockedAvs.includes(tier.rewardValue)) {
+                unlockedAvs.push(tier.rewardValue);
+                localStorage.setItem('arcade_unlocked_avatars', JSON.stringify(unlockedAvs));
+              }
+            } catch (e) {
+              console.error(e);
+            }
+            next.avatar = tier.rewardValue;
+          }
+          return next;
+        });
 
-    setClaimedTiers(prev => [...prev, tier.level]);
-    onUpdateProfile(updatedProfile);
+        setClaimedTiers(prev => [...prev, tier.level]);
+        showToast('Klaim Berhasil', `Hadiah dari tier ${tier.level} berhasil diklaim.`, 'success', '✨');
+      } else {
+        showToast('Klaim Gagal', res.message || 'Gagal mengklaim hadiah.', 'error');
+      }
+    }).catch(err => {
+      showToast('Klaim Gagal', 'Terjadi kesalahan koneksi ke server.', 'error');
+    });
   };
 
   return (
@@ -184,12 +168,7 @@ export default function Quests({ dailyMissions, profile, onUpdateProfile, totalP
       {/* Banner */}
       <section className="relative rounded-2xl overflow-hidden border border-white/[0.06] bg-[#0f131c] flex flex-col justify-center px-6 md:px-10 py-8 md:py-10 shadow-sm">
         <div className="absolute inset-0 bg-gradient-to-r from-[#0f131c] via-[#0f131c]/90 to-transparent z-10"></div>
-        <img 
-          src="https://images.unsplash.com/photo-1542751371-adc38448a05e?q=80&w=1200&auto=format&fit=crop" 
-          alt="Battle pass quests background"
-          referrerPolicy="no-referrer" loading="lazy"
-          className="absolute inset-0 w-full h-full object-cover opacity-20 z-0"
-        />
+        <div className="absolute inset-0 z-0 bg-gradient-to-r from-emerald-900/10 to-indigo-900/10" style={{ backgroundImage: 'radial-gradient(circle at 100% 0%, rgba(16, 185, 129, 0.15), transparent 50%), radial-gradient(circle at 0% 100%, rgba(99, 102, 241, 0.1), transparent 50%)' }} />
 
         <div className="relative z-20 max-w-xl space-y-2">
           <div className="bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 text-xs font-mono font-bold px-3 py-1 rounded-md w-fit uppercase tracking-wider flex items-center gap-2">

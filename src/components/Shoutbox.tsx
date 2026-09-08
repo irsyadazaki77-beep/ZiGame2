@@ -174,7 +174,7 @@ export default function Shoutbox({ playerName, playerAvatar, playerThemeColor }:
         </div>
         <div className="flex items-center gap-1">
           <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 "></span>
-          <span className="text-xs font-mono text-zinc-500 uppercase tracking-wider">7 ONLINE</span>
+          <span className="text-[10px] font-mono text-zinc-500 uppercase tracking-wider bg-black/40 px-2 py-0.5 rounded-full border border-white/10">DEMO MODE</span>
         </div>
       </div>
 

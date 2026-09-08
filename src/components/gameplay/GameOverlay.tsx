@@ -130,10 +130,23 @@ export const GameOverlay: React.FC<GameOverlayProps> = ({
         <div className="absolute inset-0 bg-black/85 backdrop-blur-md flex flex-col items-center justify-center p-4 sm:p-6 text-center z-30 pointer-events-auto overflow-y-auto animate-in fade-in duration-200">
           <div className="w-full max-w-sm bg-[#11151f] border border-white/[0.08] rounded-2xl p-6 shadow-2xl flex flex-col items-center gap-4 my-auto">
             {/* Header Status */}
-            <div className="space-y-1">
+            <div className="space-y-1 w-full flex flex-col items-center">
               {isNewRecord ? (
-                <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/15 border border-amber-500/30 text-amber-300 text-xs font-semibold">
-                  <Sparkles size={13} /> Rekor Baru Tercapai!
+                <div className="space-y-2.5 w-full flex flex-col items-center">
+                  <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/15 border border-amber-500/20 text-amber-300 text-xs font-semibold">
+                    <Sparkles size={13} className="text-amber-400 animate-pulse" /> Rekor Baru Tercapai!
+                  </div>
+                  <div className="w-full bg-amber-500/[0.03] border border-amber-500/10 p-3 rounded-xl text-xs space-y-1">
+                    <div className="text-zinc-500 font-medium font-sans">Melampaui Rekor Sebelumnya</div>
+                    <div className="flex justify-center items-center gap-3 font-mono">
+                      <span className="text-zinc-500 line-through text-xs">{highScore.toLocaleString()}</span>
+                      <span className="text-zinc-400">➡️</span>
+                      <span className="text-amber-400 font-bold text-sm">{score.toLocaleString()}</span>
+                    </div>
+                    <div className="text-emerald-400 font-bold text-[10px] font-mono mt-1">
+                      Kenaikan Rekor: +{(score - highScore).toLocaleString()} poin!
+                    </div>
+                  </div>
                 </div>
               ) : (
                 <h3 className="text-xl font-bold text-white tracking-tight">

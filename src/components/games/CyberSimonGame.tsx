@@ -1,5 +1,6 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { audio } from '../../utils/audio';
+import { useGameEngine } from '../../hooks/useGameEngine';
 import { Particle } from '../../types';
 import { GameContainer } from '../gameplay/GameContainer';
 import { GameHUD } from '../gameplay/GameHUD';
@@ -24,21 +25,29 @@ interface SimonPad {
 
 export default function CyberSimonGame({ onGameOver, onScoreUpdate, highScore }: CyberSimonGameProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [score, setScore] = useState(0);
-  const gameLoopRef = useRef<number | null>(null);
-  const scoreRef = useRef(0);
-  const [gameOver, setGameOver] = useState(false);
-  const isPlayingRef = useRef(false);
-  const gameOverRef = useRef(false);
 
+  const {
+    gameState,
+    setGameState,
+    score,
+    updateScore,
+    addScore,
+    startLoop,
+    stopLoop,
+    triggerGameOver,
+    startWithCountdown,
+    countdown,
+  } = useGameEngine({
+    gameId: 'cybersimon',
+    onGameOver,
+    onScoreUpdate,
+  });
 
+  const gameStateRef = useRef(gameState);
+  
   useEffect(() => {
-    isPlayingRef.current = isPlaying;
-    gameOverRef.current = gameOver;
-    scoreRef.current = score;
-  }, [isPlaying, gameOver, score]);
-  const [muted, setMuted] = useState(audio.getMuteState());
+    gameStateRef.current = gameState;
+  }, [gameState]);
 
   const CANVAS_WIDTH = 400;
   const CANVAS_HEIGHT = 500;
@@ -60,11 +69,10 @@ export default function CyberSimonGame({ onGameOver, onScoreUpdate, highScore }:
 
   const particlesRef = useRef<Particle[]>([]);
 
+  const lastTimeRef = useRef(0);
+
   useEffect(() => {
     drawStatic();
-    return () => {
-      if (gameLoopRef.current) cancelAnimationFrame(gameLoopRef.current);
-    };
   }, []);
 
   const drawStatic = () => {
@@ -95,24 +103,20 @@ export default function CyberSimonGame({ onGameOver, onScoreUpdate, highScore }:
     });
   };
 
-  const startNewGame = () => {
-    audio.playCoin();
-    setIsPlaying(true);
-    setGameOver(false);
-    setScore(0);
-    onScoreUpdate(0);
-
+  const startGame = useCallback(() => {
+    updateScore(0);
     sequenceRef.current = [];
     playerSequenceRef.current = [];
     isPlaybackRef.current = false;
     activePadRef.current = null;
     particlesRef.current = [];
 
-    addNewSequenceStep();
-
-    if (gameLoopRef.current) cancelAnimationFrame(gameLoopRef.current);
-    gameLoopRef.current = requestAnimationFrame(update);
-  };
+    startWithCountdown(() => {
+      lastTimeRef.current = performance.now();
+      addNewSequenceStep();
+      startLoop(gameStep);
+    });
+  }, [startWithCountdown, startLoop, updateScore]);
 
   const addNewSequenceStep = () => {
     const randomPad = Math.floor(Math.random() * 4);
@@ -161,7 +165,7 @@ export default function CyberSimonGame({ onGameOver, onScoreUpdate, highScore }:
   };
 
   const handlePadClick = (padId: number) => {
-    if (!isPlaying || isPlaybackRef.current || gameOver) return;
+    if (gameStateRef.current !== 'playing' || isPlaybackRef.current) return;
 
     playPadGlow(padId);
     playerSequenceRef.current.push(padId);
@@ -171,23 +175,17 @@ export default function CyberSimonGame({ onGameOver, onScoreUpdate, highScore }:
     if (playerSequenceRef.current[currentIndex] !== sequenceRef.current[currentIndex]) {
       // Game Over!
       audio.playExplosion();
-      setGameOver(true);
-      setIsPlaying(false);
-      onGameOver(scoreRef.current);
+      triggerGameOver();
       return;
     }
 
     if (playerSequenceRef.current.length === sequenceRef.current.length) {
       // Completed full turn!
-      setScore(prev => {
-        const next = prev + 10;
-        onScoreUpdate(next);
-        return next;
-      });
+      addScore(10);
 
       playerSequenceRef.current = [];
       setTimeout(() => {
-        if (!gameOver) {
+        if (gameStateRef.current === 'playing') {
           audio.playScore();
           addNewSequenceStep();
         }
@@ -196,7 +194,7 @@ export default function CyberSimonGame({ onGameOver, onScoreUpdate, highScore }:
   };
 
   const handleCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (!isPlaying || isPlaybackRef.current || gameOver) return;
+    if (gameStateRef.current !== 'playing' || isPlaybackRef.current) return;
 
     const rect = canvasRef.current?.getBoundingClientRect();
     if (!rect) return;
@@ -217,9 +215,10 @@ export default function CyberSimonGame({ onGameOver, onScoreUpdate, highScore }:
     });
   };
 
-  const update = (timestamp: number) => {
+  const gameStep = useCallback((timestamp: number) => {
+    if (gameStateRef.current !== 'playing') return;
     const canvas = canvasRef.current;
-    if (!canvas || !isPlayingRef.current) return;
+    if (!canvas) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
@@ -242,6 +241,11 @@ export default function CyberSimonGame({ onGameOver, onScoreUpdate, highScore }:
         }
       }
     }
+
+    draw(ctx);
+  }, []);
+
+  const draw = (ctx: CanvasRenderingContext2D) => {
 
     // DRAW
     ctx.fillStyle = '#09090b';
@@ -308,24 +312,11 @@ export default function CyberSimonGame({ onGameOver, onScoreUpdate, highScore }:
     ctx.fillStyle = '#52525b';
     ctx.font = "bold 11px 'JetBrains Mono', monospace";
     ctx.fillText(`SKOR: ${score}`, CANVAS_WIDTH / 2, 475);
-
-    gameLoopRef.current = requestAnimationFrame(update);
-  };
-
-  const toggleMute = () => {
-    const nextMuted = audio.toggleMute();
-    setMuted(nextMuted);
-  };
-
-  const getGameState = () => {
-    if (!isPlaying && score === 0 && !gameOver) return 'ready';
-    if (!isPlaying) return 'gameover';
-    return 'playing';
   };
 
   return (
     <GameContainer aspect="portrait" maxWidth="sm">
-      {isPlaying && (
+      {gameState === 'playing' && (
         <GameHUD 
           stats={[
             { id: 'score', label: 'SKOR', value: score, emphasized: true }
@@ -334,10 +325,11 @@ export default function CyberSimonGame({ onGameOver, onScoreUpdate, highScore }:
       )}
 
       <GameOverlay
-        gameState={getGameState()}
+        gameState={gameState}
         score={score}
-        onStart={startNewGame}
-        onRestart={startNewGame}
+        countdown={countdown}
+        onStart={startGame}
+        onRestart={startGame}
         instructions="IKUTI SEQUENCE POLA LAMPU NEON. Ketuk langsung pada panel menyala."
       />
 

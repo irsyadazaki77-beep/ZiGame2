@@ -16,12 +16,12 @@ type MazeCell = 'wall' | 'path' | 'start' | 'goal';
 const GRID_SIZE = 7; // Odd size works perfectly for standard recursive division maze generation
 
 export default function MazeRunnerGame({ onGameOver, onScoreUpdate, highScore }: GameProps) {
+  const scoreRef = useRef(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [grid, setGrid] = useState<MazeCell[][]>([]);
   const [playerPos, setPlayerPos] = useState<{ r: number; c: number }>({ r: 1, c: 1 });
   const [score, setScore] = useState(0);
   const [timeLeft, setTimeLeft] = useState(40);
-  const scoreRef = useRef(0);
 
   useEffect(() => {
     scoreRef.current = score;
@@ -132,7 +132,7 @@ export default function MazeRunnerGame({ onGameOver, onScoreUpdate, highScore }:
   const endGame = () => {
     setIsPlaying(false);
     audio.playGameOver();
-    onGameOver(scoreRef.current);
+    onGameOver(score);
   };
 
   const getGameState = () => {

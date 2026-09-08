@@ -389,6 +389,7 @@ export interface Achievement {
   progress?: number;
   target?: number;
   secret?: boolean;
+  tier?: 'Beginner' | 'Skill' | 'Mastery' | 'Rare' | 'Secret';
 }
 
 export interface Particle {
@@ -404,7 +405,8 @@ export interface Particle {
 
 export interface DailyMission {
   id: string;
-  type: 'play_count' | 'score_target' | 'unique_games';
+  type: 'play_count' | 'score_target' | 'unique_games' | 'beat_pb' | 'play_genre_count' | 'survive_time' | 'total_score';
+  metadata?: any;
   target: number;
   progress: number;
   rewardCoins: number;

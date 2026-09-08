@@ -1,5 +1,6 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { audio } from '../../utils/audio';
+import { useGameEngine } from '../../hooks/useGameEngine';
 import { Particle } from '../../types';
 import { GameContainer } from '../gameplay/GameContainer';
 import { GameHUD } from '../gameplay/GameHUD';
@@ -14,21 +15,31 @@ interface LockBreakerGameProps {
 
 export default function LockBreakerGame({ onGameOver, onScoreUpdate, highScore }: LockBreakerGameProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [score, setScore] = useState(0);
-  const gameLoopRef = useRef<number | null>(null);
-  const scoreRef = useRef(0);
-  const [gameOver, setGameOver] = useState(false);
-  const isPlayingRef = useRef(false);
-  const gameOverRef = useRef(false);
 
+  const {
+    gameState,
+    setGameState,
+    score,
+    updateScore,
+    addScore,
+    startLoop,
+    stopLoop,
+    triggerGameOver,
+    startWithCountdown,
+    countdown,
+    scoreRef,
+  } = useGameEngine({
+    gameId: 'lockbreaker',
+    onGameOver,
+    onScoreUpdate,
+  });
 
+  const gameStateRef = useRef(gameState);
+  
   useEffect(() => {
-    isPlayingRef.current = isPlaying;
-    gameOverRef.current = gameOver;
+    gameStateRef.current = gameState;
     scoreRef.current = score;
-  }, [isPlaying, gameOver, score]);
-  const [muted, setMuted] = useState(audio.getMuteState());
+  }, [gameState, score]);
 
   const CANVAS_WIDTH = 400;
   const CANVAS_HEIGHT = 500;
@@ -42,9 +53,6 @@ export default function LockBreakerGame({ onGameOver, onScoreUpdate, highScore }
 
   useEffect(() => {
     drawStatic();
-    return () => {
-      if (gameLoopRef.current) cancelAnimationFrame(gameLoopRef.current);
-    };
   }, []);
 
   const drawStatic = () => {
@@ -95,22 +103,18 @@ export default function LockBreakerGame({ onGameOver, onScoreUpdate, highScore }
     }
   };
 
-  const startNewGame = () => {
-    audio.playCoin();
-    setIsPlaying(true);
-    setGameOver(false);
-    setScore(0);
-    onScoreUpdate(0);
-
+  const startGame = useCallback(() => {
+    updateScore(0);
     angleRef.current = 0;
     dirRef.current = 1;
     speedRef.current = 0.045;
     particlesRef.current = [];
     spawnNewTarget();
 
-    if (gameLoopRef.current) cancelAnimationFrame(gameLoopRef.current);
-    gameLoopRef.current = requestAnimationFrame(update);
-  };
+    startWithCountdown(() => {
+      startLoop(gameStep);
+    });
+  }, [updateScore, startWithCountdown, startLoop]);
 
   const createSuccessParticles = (x: number, y: number) => {
     for (let i = 0; i < 15; i++) {
@@ -128,7 +132,7 @@ export default function LockBreakerGame({ onGameOver, onScoreUpdate, highScore }
   };
 
   const handleTrigger = () => {
-    if (!isPlayingRef.current || gameOverRef.current ) return;
+    if (gameStateRef.current !== 'playing') return;
 
     // Normalize angles to 0 to 2*PI
     let normAngle = angleRef.current % (Math.PI * 2);
@@ -158,11 +162,7 @@ export default function LockBreakerGame({ onGameOver, onScoreUpdate, highScore }
 
       createSuccessParticles(sparkX, sparkY);
 
-      setScore(prev => {
-        const next = prev + 10;
-        onScoreUpdate(next);
-        return next;
-      });
+      addScore(10);
 
       // Reverse direction and make it slightly faster!
       dirRef.current *= -1;
@@ -171,21 +171,27 @@ export default function LockBreakerGame({ onGameOver, onScoreUpdate, highScore }
     } else {
       // MISSED!
       audio.playExplosion();
-      setGameOver(true);
-      setIsPlaying(false);
-      onGameOver(scoreRef.current);
+      triggerGameOver();
     }
   };
 
-  const update = () => {
+  const gameStep = useCallback((timestamp: number, dt: number) => {
+    if (gameStateRef.current !== 'playing') return;
     const canvas = canvasRef.current;
-    if (!canvas || !isPlayingRef.current || gameOverRef.current ) return;
+    if (!canvas) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
+    // Scale speed properly with dt if needed, but since original is per-frame at 60fps, multiply by delta scalar
+    const delta = dt / 16.666;
+    
     // Update scanner hand position
-    angleRef.current += dirRef.current * speedRef.current;
+    angleRef.current += dirRef.current * speedRef.current * delta;
 
+    draw(ctx);
+  }, []);
+
+  const draw = (ctx: CanvasRenderingContext2D) => {
     // Draw background
     ctx.fillStyle = '#09090b';
     ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
@@ -264,24 +270,11 @@ export default function LockBreakerGame({ onGameOver, onScoreUpdate, highScore }
     ctx.fillStyle = '#52525b';
     ctx.font = "bold 11px 'JetBrains Mono', monospace";
     ctx.fillText(`KUNCI TERPECAH: ${score / 10}`, 60, 30);
-
-    gameLoopRef.current = requestAnimationFrame(update);
-  };
-
-  const toggleMute = () => {
-    const nextMuted = audio.toggleMute();
-    setMuted(nextMuted);
-  };
-
-  const getGameState = () => {
-    if (!isPlaying && score === 0 && !gameOver) return 'ready';
-    if (!isPlaying) return 'gameover';
-    return 'playing';
   };
 
   return (
     <GameContainer aspect="portrait" maxWidth="sm">
-      {isPlaying && (
+      {gameState === 'playing' && (
         <GameHUD 
           stats={[
             { id: 'score', label: 'SKOR', value: score, emphasized: true }
@@ -290,17 +283,18 @@ export default function LockBreakerGame({ onGameOver, onScoreUpdate, highScore }
       )}
 
       <GameOverlay
-        gameState={getGameState()}
+        gameState={gameState}
         score={score}
-        onStart={startNewGame}
-        onRestart={startNewGame}
+        countdown={countdown}
+        onStart={startGame}
+        onRestart={startGame}
         instructions="KLIK TEPAT PADA BULATAN ORANGE. Kecepatan meningkat setiap gembok terbuka."
       />
 
       <div 
         className="relative w-full aspect-[4/5] mx-auto bg-zinc-950 rounded-xl border-4 border-zinc-900 shadow-2xl overflow-hidden cursor-pointer"
         onPointerDown={(e) => {
-          if (isPlaying) handleTrigger();
+          if (gameState === 'playing') handleTrigger();
         }}
       >
         <canvas
@@ -311,7 +305,7 @@ export default function LockBreakerGame({ onGameOver, onScoreUpdate, highScore }
         />
       </div>
 
-      {isPlaying && (
+      {gameState === 'playing' && (
         <MobileControls
           onA={handleTrigger}
           labelA="BUKA!"

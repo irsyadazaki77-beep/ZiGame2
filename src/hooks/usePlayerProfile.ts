@@ -21,9 +21,12 @@ export const usePlayerProfile = () => {
     }
   }, []);
 
-  const handleUpdateProfile = (newProfile: PlayerProfile) => {
-    setProfile(newProfile);
-    storageService.saveProfile(newProfile);
+  const handleUpdateProfile = (updates: Partial<PlayerProfile> | ((prev: PlayerProfile) => PlayerProfile)) => {
+    setProfile(prev => {
+      const next = typeof updates === 'function' ? updates(prev) : { ...prev, ...updates };
+      storageService.saveProfile(next);
+      return next;
+    });
   };
 
   return {

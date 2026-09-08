@@ -1,5 +1,6 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { audio } from '../../utils/audio';
+import { useGameEngine } from '../../hooks/useGameEngine';
 import { GameContainer } from '../gameplay/GameContainer';
 import { GameHUD } from '../gameplay/GameHUD';
 import { GameOverlay } from '../gameplay/GameOverlay';
@@ -31,19 +32,39 @@ const NOTE_GLOWS = [
 ];
 
 export default function RhythmTapGame({ onGameOver, onScoreUpdate, highScore }: GameProps) {
-  const gameLoopRef = useRef<number | null>(null);
-  const [isPlaying, setIsPlaying] = useState(false);
+  const {
+    gameState,
+    setGameState,
+    score,
+    updateScore,
+    addScore,
+    startLoop,
+    stopLoop,
+    triggerGameOver,
+    startWithCountdown,
+    countdown,
+    scoreRef,
+  } = useGameEngine({
+    gameId: 'rhythmtap',
+    onGameOver,
+    onScoreUpdate,
+  });
+
+  const gameStateRef = useRef(gameState);
+  
+  useEffect(() => {
+    gameStateRef.current = gameState;
+  }, [gameState]);
   const [notes, setNotes] = useState<BeatNote[]>([]);
-  const [score, setScore] = useState(0);
   const [combo, setCombo] = useState(0);
   const [maxCombo, setMaxCombo] = useState(0);
   const [timeLeft, setTimeLeft] = useState(45);
   const [feedback, setFeedback] = useState<{ text: string; color: string } | null>(null);
   const [keyStates, setKeyStates] = useState<boolean[]>([false, false, false, false]);
 
-  const scoreRef = useRef(0);
   const notesRef = useRef<BeatNote[]>([]);
-  const isPlayingRef = useRef(false);
+  const spawnTimerRef = useRef(0);
+  const gameTimerRef = useRef(0);
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const cabinetRef = useRef<HTMLDivElement | null>(null);
@@ -51,29 +72,31 @@ export default function RhythmTapGame({ onGameOver, onScoreUpdate, highScore }: 
   const floatingTextsRef = useRef<{ x: number; y: number; text: string; color: string; alpha: number; vy: number }[]>([]);
   const shakeRef = useRef<number>(0);
 
+  const lastTimeRef = useRef(0);
+
   useEffect(() => {
     scoreRef.current = score;
-    onScoreUpdate(score);
-  }, [score, onScoreUpdate]);
+  }, [score]);
 
   useEffect(() => {
     notesRef.current = notes;
   }, [notes]);
 
-  useEffect(() => {
-    isPlayingRef.current = isPlaying;
-  }, [isPlaying]);
-
-  const startNewGame = () => {
-    audio.playCoin();
-    setScore(0);
+  const startGame = useCallback(() => {
+    updateScore(0);
     setCombo(0);
     setMaxCombo(0);
     setTimeLeft(45);
     setNotes([]);
     setFeedback(null);
-    setIsPlaying(true);
-  };
+    particlesRef.current = [];
+    floatingTextsRef.current = [];
+
+    startWithCountdown(() => {
+      lastTimeRef.current = performance.now();
+      startLoop(gameStep);
+    });
+  }, [startWithCountdown, startLoop, updateScore]);
 
   const triggerFeedback = (text: string, isGood: boolean) => {
     if (isGood) {
@@ -135,7 +158,7 @@ export default function RhythmTapGame({ onGameOver, onScoreUpdate, highScore }: 
   };
 
   const triggerLaneHit = (laneIdx: number) => {
-    if (!isPlayingRef.current) return;
+    if (gameStateRef.current !== 'playing') return;
 
     // Flash key state for visual feedback
     setKeyStates(prev => {
@@ -189,7 +212,7 @@ export default function RhythmTapGame({ onGameOver, onScoreUpdate, highScore }: 
         triggerHitEffects(laneIdx, 'good', `GOOD +${earned}`);
       }
 
-      setScore(prev => prev + earned);
+      addScore(earned);
       setCombo(prev => {
         const next = prev + 1;
         if (next > maxCombo) setMaxCombo(next);
@@ -211,7 +234,7 @@ export default function RhythmTapGame({ onGameOver, onScoreUpdate, highScore }: 
   // Keyboard controls listener
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (!isPlaying) return;
+      if (gameStateRef.current !== 'playing') return;
       const key = e.key.toUpperCase();
       const laneIdx = LANES_KEYS.indexOf(key);
       if (laneIdx !== -1) {
@@ -222,166 +245,123 @@ export default function RhythmTapGame({ onGameOver, onScoreUpdate, highScore }: 
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isPlaying]);
+  }, []);
 
-  // Main game ticks and game loops
-  useEffect(() => {
-    let tickInterval: NodeJS.Timeout;
-    let spawnInterval: NodeJS.Timeout;
-    let timerInterval: NodeJS.Timeout;
+  const gameStep = useCallback((timestamp: number, dt: number) => {
+    if (gameStateRef.current !== 'playing') return;
 
-    if (isPlaying) {
-      // Timer countdown
-      timerInterval = setInterval(() => {
-        setTimeLeft(prev => {
-          if (prev <= 1) {
-            endGame();
-            return 0;
-          }
-          return prev - 1;
-        });
-      }, 1000);
+    const delta = dt / 16.666;
+    gameTimerRef.current += delta;
+    spawnTimerRef.current += delta;
 
-      // Cascading notes downwards (Runs at ~60fps)
-      tickInterval = setInterval(() => {
-        setNotes(prev => {
-          let missedAny = false;
-          const updated = prev.map(n => {
-            const nextY = n.y + 1.25; // standard fall velocity
-            if (nextY > 100) {
-              missedAny = true;
-              return null; // Note missed (went past screen edge)
-            }
-            return { ...n, y: nextY };
-          }).filter(Boolean) as BeatNote[];
-
-          if (missedAny) {
-            setCombo(0);
-            triggerFeedback('⚠️ MISS ⚠️', false);
-            shakeRef.current = Math.max(shakeRef.current, 6);
-          }
-
-          return updated;
-        });
-      }, 16);
-
-      // Periodic random note spawning (synchronized to standard beats rhythm)
-      spawnInterval = setInterval(() => {
-        const targetLane = Math.floor(Math.random() * 4);
-        const newNote: BeatNote = {
-          id: `${Date.now()}-${Math.random()}`,
-          lane: targetLane,
-          y: 0,
-        };
-        setNotes(prev => [...prev, newNote]);
-      }, 620); // Spawns approx. 100 beats per minute track
+    // Time limit (45 seconds = 2700 frames at 60fps)
+    if (gameTimerRef.current > 2700) {
+      triggerGameOver();
+      return;
     }
-
-    return () => {
-      if (tickInterval) clearInterval(tickInterval);
-      if (spawnInterval) clearInterval(spawnInterval);
-      if (timerInterval) clearInterval(timerInterval);
-    };
-  }, [isPlaying]);
-
-  // Canvas loop for visual effects and screen shake
-  useEffect(() => {
-    let animId: number;
     
-    const render = () => {
-      const canvas = canvasRef.current;
-      if (!canvas) {
-        animId = requestAnimationFrame(render);
-        return;
-      }
-      const ctx = canvas.getContext('2d');
-      if (!ctx) {
-        animId = requestAnimationFrame(render);
-        return;
+    setTimeLeft(Math.max(0, Math.ceil(45 - gameTimerRef.current / 60)));
+
+    // Cascading notes downwards (Runs at ~60fps)
+    setNotes(prev => {
+      let missedAny = false;
+      const updated = prev.map(n => {
+        const nextY = n.y + 1.25 * delta; // standard fall velocity
+        if (nextY > 100) {
+          missedAny = true;
+          return null; // Note missed (went past screen edge)
+        }
+        return { ...n, y: nextY };
+      }).filter(Boolean) as BeatNote[];
+
+      if (missedAny) {
+        setCombo(0);
+        triggerFeedback('⚠️ MISS ⚠️', false);
+        shakeRef.current = Math.max(shakeRef.current, 6);
       }
 
-      ctx.clearRect(0, 0, 384, 280);
+      return updated;
+    });
 
-      // Apply direct DOM transformation for camera shake on the cabinet element
-      const cabinet = cabinetRef.current;
-      if (cabinet) {
-        if (shakeRef.current > 0) {
-          const dx = (Math.random() - 0.5) * shakeRef.current;
-          const dy = (Math.random() - 0.5) * shakeRef.current;
-          cabinet.style.transform = `translate(${dx}px, ${dy}px)`;
-          // decay shake
-          shakeRef.current *= 0.88;
-          if (shakeRef.current < 0.5) {
-            shakeRef.current = 0;
-            cabinet.style.transform = 'none';
-          }
-        } else {
+    // Periodic random note spawning (synchronized to standard beats rhythm)
+    if (spawnTimerRef.current > 37) { // roughly 620ms
+      spawnTimerRef.current = 0;
+      const targetLane = Math.floor(Math.random() * 4);
+      const newNote: BeatNote = {
+        id: `${Date.now()}-${Math.random()}`,
+        lane: targetLane,
+        y: 0,
+      };
+      setNotes(prev => [...prev, newNote]);
+    }
+  }, [triggerGameOver]);
+
+  const draw = () => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    ctx.clearRect(0, 0, 384, 280);
+
+    // Apply direct DOM transformation for camera shake on the cabinet element
+    const cabinet = cabinetRef.current;
+    if (cabinet) {
+      if (shakeRef.current > 0) {
+        const dx = (Math.random() - 0.5) * shakeRef.current;
+        const dy = (Math.random() - 0.5) * shakeRef.current;
+        cabinet.style.transform = `translate(${dx}px, ${dy}px)`;
+        // decay shake
+        shakeRef.current *= 0.88;
+        if (shakeRef.current < 0.5) {
+          shakeRef.current = 0;
           cabinet.style.transform = 'none';
         }
+      } else {
+        cabinet.style.transform = 'none';
       }
-
-      // Update & Render standard particle sparks
-      particlesRef.current.forEach(p => {
-        p.x += p.vx;
-        p.y += p.vy;
-        p.alpha -= p.decay;
-
-        ctx.fillStyle = p.color;
-        ctx.shadowColor = p.color;
-        ctx.shadowBlur = 4;
-        ctx.globalAlpha = Math.max(0, p.alpha);
-        ctx.beginPath();
-        ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
-        ctx.fill();
-      });
-      ctx.shadowBlur = 0;
-      ctx.globalAlpha = 1.0;
-      particlesRef.current = particlesRef.current.filter(p => p.alpha > 0);
-
-      // Update & Render arcade-style floating score text popups
-      floatingTextsRef.current.forEach(t => {
-        t.y += t.vy;
-        t.alpha -= 0.025;
-
-        ctx.fillStyle = t.color;
-        ctx.globalAlpha = Math.max(0, t.alpha);
-        ctx.font = 'bold 8px "Press Start 2P", monospace';
-        ctx.textAlign = 'center';
-        ctx.fillText(t.text, t.x, t.y);
-      });
-      ctx.globalAlpha = 1.0;
-      floatingTextsRef.current = floatingTextsRef.current.filter(t => t.alpha > 0);
-
-      animId = requestAnimationFrame(render);
-    };
-
-    if (isPlaying) {
-      animId = requestAnimationFrame(render);
     }
 
-    return () => {
-      if (animId) cancelAnimationFrame(animId);
-      if (cabinetRef.current) {
-        cabinetRef.current.style.transform = 'none';
-      }
-    };
-  }, [isPlaying]);
+    // Update & Render standard particle sparks
+    particlesRef.current.forEach(p => {
+      p.x += p.vx;
+      p.y += p.vy;
+      p.alpha -= p.decay;
 
-  const endGame = () => {
-    setIsPlaying(false);
-    audio.playGameOver();
-    onGameOver(scoreRef.current);
+      ctx.fillStyle = p.color;
+      ctx.shadowColor = p.color;
+      ctx.shadowBlur = 4;
+      ctx.globalAlpha = Math.max(0, p.alpha);
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
+      ctx.fill();
+    });
+    ctx.shadowBlur = 0;
+    ctx.globalAlpha = 1.0;
+    particlesRef.current = particlesRef.current.filter(p => p.alpha > 0);
+
+    // Update & Render arcade-style floating score text popups
+    floatingTextsRef.current.forEach(t => {
+      t.y += t.vy;
+      t.alpha -= 0.025;
+
+      ctx.fillStyle = t.color;
+      ctx.globalAlpha = Math.max(0, t.alpha);
+      ctx.font = 'bold 8px "Press Start 2P", monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText(t.text, t.x, t.y);
+    });
+    ctx.globalAlpha = 1.0;
+    floatingTextsRef.current = floatingTextsRef.current.filter(t => t.alpha > 0);
   };
 
-  const getGameState = () => {
-    if (!isPlaying && score === 0 && timeLeft === 45) return 'ready';
-    if (!isPlaying) return 'gameover';
-    return 'playing';
-  };
+  useEffect(() => {
+    if (gameStateRef.current === 'playing') draw();
+  }, [notes, draw]);
 
   return (
     <GameContainer aspect="square" maxWidth="sm">
-      {isPlaying && (
+      {gameState === 'playing' && (
         <GameHUD 
           stats={[
             { id: 'score', label: 'SKOR', value: score, emphasized: true },
@@ -392,14 +372,15 @@ export default function RhythmTapGame({ onGameOver, onScoreUpdate, highScore }: 
       )}
 
       <GameOverlay
-        gameState={getGameState()}
+        gameState={gameState}
         score={score}
-        onStart={startNewGame}
-        onRestart={startNewGame}
+        countdown={countdown}
+        onStart={startGame}
+        onRestart={startGame}
         instructions="Ikuti ritme musik siber! Tekan tombol D, F, J, K atau tap pada layar saat not berada di garis target."
       />
 
-      {isPlaying && (
+      {gameState === 'playing' && (
         <div ref={cabinetRef} className="w-full aspect-video md:aspect-square bg-zinc-950 border-4 border-zinc-900 rounded-2xl relative overflow-hidden flex mb-4 transition-transform duration-75">
           {/* Transparent particle overlay canvas */}
           <canvas ref={canvasRef} width={384} height={280} className="absolute inset-0 pointer-events-none w-full h-full object-fill z-20" />
@@ -442,7 +423,7 @@ export default function RhythmTapGame({ onGameOver, onScoreUpdate, highScore }: 
         </div>
       )}
 
-      {isPlaying && (
+      {gameState === 'playing' && (
         <div className="grid grid-cols-4 gap-2 w-full">
           {LANES_KEYS.map((k, idx) => (
             <button

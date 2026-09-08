@@ -30,12 +30,12 @@ interface BulletItem {
 }
 
 export default function CosmicAsteroidGame({ onGameOver, onScoreUpdate, highScore }: CosmicAsteroidGameProps) {
+  const gameLoopRef = useRef<number | null>(null);
+  const scoreRef = useRef(0);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [score, setScore] = useState(0);
   const lastTimeRef = useRef<number>(0);
-  const gameLoopRef = useRef<number | null>(null);
-  const scoreRef = useRef(0);
   const [gameOver, setGameOver] = useState(false);
   const isPlayingRef = useRef(false);
   const gameOverRef = useRef(false);
@@ -69,7 +69,7 @@ export default function CosmicAsteroidGame({ onGameOver, onScoreUpdate, highScor
   useEffect(() => {
     drawStatic();
     return () => {
-      if (gameLoopRef.current) cancelAnimationFrame(gameLoopRef.current);
+      if (gameLoopRef?.current) cancelAnimationFrame(gameLoopRef.current);
     };
   }, []);
 
@@ -123,7 +123,7 @@ export default function CosmicAsteroidGame({ onGameOver, onScoreUpdate, highScor
     spawnTimerRef.current = 0;
     lastTimeRef.current = performance.now();
 
-    if (gameLoopRef.current) cancelAnimationFrame(gameLoopRef.current);
+    if (gameLoopRef?.current) cancelAnimationFrame(gameLoopRef.current);
     gameLoopRef.current = requestAnimationFrame(update);
   };
 
@@ -253,7 +253,7 @@ export default function CosmicAsteroidGame({ onGameOver, onScoreUpdate, highScor
       ctx.shadowColor = color;
     };
 
-    const asteroidSpeed = 1.0 + scoreRef.current * 0.002;
+    const asteroidSpeed = 1.0 + score * 0.002;
 
     // Rotate Ship
     if (keysPressedRef.current['ArrowLeft'] || keysPressedRef.current['a']) {
@@ -265,7 +265,7 @@ export default function CosmicAsteroidGame({ onGameOver, onScoreUpdate, highScor
 
     // Spawn drifting asteroids from outer screen boundaries
     spawnTimerRef.current += delta;
-    if (spawnTimerRef.current > Math.max(25, 55 - scoreRef.current * 0.05)) {
+    if (spawnTimerRef.current > Math.max(25, 55 - score * 0.05)) {
       spawnTimerRef.current = 0;
 
       // Pick random outer wall edge
@@ -372,7 +372,7 @@ export default function CosmicAsteroidGame({ onGameOver, onScoreUpdate, highScor
             decay: Math.random() * 0.04 + 0.02
           });
         }
-        onGameOver(scoreRef.current);
+        onGameOver(score);
       }
     });
 
@@ -526,7 +526,7 @@ export default function CosmicAsteroidGame({ onGameOver, onScoreUpdate, highScor
 
       <GameOverlay
         gameState={getGameState()}
-        score={scoreRef.current}
+        score={score}
         onStart={startNewGame}
         onRestart={startNewGame}
         instructions="PUTAR KAPAL DAN TEMBAK METEOR DRIFTING"

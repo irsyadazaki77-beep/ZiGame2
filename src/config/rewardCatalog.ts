@@ -37,7 +37,9 @@ export const AUTHORITATIVE_ACHIEVEMENT_REWARDS: Record<string, { rewardCoins: nu
   racer_apex: { rewardCoins: 100, rewardXp: 150, title: 'APEX DRIFTER' },
   tetris_grandmaster: { rewardCoins: 150, rewardXp: 250, title: 'TETRIS MATRIX MASTER' },
   mines_sweeper: { rewardCoins: 90, rewardXp: 140, title: 'DEFUSER PROTOCOL' },
-  neon_2048_master: { rewardCoins: 200, rewardXp: 300, title: 'QUANTUM 2048' }
+  neon_2048_master: { rewardCoins: 200, rewardXp: 300, title: 'QUANTUM 2048' },
+  ach_first_win: { rewardCoins: 50, rewardXp: 75, title: 'Achievement: First Win' },
+  ach_score_500: { rewardCoins: 100, rewardXp: 150, title: 'Achievement: Score 500' }
 };
 
 export const AUTHORITATIVE_QUEST_TIER_REWARDS: Record<number, { rewardCoins: number; rewardXp: number; title: string }> = {
@@ -65,23 +67,24 @@ export function resolveAuthoritativeReward(
     case 'achievement': {
       const ach = AUTHORITATIVE_ACHIEVEMENT_REWARDS[sanitizedId];
       if (ach) return ach;
-      // Default achievement baseline reward
-      return { rewardCoins: 50, rewardXp: 75, title: `Achievement: ${sanitizedId}` };
+      return null;
     }
 
     case 'daily_mission': {
-      // Daily missions reward between 50 and 150 coins based on mission index
-      if (sanitizedId.endsWith('_1') || sanitizedId.includes('score_target')) {
+      if (sanitizedId === 'm_play_3') {
+        return { rewardCoins: 50, rewardXp: 80, title: 'Daily Mission: Play 3 Games' };
+      }
+      if (sanitizedId.match(/^m_\d{4}-\d{2}-\d{2}_1$/) || sanitizedId.includes('score_target')) {
         const target = typeof details?.target === 'number' ? Math.min(150, Math.max(50, details.target)) : 100;
         return { rewardCoins: target, rewardXp: target + 20, title: 'Daily Mission: Score Target' };
       }
-      if (sanitizedId.endsWith('_2') || sanitizedId.includes('unique_games')) {
+      if (sanitizedId.match(/^m_\d{4}-\d{2}-\d{2}_2$/) || sanitizedId.includes('unique_games')) {
         return { rewardCoins: 100, rewardXp: 120, title: 'Daily Mission: High Score Breakthrough' };
       }
-      if (sanitizedId.endsWith('_3') || sanitizedId.includes('play_count')) {
+      if (sanitizedId.match(/^m_\d{4}-\d{2}-\d{2}_3$/) || sanitizedId.includes('play_count')) {
         return { rewardCoins: 50, rewardXp: 80, title: 'Daily Mission: Multigenre Exploration' };
       }
-      return { rewardCoins: 60, rewardXp: 90, title: `Daily Mission: ${sanitizedId}` };
+      return null;
     }
 
     case 'challenge': {
@@ -94,22 +97,27 @@ export function resolveAuthoritativeReward(
       if (sanitizedId.startsWith('special_') || sanitizedId.startsWith('season_')) {
         return { rewardCoins: 250, rewardXp: 400, title: 'Special Challenge Complete' };
       }
-      return { rewardCoins: 80, rewardXp: 120, title: `Challenge: ${sanitizedId}` };
+      return null;
     }
 
     case 'quest_tier': {
-      const tierNum = typeof details?.tier === 'number' ? details.tier : parseInt(sanitizedId.replace(/\D/g, ''), 10) || 1;
+      const tierNum = typeof details?.tier === 'number' ? details.tier : parseInt(sanitizedId.replace(/\D/g, ''), 10);
+      if (!tierNum || isNaN(tierNum)) return null;
       const tierReward = AUTHORITATIVE_QUEST_TIER_REWARDS[tierNum];
       if (tierReward) return tierReward;
-      return { rewardCoins: 100, rewardXp: 100, title: `Quest Tier ${tierNum}` };
+      return null;
     }
 
     case 'starter_pack': {
-      return { rewardCoins: 100, rewardXp: 150, title: 'Starter Recruit Bonus' };
+      if (sanitizedId === 'starter_pack' || sanitizedId === 'starter_pack_claim') {
+        return { rewardCoins: 100, rewardXp: 150, title: 'Starter Recruit Bonus' };
+      }
+      return null;
     }
 
     case 'level_up': {
-      const level = typeof details?.level === 'number' ? details.level : parseInt(sanitizedId.replace(/\D/g, ''), 10) || 2;
+      const level = typeof details?.level === 'number' ? details.level : parseInt(sanitizedId.replace(/\D/g, ''), 10);
+      if (!level || isNaN(level) || level < 2 || level > 100) return null;
       return { rewardCoins: 50, rewardXp: 0, title: `Player Level ${level} Reached` };
     }
 

@@ -68,9 +68,13 @@ html, body {
   color: #f3f4f6;
   overscroll-behavior-y: none;
   -webkit-tap-highlight-color: transparent;
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+/* Explicit select-none for controls, buttons, and canvas */
+canvas, button, .game-stage-container, .game-touch-controls, [role="button"], .no-select {
   user-select: none;
   -webkit-user-select: none;
-  padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 
 /* Safe area insets helpers */
@@ -216,6 +220,20 @@ input, textarea {
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
   }
+}
+
+/* Performance Service Disable Classes */
+.disable-expensive-blur {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  filter: none !important;
+}
+.disable-expensive-blur .glass-panel {
+  background: rgba(15, 19, 28, 0.95); /* darker solid fallback */
+}
+.disable-glow {
+  box-shadow: none !important;
+  text-shadow: none !important;
 }
 
 body.reduced-motion *, body.reduced-motion ::before, body.reduced-motion ::after {

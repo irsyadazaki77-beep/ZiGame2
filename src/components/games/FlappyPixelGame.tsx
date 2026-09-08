@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { audio } from '../../utils/audio';
+import { useGameEngine } from '../../hooks/useGameEngine';
 import { inputManager } from '../../services/inputService';
 import { GameOverlay } from '../gameplay/GameOverlay';
 import { Sparkles, Trophy } from 'lucide-react';
@@ -9,8 +10,6 @@ interface FlappyPixelProps {
   onScoreUpdate: (score: number) => void;
   highScore: number;
 }
-
-type GameState = 'ready' | 'countdown' | 'playing' | 'paused' | 'gameover';
 
 interface Pipe {
   x: number;
@@ -49,14 +48,27 @@ const PIPE_WIDTH = 58;
 const BIRD_SIZE = 22;
 
 export default function FlappyPixelGame({ onGameOver, onScoreUpdate, highScore }: FlappyPixelProps) {
-  const [gameState, setGameState] = useState<GameState>('ready');
-  const [countdown, setCountdown] = useState(3);
-  const [score, setScore] = useState(0);
+  const {
+    gameState,
+    setGameState,
+    score,
+    updateScore,
+    addScore,
+    startLoop,
+    stopLoop,
+    triggerGameOver,
+    startWithCountdown,
+    countdown,
+    scoreRef,
+  } = useGameEngine({
+    gameId: 'flappypixel',
+    onGameOver,
+    onScoreUpdate,
+  });
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const gameStateRef = useRef(gameState);
-  const scoreRef = useRef(0);
   const birdYRef = useRef(CANVAS_HEIGHT / 2);
   const birdVelocityRef = useRef(0);
   const pipesRef = useRef<Pipe[]>([]);
@@ -65,13 +77,12 @@ export default function FlappyPixelGame({ onGameOver, onScoreUpdate, highScore }
   const shakeRef = useRef(0);
   const hitStopRef = useRef(0);
 
-  const gameLoopRef = useRef<number | null>(null);
-  const lastTimeRef = useRef<number>(0);
   const frameTimerRef = useRef<number>(0);
 
   useEffect(() => {
     gameStateRef.current = gameState;
-  }, [gameState]);
+    scoreRef.current = score;
+  }, [gameState, score]);
 
   // Auto-pause when tab is hidden
   useEffect(() => {
@@ -134,9 +145,7 @@ export default function FlappyPixelGame({ onGameOver, onScoreUpdate, highScore }
   const resetGame = useCallback(() => {
     birdYRef.current = CANVAS_HEIGHT / 2 - 30;
     birdVelocityRef.current = 0;
-    scoreRef.current = 0;
-    setScore(0);
-    onScoreUpdate(0);
+    updateScore(0);
     particlesRef.current = [];
     floatingTextsRef.current = [];
     shakeRef.current = 0;
@@ -147,7 +156,7 @@ export default function FlappyPixelGame({ onGameOver, onScoreUpdate, highScore }
       createPipe(CANVAS_WIDTH + 310, 0),
     ];
     draw();
-  }, [onScoreUpdate]);
+  }, [updateScore]);
 
   const jump = useCallback(() => {
     if (gameStateRef.current === 'playing') {
@@ -162,63 +171,27 @@ export default function FlappyPixelGame({ onGameOver, onScoreUpdate, highScore }
 
   const startGame = useCallback(() => {
     resetGame();
-    setGameState('countdown');
-    setCountdown(3);
-    audio.playCountdownTick();
-
-    let count = 3;
-    const interval = setInterval(() => {
-      count--;
-      if (count > 0) {
-        setCountdown(count);
-        audio.playCountdownTick();
-      } else {
-        clearInterval(interval);
-        audio.playCountdownGo();
-        setGameState('playing');
-        lastTimeRef.current = performance.now();
-        if (gameLoopRef.current) cancelAnimationFrame(gameLoopRef.current);
-        gameLoopRef.current = requestAnimationFrame(gameStep);
-      }
-    }, 800);
-  }, [resetGame]);
+    startWithCountdown(() => {
+      startLoop(gameStep);
+    });
+  }, [resetGame, startWithCountdown, startLoop]);
 
   const resumeGame = useCallback(() => {
-    setGameState('countdown');
-    setCountdown(3);
-    audio.playCountdownTick();
+    startWithCountdown(() => {
+      startLoop(gameStep);
+    });
+  }, [startWithCountdown, startLoop]);
 
-    let count = 3;
-    const interval = setInterval(() => {
-      count--;
-      if (count > 0) {
-        setCountdown(count);
-        audio.playCountdownTick();
-      } else {
-        clearInterval(interval);
-        audio.playCountdownGo();
-        setGameState('playing');
-        lastTimeRef.current = performance.now();
-        if (gameLoopRef.current) cancelAnimationFrame(gameLoopRef.current);
-        gameLoopRef.current = requestAnimationFrame(gameStep);
-      }
-    }, 800);
-  }, []);
-
-  const gameStep = (timestamp: number) => {
+  const gameStep = useCallback((timestamp: number, dt: number) => {
     if (gameStateRef.current !== 'playing') return;
 
-    const deltaTime = timestamp - lastTimeRef.current;
-    lastTimeRef.current = timestamp;
-
     if (hitStopRef.current > 0) {
-      hitStopRef.current -= deltaTime;
+      hitStopRef.current -= dt;
       draw();
-      gameLoopRef.current = requestAnimationFrame(gameStep);
       return;
     }
 
-    const safeDelta = Math.min(deltaTime, 100);
+    const safeDelta = Math.min(dt, 100);
     frameTimerRef.current += safeDelta;
 
     const targetFrameTime = 1000 / 60;
@@ -228,10 +201,7 @@ export default function FlappyPixelGame({ onGameOver, onScoreUpdate, highScore }
     }
 
     draw();
-    if (gameStateRef.current === 'playing') {
-      gameLoopRef.current = requestAnimationFrame(gameStep);
-    }
-  };
+  }, []);
 
   const updatePhysics = () => {
     // Bird physics
@@ -252,7 +222,7 @@ export default function FlappyPixelGame({ onGameOver, onScoreUpdate, highScore }
     };
 
     let needsNewPipe = false;
-    const currentScore = scoreRef.current;
+    const currentScore = score;
     const pipeSpeed = BASE_PIPE_SPEED + Math.min(1.2, currentScore * 0.04);
 
     pipesRef.current.forEach(pipe => {
@@ -261,10 +231,7 @@ export default function FlappyPixelGame({ onGameOver, onScoreUpdate, highScore }
       // Scoring
       if (!pipe.passed && pipe.x + PIPE_WIDTH < birdRect.x) {
         pipe.passed = true;
-        const newScore = scoreRef.current + 1;
-        scoreRef.current = newScore;
-        setScore(newScore);
-        onScoreUpdate(newScore);
+        addScore(1);
         audio.playCoin();
         spawnFloatingText(birdRect.x + 20, birdRect.y - 15, `+1`, '#10b981');
       }
@@ -276,10 +243,7 @@ export default function FlappyPixelGame({ onGameOver, onScoreUpdate, highScore }
         if (distToTop < 10 || distToBottom < 10) {
           pipe.nearMissAwarded = true;
           audio.playNearMiss();
-          const bonusScore = scoreRef.current + 1;
-          scoreRef.current = bonusScore;
-          setScore(bonusScore);
-          onScoreUpdate(bonusScore);
+          addScore(1);
           spawnFloatingText(birdRect.x + 25, birdRect.y - 25, 'NEAR MISS! +1', '#38bdf8');
           shakeRef.current = 2;
         }
@@ -303,7 +267,7 @@ export default function FlappyPixelGame({ onGameOver, onScoreUpdate, highScore }
     if (needsNewPipe) {
       pipesRef.current.shift();
       const lastPipeX = pipesRef.current.length > 0 ? pipesRef.current[pipesRef.current.length - 1].x : CANVAS_WIDTH;
-      pipesRef.current.push(createPipe(lastPipeX + 250, scoreRef.current));
+      pipesRef.current.push(createPipe(lastPipeX + 250, score));
     }
 
     // Update Particles
@@ -331,9 +295,7 @@ export default function FlappyPixelGame({ onGameOver, onScoreUpdate, highScore }
     inputManager.vibrateGamepad(180, 0.7);
 
     spawnParticles(50 + BIRD_SIZE / 2, birdYRef.current + BIRD_SIZE / 2, '#f43f5e', 22, 3);
-    setGameState('gameover');
-    if (gameLoopRef.current) cancelAnimationFrame(gameLoopRef.current);
-    onGameOver(scoreRef.current);
+    triggerGameOver();
   };
 
   const draw = () => {

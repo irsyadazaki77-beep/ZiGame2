@@ -1,5 +1,6 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { audio } from '../../utils/audio';
+import { useGameEngine } from '../../hooks/useGameEngine';
 import { Particle } from '../../types';
 import { GameContainer } from '../gameplay/GameContainer';
 import { GameHUD } from '../gameplay/GameHUD';
@@ -14,22 +15,31 @@ interface LaserGridGameProps {
 
 export default function LaserGridGame({ onGameOver, onScoreUpdate, highScore }: LaserGridGameProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [score, setScore] = useState(0);
-  const lastTimeRef = useRef<number>(0);
-  const gameLoopRef = useRef<number | null>(null);
-  const scoreRef = useRef(0);
-  const [gameOver, setGameOver] = useState(false);
-  const isPlayingRef = useRef(false);
-  const gameOverRef = useRef(false);
 
+  const {
+    gameState,
+    setGameState,
+    score,
+    updateScore,
+    addScore,
+    startLoop,
+    stopLoop,
+    triggerGameOver,
+    startWithCountdown,
+    countdown,
+    scoreRef,
+  } = useGameEngine({
+    gameId: 'lasergrid',
+    onGameOver,
+    onScoreUpdate,
+  });
 
+  const gameStateRef = useRef(gameState);
+  
   useEffect(() => {
-    isPlayingRef.current = isPlaying;
-    gameOverRef.current = gameOver;
+    gameStateRef.current = gameState;
     scoreRef.current = score;
-  }, [isPlaying, gameOver, score]);
-  const [muted, setMuted] = useState(audio.getMuteState());
+  }, [gameState, score]);
 
   const CANVAS_WIDTH = 400;
   const CANVAS_HEIGHT = 500;
@@ -53,11 +63,10 @@ export default function LaserGridGame({ onGameOver, onScoreUpdate, highScore }: 
 
   const particlesRef = useRef<Particle[]>([]);
 
+  const lastTimeRef = useRef(0);
+
   useEffect(() => {
     drawStatic();
-    return () => {
-      if (gameLoopRef.current) cancelAnimationFrame(gameLoopRef.current);
-    };
   }, []);
 
   const drawStatic = () => {
@@ -99,13 +108,8 @@ export default function LaserGridGame({ onGameOver, onScoreUpdate, highScore }: 
     ctx.fillText('Gunakan tombol arah untuk melompat petak', CANVAS_WIDTH / 2, 470);
   };
 
-  const startNewGame = () => {
-    audio.playCoin();
-    setIsPlaying(true);
-    setGameOver(false);
-    setScore(0);
-    onScoreUpdate(0);
-
+  const startGame = useCallback(() => {
+    updateScore(0);
     playerXRef.current = 1;
     playerYRef.current = 1;
 
@@ -118,16 +122,17 @@ export default function LaserGridGame({ onGameOver, onScoreUpdate, highScore }: 
     roundStateRef.current = 'safe';
     durationRef.current = 110;
     particlesRef.current = [];
-    lastTimeRef.current = performance.now();
 
-    if (gameLoopRef.current) cancelAnimationFrame(gameLoopRef.current);
-    gameLoopRef.current = requestAnimationFrame(update);
-  };
+    startWithCountdown(() => {
+      lastTimeRef.current = performance.now();
+      startLoop(gameStep);
+    });
+  }, [startWithCountdown, startLoop, updateScore]);
 
   // Keyboard navigation
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (!isPlayingRef.current || gameOverRef.current ) return;
+      if (gameStateRef.current !== 'playing') return;
       if (e.key === 'ArrowUp' || e.key === 'w') {
         e.preventDefault();
         moveUp();
@@ -144,7 +149,7 @@ export default function LaserGridGame({ onGameOver, onScoreUpdate, highScore }: 
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isPlaying, gameOver]);
+  }, []);
 
   const moveUp = () => {
     if (playerYRef.current > 0) {
@@ -208,13 +213,15 @@ export default function LaserGridGame({ onGameOver, onScoreUpdate, highScore }: 
     }
   };
 
-  const update = (timestamp: number) => {
+  const gameStep = useCallback((timestamp: number, dt: number) => {
+    if (gameStateRef.current !== 'playing') return;
     const canvas = canvasRef.current;
-    if (!canvas || !isPlayingRef.current || gameOverRef.current ) return;
+    if (!canvas) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    const delta = (timestamp - lastTimeRef.current) / 16.666;
+    // delta mapping to original 16.6ms standard
+    const delta = dt / 16.666;
     lastTimeRef.current = timestamp;
 
     // Round timing
@@ -226,7 +233,7 @@ export default function LaserGridGame({ onGameOver, onScoreUpdate, highScore }: 
         startLaserRound();
       }
     } else if (roundStateRef.current === 'warning') {
-      const limit = Math.max(45, durationRef.current - scoreRef.current * 0.4);
+      const limit = Math.max(45, durationRef.current - score * 0.4);
       if (laserTimerRef.current > limit) {
         // Ignite lasers!
         roundStateRef.current = 'firing';
@@ -252,19 +259,13 @@ export default function LaserGridGame({ onGameOver, onScoreUpdate, highScore }: 
         if (hitRow || hitCol) {
           // Player hit!
           audio.playExplosion();
-          setGameOver(true);
-          setIsPlaying(false);
           createSparkParticles(curX * CELL_WIDTH + CELL_WIDTH / 2, curY * CELL_HEIGHT + CELL_HEIGHT / 2, '#ef4444');
-          onGameOver(scoreRef.current);
+          triggerGameOver();
           return;
         } else {
           // Gained survival bonus points
           audio.playScore();
-          setScore(prev => {
-            const next = prev + 25;
-            onScoreUpdate(next);
-            return next;
-          });
+          addScore(25);
           // Speed up slightly
           durationRef.current = Math.max(25, durationRef.current - 4);
         }
@@ -274,6 +275,10 @@ export default function LaserGridGame({ onGameOver, onScoreUpdate, highScore }: 
       }
     }
 
+    draw(ctx, delta, timestamp);
+  }, [score, triggerGameOver, addScore]);
+
+  const draw = (ctx: CanvasRenderingContext2D, delta: number, timestamp: number) => {
     // DRAW
     ctx.fillStyle = '#09090b';
     ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
@@ -389,38 +394,26 @@ export default function LaserGridGame({ onGameOver, onScoreUpdate, highScore }: 
 
     ctx.fillStyle = '#71717a';
     ctx.font = "10px 'JetBrains Mono', monospace";
-    ctx.fillText(`STATUS LEVEL: ${Math.min(10, 1 + scoreRef.current / 50)} | SKOR: ${score}`, CANVAS_WIDTH / 2, 440);
-
-    gameLoopRef.current = requestAnimationFrame(update);
-  };
-
-  const toggleMute = () => {
-    const nextMuted = audio.toggleMute();
-    setMuted(nextMuted);
-  };
-
-  const getGameState = () => {
-    if (!isPlaying && score === 0 && !gameOver) return 'ready';
-    if (!isPlaying) return 'gameover';
-    return 'playing';
+    ctx.fillText(`STATUS LEVEL: ${Math.min(10, 1 + score / 50)} | SKOR: ${score}`, CANVAS_WIDTH / 2, 440);
   };
 
   return (
     <GameContainer aspect="portrait" maxWidth="sm">
-      {isPlaying && (
+      {gameState === 'playing' && (
         <GameHUD 
           stats={[
-            { id: 'level', label: 'STATUS LEVEL', value: Math.min(10, 1 + Math.floor(scoreRef.current / 50)) },
+            { id: 'level', label: 'STATUS LEVEL', value: Math.min(10, 1 + Math.floor(score / 50)) },
             { id: 'score', label: 'SKOR', value: score, emphasized: true }
           ]} 
         />
       )}
 
       <GameOverlay
-        gameState={getGameState()}
+        gameState={gameState}
         score={score}
-        onStart={startNewGame}
-        onRestart={startNewGame}
+        countdown={countdown}
+        onStart={startGame}
+        onRestart={startGame}
         instructions="Gunakan tombol panah atau D-Pad untuk melompat petak. HINDARI SEKTOR DENGAN WARNING LASER!"
       />
 
@@ -433,7 +426,7 @@ export default function LaserGridGame({ onGameOver, onScoreUpdate, highScore }: 
         />
       </div>
 
-      {isPlaying && (
+      {gameState === 'playing' && (
         <MobileControls
           onUp={moveUp}
           onDown={moveDown}

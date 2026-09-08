@@ -2,7 +2,9 @@ import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Challenge, PlayerProfile, DailyMission, GameStats } from '../types';
 import { challengeService } from '../services/challengeService';
+import { progressionService } from '../services/progressionService';
 import { audio } from '../utils/audio';
+import Quests from './Quests';
 import { 
   Target, Clock, Calendar, Sparkles, Check, Gift, ShieldAlert, Award, Star, Trophy, 
   HelpCircle, ArrowUpRight, ArrowDownRight, RefreshCw, Sparkle 
@@ -12,7 +14,7 @@ interface ChallengesPageProps {
   profile: PlayerProfile;
   games: GameStats[];
   dailyMissions: DailyMission[];
-  onUpdateProfile: (profile: PlayerProfile) => void;
+  onUpdateProfile: (updates: Partial<PlayerProfile> | ((prev: PlayerProfile) => PlayerProfile)) => void;
 }
 
 export default function ChallengesPage({
@@ -21,7 +23,7 @@ export default function ChallengesPage({
   dailyMissions,
   onUpdateProfile
 }: ChallengesPageProps) {
-  const [tab, setTab] = useState<'daily' | 'weekly' | 'missions' | 'special'>('daily');
+  const [tab, setTab] = useState<'daily' | 'weekly' | 'missions' | 'special' | 'quests'>('daily');
   const [challenges, setChallenges] = useState<Challenge[]>([]);
 
   // Initialize and synchronize challenges on load
@@ -35,23 +37,31 @@ export default function ChallengesPage({
   const handleClaim = (challenge: Challenge) => {
     if (!challenge.completed || challenge.claimed) return;
 
-    audio.playLevelUp();
-    const result = challengeService.claimChallenge(challenge.id);
-    if (result.success) {
-      // Award Coins and XP
-      const nextXp = (profile.xp || 0) + result.xp;
-      const nextLevel = Math.floor(nextXp / 100) + 1;
-      
-      onUpdateProfile({
-        ...profile,
-        coins: profile.coins + result.coins,
-        xp: nextXp,
-        level: Math.max(profile.level || 1, nextLevel)
+    import('../services/economyService').then(({ economyService }) => {
+      economyService.claimReward(challenge.id, 'challenge', profile.name).then(res => {
+        if (res.success && res.newBalance !== undefined) {
+          audio.playLevelUp();
+          
+          const result = challengeService.claimChallenge(challenge.id);
+          if (result.success) {
+            const earnedXp = result.xp || 0;
+            onUpdateProfile(prev => {
+              const currentXp = prev.xp || 0;
+              const nextXp = currentXp + earnedXp;
+              const nextLevel = progressionService.calculateLevel(nextXp).level;
+              return {
+                ...prev,
+                coins: res.newBalance,
+                xp: nextXp,
+                level: nextLevel
+              };
+            });
+            
+            setChallenges(challengeService.getStoredChallenges());
+          }
+        }
       });
-      
-      // Update local and storage challenges
-      setChallenges(challengeService.getStoredChallenges());
-    }
+    });
   };
 
   // Computes progress summary
@@ -67,12 +77,7 @@ export default function ChallengesPage({
       {/* Visual Header Banner */}
       <section className="relative rounded-3xl overflow-hidden border border-white/[0.05] bg-[#0c0e17] flex flex-col justify-center px-6 md:px-10 py-8 shadow-md">
         <div className="absolute inset-0 bg-gradient-to-r from-[#0c0e17] via-[#0c0e17]/90 to-transparent z-10" />
-        <img 
-          src="https://images.unsplash.com/photo-1511512578047-dfb367046420?q=80&w=1200&auto=format&fit=crop" 
-          alt="Cyberpunk workspace background"
-          referrerPolicy="no-referrer" loading="lazy"
-          className="absolute inset-0 w-full h-full object-cover opacity-10 z-0"
-        />
+        <div className="absolute inset-0 z-0 bg-gradient-to-r from-amber-900/10 to-indigo-900/10" style={{ backgroundImage: 'radial-gradient(circle at 100% 50%, rgba(99, 102, 241, 0.15), transparent 50%), radial-gradient(circle at 0% 100%, rgba(245, 158, 11, 0.1), transparent 50%)' }} />
 
         <div className="relative z-20 max-w-xl space-y-2">
           <div className="bg-amber-500/10 border border-amber-500/20 text-amber-400 text-[10px] font-mono font-bold px-2.5 py-1 rounded-md w-fit uppercase tracking-wider flex items-center gap-1.5">
@@ -122,6 +127,14 @@ export default function ChallengesPage({
         >
           <Sparkles size={13} /> Spesial Season
         </button>
+        <button
+          onClick={() => { audio.playHit(); setTab('quests'); }}
+          className={`px-4 py-2.5 rounded-xl text-xs font-mono font-bold uppercase transition shrink-0 cursor-pointer flex items-center gap-1.5 ${
+            tab === 'quests' ? 'bg-indigo-500/10 text-indigo-400 border border-indigo-500/30' : 'text-zinc-500 hover:text-zinc-300 border border-transparent'
+          }`}
+        >
+          <Gift size={13} /> Pas Tantangan
+        </button>
       </div>
 
       {/* Claim Indicator Notification if any claim is pending */}
@@ -136,8 +149,14 @@ export default function ChallengesPage({
 
       {/* Main Grid View */}
       <div className="pt-2">
-        {/* TAB 1, 2, 4: CHALLENGES */}
-        {tab !== 'missions' ? (
+        {tab === 'quests' ? (
+          <Quests 
+            dailyMissions={dailyMissions} 
+            profile={profile} 
+            onUpdateProfile={onUpdateProfile} 
+            totalPlays={games.reduce((acc, g) => acc + g.plays, 0)} 
+          />
+        ) : tab !== 'missions' ? (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {filteredChallenges.length > 0 ? (
               filteredChallenges.map((ch) => {

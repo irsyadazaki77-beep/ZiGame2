@@ -1,64 +1,8 @@
 import { FriendProfile, RelationshipStatus, ActivityFeedItem, SocialPrivacySettings } from '../types';
 
-const INITIAL_BOT_FRIENDS: FriendProfile[] = [
-  {
-    uid: 'friend_raka_01',
-    name: 'RAKA_NEO',
-    avatar: '🐱‍💻',
-    colorTheme: '#6366f1',
-    status: 'FRIENDS',
-    isOnline: true,
-    lastActive: Date.now() - 1000 * 60 * 5,
-    highestScoreGame: { gameTitle: 'Snake Classic', score: 1450 },
-    masteryTitle: 'VIPER_STRIKER'
-  },
-  {
-    uid: 'friend_maya_02',
-    name: 'MAYA_CYBER',
-    avatar: '🚀',
-    colorTheme: '#ec4899',
-    status: 'FRIENDS',
-    isOnline: false,
-    lastActive: Date.now() - 1000 * 60 * 120,
-    highestScoreGame: { gameTitle: 'Space Defender', score: 3200 },
-    masteryTitle: 'LASER_COMMANDER'
-  },
-  {
-    uid: 'friend_dimas_03',
-    name: 'DIMAS_PIXEL',
-    avatar: '🤖',
-    colorTheme: '#10b981',
-    status: 'PENDING_RECEIVED',
-    isOnline: true,
-    lastActive: Date.now() - 1000 * 60 * 15,
-    highestScoreGame: { gameTitle: 'Brick Breaker', score: 2100 },
-    masteryTitle: 'SHATTER_ARTISAN'
-  }
-];
+const INITIAL_BOT_FRIENDS: FriendProfile[] = [];
 
-const INITIAL_ACTIVITIES: ActivityFeedItem[] = [
-  {
-    id: 'act_1',
-    userId: 'friend_raka_01',
-    userName: 'RAKA_NEO',
-    userAvatar: '🐱‍💻',
-    type: 'high_score',
-    gameTitle: 'Snake Classic',
-    score: 1450,
-    details: 'Mencetak Rekor Baru 1,450 poin di Snake Classic!',
-    timestamp: Date.now() - 1000 * 60 * 20
-  },
-  {
-    id: 'act_2',
-    userId: 'friend_maya_02',
-    userName: 'MAYA_CYBER',
-    userAvatar: '🚀',
-    type: 'mastery_up',
-    gameTitle: 'Space Defender',
-    details: 'Mencapai Space Defender Mastery Lv. 10 (Gelar: LASER_COMMANDER)!',
-    timestamp: Date.now() - 1000 * 60 * 180
-  }
-];
+const INITIAL_ACTIVITIES: ActivityFeedItem[] = [];
 
 export const socialService = {
   getFriends(): FriendProfile[] {

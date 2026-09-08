@@ -1,5 +1,6 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { audio } from '../../utils/audio';
+import { useGameEngine } from '../../hooks/useGameEngine';
 import { GameContainer } from '../gameplay/GameContainer';
 import { GameHUD } from '../gameplay/GameHUD';
 import { GameOverlay } from '../gameplay/GameOverlay';
@@ -16,16 +17,39 @@ interface Vector2D {
 }
 
 export default function PixelGolfGame({ onGameOver, onScoreUpdate, highScore }: GameProps) {
-  const gameLoopRef = useRef<number | null>(null);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [score, setScore] = useState(0);
+  const {
+    gameState,
+    setGameState,
+    score,
+    updateScore,
+    addScore,
+    startLoop,
+    stopLoop,
+    triggerGameOver,
+    startWithCountdown,
+    countdown,
+    scoreRef,
+  } = useGameEngine({
+    gameId: 'pixelgolf',
+    onGameOver,
+    onScoreUpdate,
+  });
+
+  const gameStateRef = useRef(gameState);
+  useEffect(() => {
+    gameStateRef.current = gameState;
+  }, [gameState]);
+
   const [strokes, setStrokes] = useState(0);
   const [level, setLevel] = useState(1);
   const [timeLeft, setTimeLeft] = useState(60);
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const isPlayingRef = useRef(false);
-  const scoreRef = useRef(0);
+  useEffect(() => {
+    scoreRef.current = score;
+  }, [score]);
+
+  const gameTimerRef = useRef(0);
 
   // Physics state
   const ballPos = useRef<Vector2D>({ x: 50, y: 150 });
@@ -43,12 +67,7 @@ export default function PixelGolfGame({ onGameOver, onScoreUpdate, highScore }: 
 
   useEffect(() => {
     scoreRef.current = score;
-    onScoreUpdate(score);
-  }, [score, onScoreUpdate]);
-
-  useEffect(() => {
-    isPlayingRef.current = isPlaying;
-  }, [isPlaying]);
+  }, [score]);
 
   const initLevel = (lvl: number) => {
     // Spawn hole in a random position away from start
@@ -62,25 +81,22 @@ export default function PixelGolfGame({ onGameOver, onScoreUpdate, highScore }: 
     };
   };
 
-  const startNewGame = () => {
-    audio.playCoin();
-    setScore(0);
+  const startGame = useCallback(() => {
+    updateScore(0);
     setStrokes(0);
     setLevel(1);
     setTimeLeft(60);
+    gameTimerRef.current = 0;
     initLevel(1);
-    setIsPlaying(true);
-  };
-
-  const endGame = () => {
-    setIsPlaying(false);
-    audio.playGameOver();
-    onGameOver(scoreRef.current);
-  };
+    
+    startWithCountdown(() => {
+      startLoop(gameStep);
+    });
+  }, [updateScore, startWithCountdown, startLoop]);
 
   // Drag interaction
   const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (!isPlaying) return;
+    if (gameStateRef.current !== 'playing') return;
     const canvas = canvasRef.current;
     if (!canvas) return;
     const rect = canvas.getBoundingClientRect();
@@ -126,7 +142,7 @@ export default function PixelGolfGame({ onGameOver, onScoreUpdate, highScore }: 
 
   // Support mobile touch gestures as well
   const handleTouchStart = (e: React.TouchEvent<HTMLCanvasElement>) => {
-    if (!isPlaying) return;
+    if (gameStateRef.current !== 'playing') return;
     const canvas = canvasRef.current;
     if (!canvas) return;
     const rect = canvas.getBoundingClientRect();
@@ -155,163 +171,143 @@ export default function PixelGolfGame({ onGameOver, onScoreUpdate, highScore }: 
   };
 
   // Game physical logic loops (60fps)
-  useEffect(() => {
-    let animId: number;
-    let timerId: NodeJS.Timeout;
+  const gameStep = useCallback((timestamp: number, dt: number) => {
+    if (gameStateRef.current !== 'playing') return;
 
-    if (isPlaying) {
-      // Countdown Timer
-      timerId = setInterval(() => {
-        setTimeLeft(prev => {
-          if (prev <= 1) {
-            endGame();
-            return 0;
-          }
-          return prev - 1;
-        });
-      }, 1000);
-
-      // Rendering & Physics Updates
-      const render = () => {
-        const canvas = canvasRef.current;
-        if (!canvas) return;
-        const ctx = canvas.getContext('2d');
-        if (!ctx) return;
-
-        // Clear
-        ctx.fillStyle = '#09090b';
-        ctx.fillRect(0, 0, width, height);
-
-        // Grid Lines
-        ctx.strokeStyle = '#18181b';
-        ctx.lineWidth = 1;
-        for (let i = 0; i < width; i += 30) {
-          ctx.beginPath();
-          ctx.moveTo(i, 0);
-          ctx.lineTo(i, height);
-          ctx.stroke();
-          ctx.beginPath();
-          ctx.moveTo(0, i);
-          ctx.lineTo(width, i);
-          ctx.stroke();
+    // Timer Logic
+    const delta = dt / 16.666;
+    gameTimerRef.current += delta;
+    if (gameTimerRef.current > 60) {
+      gameTimerRef.current = 0;
+      setTimeLeft(prev => {
+        if (prev <= 1) {
+          triggerGameOver();
+          return 0;
         }
-
-        // Draw hole (Target Cup)
-        const gradient = ctx.createRadialGradient(
-          holePos.current.x, holePos.current.y, 2,
-          holePos.current.x, holePos.current.y, holeRadius
-        );
-        gradient.addColorStop(0, '#a855f7');
-        gradient.addColorStop(1, '#000000');
-        ctx.fillStyle = gradient;
-        ctx.beginPath();
-        ctx.arc(holePos.current.x, holePos.current.y, holeRadius, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.strokeStyle = '#c084fc';
-        ctx.lineWidth = 2;
-        ctx.stroke();
-
-        // Update Ball Physics
-        const ball = ballPos.current;
-        const vel = ballVel.current;
-
-        ball.x += vel.x;
-        ball.y += vel.y;
-
-        // Apply friction
-        vel.x *= 0.98;
-        vel.y *= 0.98;
-
-        // Bounce walls
-        if (ball.x - ballRadius < 0) {
-          ball.x = ballRadius;
-          vel.x *= -0.8;
-          audio.playHit();
-        } else if (ball.x + ballRadius > width) {
-          ball.x = width - ballRadius;
-          vel.x *= -0.8;
-          audio.playHit();
-        }
-
-        if (ball.y - ballRadius < 0) {
-          ball.y = ballRadius;
-          vel.y *= -0.8;
-          audio.playHit();
-        } else if (ball.y + ballRadius > height) {
-          ball.y = height - ballRadius;
-          vel.y *= -0.8;
-          audio.playHit();
-        }
-
-        // Check if ball fell into hole
-        const distToHole = Math.hypot(ball.x - holePos.current.x, ball.y - holePos.current.y);
-        if (distToHole < holeRadius - 2) {
-          // Success!
-          audio.playLevelUp();
-          const pointsEarned = Math.max(150 - strokes * 20, 50);
-          setScore(prev => prev + pointsEarned);
-          setStrokes(0);
-          setLevel(l => l + 1);
-          setTimeLeft(t => Math.min(t + 8, 60)); // extra time
-          initLevel(level + 1);
-        }
-
-        // Slingshot guide lines
-        if (isDragging.current) {
-          ctx.beginPath();
-          ctx.moveTo(dragStart.current.x, dragStart.current.y);
-          // Reverse guide vector
-          const gx = dragStart.current.x + (dragStart.current.x - dragCurrent.current.x);
-          const gy = dragStart.current.y + (dragStart.current.y - dragCurrent.current.y);
-          ctx.lineTo(gx, gy);
-          ctx.strokeStyle = '#eab308';
-          ctx.lineWidth = 3;
-          ctx.setLineDash([4, 4]);
-          ctx.stroke();
-          ctx.setLineDash([]);
-
-          // Drag center pull line
-          ctx.beginPath();
-          ctx.moveTo(dragStart.current.x, dragStart.current.y);
-          ctx.lineTo(dragCurrent.current.x, dragCurrent.current.y);
-          ctx.strokeStyle = '#ef4444';
-          ctx.lineWidth = 1.5;
-          ctx.stroke();
-        }
-
-        // Draw Ball
-        ctx.shadowColor = '#22c55e';
-        ctx.shadowBlur = 10;
-        ctx.fillStyle = '#22c55e';
-        ctx.beginPath();
-        ctx.arc(ball.x, ball.y, ballRadius, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.shadowBlur = 0; // reset
-
-        // Next frame
-        if (isPlayingRef.current) {
-          animId = requestAnimationFrame(render);
-        }
-      };
-
-      animId = requestAnimationFrame(render);
+        return prev - 1;
+      });
     }
 
-    return () => {
-      cancelAnimationFrame(animId);
-      if (timerId) clearInterval(timerId);
-    };
-  }, [isPlaying, level]);
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
 
-  const getGameState = () => {
-    if (!isPlaying && score === 0 && strokes === 0) return 'ready';
-    if (!isPlaying) return 'gameover';
-    return 'playing';
-  };
+    // Clear
+    ctx.fillStyle = '#09090b';
+    ctx.fillRect(0, 0, width, height);
+
+    // Grid Lines
+    ctx.strokeStyle = '#18181b';
+    ctx.lineWidth = 1;
+    for (let i = 0; i < width; i += 30) {
+      ctx.beginPath();
+      ctx.moveTo(i, 0);
+      ctx.lineTo(i, height);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(0, i);
+      ctx.lineTo(width, i);
+      ctx.stroke();
+    }
+
+    // Draw hole (Target Cup)
+    const gradient = ctx.createRadialGradient(
+      holePos.current.x, holePos.current.y, 2,
+      holePos.current.x, holePos.current.y, holeRadius
+    );
+    gradient.addColorStop(0, '#a855f7');
+    gradient.addColorStop(1, '#000000');
+    ctx.fillStyle = gradient;
+    ctx.beginPath();
+    ctx.arc(holePos.current.x, holePos.current.y, holeRadius, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#c084fc';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    // Update Ball Physics
+    const ball = ballPos.current;
+    const vel = ballVel.current;
+
+    ball.x += vel.x * delta;
+    ball.y += vel.y * delta;
+
+    // Apply friction (normalized to delta)
+    vel.x *= Math.pow(0.98, delta);
+    vel.y *= Math.pow(0.98, delta);
+
+    // Bounce walls
+    if (ball.x - ballRadius < 0) {
+      ball.x = ballRadius;
+      vel.x *= -0.8;
+      audio.playHit();
+    } else if (ball.x + ballRadius > width) {
+      ball.x = width - ballRadius;
+      vel.x *= -0.8;
+      audio.playHit();
+    }
+
+    if (ball.y - ballRadius < 0) {
+      ball.y = ballRadius;
+      vel.y *= -0.8;
+      audio.playHit();
+    } else if (ball.y + ballRadius > height) {
+      ball.y = height - ballRadius;
+      vel.y *= -0.8;
+      audio.playHit();
+    }
+
+    // Check if ball fell into hole
+    const distToHole = Math.hypot(ball.x - holePos.current.x, ball.y - holePos.current.y);
+    if (distToHole < holeRadius - 2) {
+      // Success!
+      audio.playLevelUp();
+      const pointsEarned = Math.max(150 - strokes * 20, 50);
+      addScore(pointsEarned);
+      setStrokes(0);
+      setLevel(l => l + 1);
+      setTimeLeft(t => Math.min(t + 8, 60)); // extra time
+      // Use set timeout to prevent sync issues if needed, or just let next frame init
+      initLevel(level + 1);
+    }
+
+    // Slingshot guide lines
+    if (isDragging.current) {
+      ctx.beginPath();
+      ctx.moveTo(dragStart.current.x, dragStart.current.y);
+      // Reverse guide vector
+      const gx = dragStart.current.x + (dragStart.current.x - dragCurrent.current.x);
+      const gy = dragStart.current.y + (dragStart.current.y - dragCurrent.current.y);
+      ctx.lineTo(gx, gy);
+      ctx.strokeStyle = '#eab308';
+      ctx.lineWidth = 3;
+      ctx.setLineDash([4, 4]);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      // Drag center pull line
+      ctx.beginPath();
+      ctx.moveTo(dragStart.current.x, dragStart.current.y);
+      ctx.lineTo(dragCurrent.current.x, dragCurrent.current.y);
+      ctx.strokeStyle = '#ef4444';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+    }
+
+    // Draw Ball
+    ctx.shadowColor = '#22c55e';
+    ctx.shadowBlur = 10;
+    ctx.fillStyle = '#22c55e';
+    ctx.beginPath();
+    ctx.arc(ball.x, ball.y, ballRadius, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.shadowBlur = 0; // reset
+  }, [level, strokes, addScore, triggerGameOver]);
 
   return (
     <GameContainer aspect="square" maxWidth="sm">
-      {isPlaying && (
+      {gameState === 'playing' && (
         <GameHUD 
           stats={[
             { id: 'score', label: 'SKOR', value: score, emphasized: true },
@@ -322,10 +318,11 @@ export default function PixelGolfGame({ onGameOver, onScoreUpdate, highScore }: 
       )}
 
       <GameOverlay
-        gameState={getGameState()}
+        gameState={gameState}
         score={score}
-        onStart={startNewGame}
-        onRestart={startNewGame}
+        countdown={countdown}
+        onStart={startGame}
+        onRestart={startGame}
         instructions="Tarik dan lepaskan bola untuk memasukkannya ke lubang. Pantulkan di dinding jika perlu!"
       />
 

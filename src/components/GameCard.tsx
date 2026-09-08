@@ -1,7 +1,8 @@
 import React from 'react';
-import { Star, Play, Eye } from 'lucide-react';
+import { Star, Play, Eye, Trophy } from 'lucide-react';
 import { GameStats } from '../types';
 import { Badge } from './UI';
+import { GameArtwork } from './GameArtwork';
 
 interface GameCardProps {
   game: GameStats;
@@ -17,17 +18,6 @@ export const GameCard: React.FC<GameCardProps> = ({
   onClick
 }) => {
   const playCount = game.plays || 0;
-  
-  const getRating = (id: string) => {
-    let hash = 0;
-    for (let i = 0; i < id.length; i++) {
-      hash = id.charCodeAt(i) + ((hash << 5) - hash);
-    }
-    const rating = 4.3 + (Math.abs(hash) % 7) * 0.1;
-    return rating.toFixed(1);
-  };
-
-  const rating = getRating(game.id);
 
   const difficultyVariant = (diff?: string) => {
     if (!diff) return 'secondary';
@@ -44,13 +34,7 @@ export const GameCard: React.FC<GameCardProps> = ({
     >
       {/* Thumbnail with 16:10 aspect ratio */}
       <div className="aspect-[16/10] w-full bg-[#0a0d14] relative overflow-hidden shrink-0">
-        <img
-          src={game.coverImage}
-          alt={game.title}
-          loading="lazy"
-          referrerPolicy="no-referrer"
-          className="w-full h-full object-cover object-center transition-transform duration-300 group-hover:scale-105"
-        />
+        <GameArtwork game={game} />
         {/* Soft bottom vignette */}
         <div className="absolute inset-0 bg-gradient-to-t from-[#121622] via-[#121622]/30 to-transparent" />
 
@@ -63,11 +47,6 @@ export const GameCard: React.FC<GameCardProps> = ({
         >
           <Star size={14} className={isFavorite ? "fill-amber-400 text-amber-400" : "text-zinc-300"} />
         </button>
-
-        {/* Game Icon Tag */}
-        <div className="absolute bottom-2 left-2 sm:bottom-2.5 sm:left-2.5 w-7 h-7 sm:w-8 sm:h-8 rounded-lg sm:rounded-xl bg-black/70 backdrop-blur-md border border-white/10 flex items-center justify-center text-sm sm:text-base shadow-md z-10">
-          {game.icon}
-        </div>
 
         {/* Play Action Hover overlay */}
         <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 bg-black/30 backdrop-blur-[2px] transition-opacity duration-200">
@@ -100,10 +79,14 @@ export const GameCard: React.FC<GameCardProps> = ({
             <Eye size={11} className="text-zinc-500" />
             <span>{playCount.toLocaleString()} main</span>
           </div>
-          <div className="flex items-center gap-1">
-            <Star size={11} className="fill-amber-400 text-amber-400" />
-            <span className="text-zinc-200 font-semibold">{rating}</span>
-          </div>
+          {game.highScore ? (
+            <div className="flex items-center gap-1 text-emerald-400 font-medium">
+              <Trophy size={11} />
+              <span>PB: {game.highScore.toLocaleString()}</span>
+            </div>
+          ) : (
+            <span className="text-zinc-500 font-medium">Siap Dimainkan</span>
+          )}
         </div>
       </div>
     </div>

@@ -9,6 +9,7 @@ import { useNavigate } from 'react-router-dom';
 import { NewPlayerOnboardingModal } from '../components/onboarding/NewPlayerOnboardingModal';
 import { GAME_QUALITY_MAP } from '../config/qualityTiers';
 import GameCard from '../components/GameCard';
+import { GameArtwork } from '../components/GameArtwork';
 
 interface HomeProps {
   games: GameStats[];
@@ -131,11 +132,7 @@ export default function Home({
       {spotlightGame && (
         <section className="relative rounded-2xl sm:rounded-3xl overflow-hidden border border-white/[0.08] bg-[#11151f] shadow-2xl shadow-black/60">
           <div className="absolute inset-0">
-            <img
-              src={spotlightGame.coverImage}
-              alt={spotlightGame.title}
-              className="w-full h-full object-cover object-center opacity-30 blur-sm scale-105"
-            />
+            <GameArtwork game={spotlightGame} className="opacity-30 blur-sm scale-105" />
             <div className="absolute inset-0 bg-gradient-to-r from-[#090b10] via-[#090b10]/85 to-transparent" />
             <div className="absolute inset-0 bg-gradient-to-t from-[#090b10] via-transparent to-transparent" />
           </div>
@@ -417,11 +414,15 @@ export default function Home({
               <div
                 key={game.id}
                 onClick={() => onSelectGame(game.id)}
-                className="p-3 sm:p-3.5 bg-[#11151f] hover:bg-[#161c2c] border border-white/[0.06] hover:border-white/[0.12] rounded-xl cursor-pointer group transition-all"
+                className="overflow-hidden bg-[#11151f] hover:bg-[#161c2c] border border-white/[0.06] hover:border-white/[0.12] rounded-xl cursor-pointer group transition-all flex flex-col h-full"
               >
-                <div className="text-xl sm:text-2xl mb-1.5 sm:mb-2">{game.icon}</div>
-                <div className="font-semibold text-xs text-zinc-200 group-hover:text-white truncate">{game.title}</div>
-                <div className="text-[10px] sm:text-[11px] text-zinc-400 mt-0.5">{game.genre || 'Arcade'}</div>
+                <div className="h-20 sm:h-24 w-full relative">
+                  <GameArtwork game={game} />
+                </div>
+                <div className="p-2 sm:p-3">
+                  <div className="font-semibold text-xs text-zinc-200 group-hover:text-white truncate">{game.title}</div>
+                  <div className="text-[10px] sm:text-[11px] text-zinc-400 mt-0.5">{game.genre || 'Arcade'}</div>
+                </div>
               </div>
             ))}
           </div>

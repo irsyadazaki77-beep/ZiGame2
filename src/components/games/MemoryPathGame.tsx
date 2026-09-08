@@ -13,6 +13,7 @@ interface GameProps {
 const MATRIX_SIZE = 16; // 4x4 grid
 
 export default function MemoryPathGame({ onGameOver, onScoreUpdate, highScore }: GameProps) {
+  const scoreRef = useRef(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [sequence, setSequence] = useState<number[]>([]);
   const [userSelected, setUserSelected] = useState<number[]>([]);
@@ -22,7 +23,6 @@ export default function MemoryPathGame({ onGameOver, onScoreUpdate, highScore }:
   const [level, setLevel] = useState(1);
   const [gridState, setGridState] = useState<'idle' | 'flash' | 'player'>('idle');
 
-  const scoreRef = useRef(0);
   const sequenceRef = useRef<number[]>([]);
 
   useEffect(() => {
@@ -105,7 +105,7 @@ export default function MemoryPathGame({ onGameOver, onScoreUpdate, highScore }:
   const endGame = () => {
     setIsPlaying(false);
     audio.playGameOver();
-    onGameOver(scoreRef.current);
+    onGameOver(score);
   };
 
   const getGameState = () => {

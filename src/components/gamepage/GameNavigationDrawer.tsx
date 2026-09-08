@@ -2,6 +2,7 @@ import React from 'react';
 import { ArrowLeft, ArrowRight, Play, Sparkles, Clock } from 'lucide-react';
 import { GameStats } from '../../types';
 import { audio } from '../../utils/audio';
+import { GameArtwork } from '../GameArtwork';
 
 interface GameNavigationDrawerProps {
   currentGame: GameStats;
@@ -95,7 +96,9 @@ export const GameNavigationDrawer: React.FC<GameNavigationDrawerProps> = ({
               className="p-3 bg-zinc-900/60 hover:bg-zinc-900 border border-zinc-800 hover:border-indigo-500/40 rounded-xl flex items-center justify-between cursor-pointer transition group"
             >
               <div className="flex items-center gap-2.5 overflow-hidden">
-                <span className="text-2xl shrink-0 p-1.5 bg-zinc-950 rounded-lg border border-zinc-800">{g.icon}</span>
+                <div className="w-11 h-11 rounded-lg overflow-hidden border border-zinc-800 relative shrink-0">
+                  <GameArtwork game={g} />
+                </div>
                 <div className="truncate">
                   <div className="text-xs font-bold text-white group-hover:text-indigo-400 transition truncate">{g.title}</div>
                   <div className="text-[10px] font-mono text-zinc-500">{g.difficulty || 'Normal'}</div>

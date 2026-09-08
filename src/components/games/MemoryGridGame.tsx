@@ -30,6 +30,7 @@ const CARDS_SYMBOLS = [
 ];
 
 export default function MemoryGridGame({ onGameOver, onScoreUpdate, highScore }: MemoryGridProps) {
+  const scoreRef = useRef(0);
   // State variables
   const [isPlaying, setIsPlaying] = useState(false);
   const [cards, setCards] = useState<Card[]>(() => {
@@ -43,7 +44,6 @@ export default function MemoryGridGame({ onGameOver, onScoreUpdate, highScore }:
   });
   const [selectedIndices, setSelectedIndices] = useState<number[]>([]);
   const [score, setScore] = useState(0);
-  const scoreRef = useRef(0);
   const [moves, setMoves] = useState(0);
   const [combo, setCombo] = useState(1);
   const [timeLeft, setTimeLeft] = useState(90); // 1.5 minutes limit
@@ -171,7 +171,7 @@ export default function MemoryGridGame({ onGameOver, onScoreUpdate, highScore }:
     setIsPlaying(false);
     setGameOver(true);
     audio.playGameOver();
-    onGameOver(scoreRef.current);
+    onGameOver(score);
   };
 
   const triggerGameWon = () => {

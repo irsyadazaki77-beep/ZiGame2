@@ -31,12 +31,12 @@ interface TrailPoint {
 }
 
 export default function CyberSlasherGame({ onGameOver, onScoreUpdate, highScore }: CyberSlasherGameProps) {
+  const gameLoopRef = useRef<number | null>(null);
+  const scoreRef = useRef(0);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [score, setScore] = useState(0);
   const lastTimeRef = useRef<number>(0);
-  const gameLoopRef = useRef<number | null>(null);
-  const scoreRef = useRef(0);
   const [gameOver, setGameOver] = useState(false);
   const isPlayingRef = useRef(false);
   const gameOverRef = useRef(false);
@@ -64,7 +64,7 @@ export default function CyberSlasherGame({ onGameOver, onScoreUpdate, highScore 
   useEffect(() => {
     drawStatic();
     return () => {
-      if (gameLoopRef.current) cancelAnimationFrame(gameLoopRef.current);
+      if (gameLoopRef?.current) cancelAnimationFrame(gameLoopRef.current);
     };
   }, []);
 
@@ -115,7 +115,7 @@ export default function CyberSlasherGame({ onGameOver, onScoreUpdate, highScore 
     spawnTimerRef.current = 0;
     lastTimeRef.current = performance.now();
 
-    if (gameLoopRef.current) cancelAnimationFrame(gameLoopRef.current);
+    if (gameLoopRef?.current) cancelAnimationFrame(gameLoopRef.current);
     gameLoopRef.current = requestAnimationFrame(update);
   };
 
@@ -242,7 +242,7 @@ export default function CyberSlasherGame({ onGameOver, onScoreUpdate, highScore 
                 decay: Math.random() * 0.04 + 0.02
               });
             }
-            onGameOver(scoreRef.current);
+            onGameOver(score);
           } else {
             audio.playScore();
             shakeRef.current = 5;
@@ -281,7 +281,7 @@ export default function CyberSlasherGame({ onGameOver, onScoreUpdate, highScore 
 
     // Spawn waves
     spawnTimerRef.current += delta;
-    if (spawnTimerRef.current > Math.max(25, 60 - scoreRef.current * 0.05)) {
+    if (spawnTimerRef.current > Math.max(25, 60 - score * 0.05)) {
       spawnTimerRef.current = 0;
       spawnFruitItem();
       if (Math.random() < 0.4) spawnFruitItem(); // Double spawns
@@ -434,7 +434,7 @@ export default function CyberSlasherGame({ onGameOver, onScoreUpdate, highScore 
     ctx.fillStyle = '#ffffff';
     ctx.font = "bold 11px 'JetBrains Mono', monospace";
     ctx.textAlign = 'left';
-    ctx.fillText(`TEBASAN BERUNTUN: ${Math.floor(scoreRef.current / 10)}`, 15, 30);
+    ctx.fillText(`TEBASAN BERUNTUN: ${Math.floor(score / 10)}`, 15, 30);
     ctx.textAlign = 'right';
     ctx.fillText(`SKOR: ${score}`, CANVAS_WIDTH - 15, 30);
 

@@ -26,6 +26,7 @@ export function useGameEngine({
   const [gameState, setGameState] = useState<GameEngineState>('ready');
   const [countdown, setCountdown] = useState<number>(3);
   const [score, setScore] = useState<number>(0);
+  const scoreRef = useRef<number>(0);
   const [perfSettings, setPerfSettings] = useState(() => performanceService.getSettings());
 
   const gameStateRef = useRef<GameEngineState>(gameState);
@@ -120,6 +121,7 @@ export function useGameEngine({
   // Score management helper
   const updateScore = useCallback((newScore: number) => {
     setScore(newScore);
+    scoreRef.current = newScore;
     if (onScoreUpdate) {
       onScoreUpdate(newScore);
     }
@@ -247,6 +249,8 @@ export function useGameEngine({
     startWithCountdown,
     startLoop,
     stopLoop,
+    scoreRef,
+    gameLoopRef: animFrameRef,
     setupCanvasContext,
     perfSettings
   };

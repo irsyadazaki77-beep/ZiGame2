@@ -1,5 +1,6 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { audio } from '../../utils/audio';
+import { useGameEngine } from '../../hooks/useGameEngine';
 import { Particle } from '../../types';
 import { GameOverlay } from '../gameplay/GameOverlay';
 
@@ -18,25 +19,30 @@ interface StackerRow {
 
 export default function NeonStackerGame({ onGameOver, onScoreUpdate, highScore }: NeonStackerGameProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [score, setScore] = useState(0);
-  const gameLoopRef = useRef<number | null>(null);
-  const scoreRef = useRef(0);
-  const [gameOver, setGameOver] = useState(false);
-  const isPlayingRef = useRef(false);
-  const gameOverRef = useRef(false);
 
+  const {
+    gameState,
+    setGameState,
+    score,
+    updateScore,
+    addScore,
+    startLoop,
+    stopLoop,
+    triggerGameOver,
+    startWithCountdown,
+    countdown,
+  } = useGameEngine({
+    gameId: 'neonstacker',
+    onGameOver,
+    onScoreUpdate,
+  });
 
   const [gameWon, setGameWon] = useState(false);
-  const gameWonRef = useRef(false);
-  const [muted, setMuted] = useState(audio.getMuteState());
-
+  const gameStateRef = useRef(gameState);
+  
   useEffect(() => {
-    isPlayingRef.current = isPlaying;
-    gameOverRef.current = gameOver;
-    scoreRef.current = score;
-    gameWonRef.current = gameWon;
-  }, [isPlaying, gameOver, score, gameWon]);
+    gameStateRef.current = gameState;
+  }, [gameState]);
 
   // Keyboard controls
   useEffect(() => {
@@ -71,78 +77,46 @@ export default function NeonStackerGame({ onGameOver, onScoreUpdate, highScore }
   const floatingTextsRef = useRef<{ x: number; y: number; text: string; color: string; alpha: number; vy: number }[]>([]);
 
   useEffect(() => {
-    drawStatic();
-    return () => {
-      if (gameLoopRef.current) cancelAnimationFrame(gameLoopRef.current);
-    };
+    draw();
   }, []);
 
-  const drawStatic = () => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    ctx.fillStyle = '#09090b';
-    ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
-
-    // Grid lines
-    ctx.strokeStyle = '#1e1b4b';
-    ctx.lineWidth = 0.5;
-    for (let r = 0; r < GRID_ROWS; r++) {
-      ctx.beginPath();
-      ctx.moveTo(0, r * CELL_SIZE);
-      ctx.lineTo(CANVAS_WIDTH, r * CELL_SIZE);
-      ctx.stroke();
-    }
-    for (let c = 0; c < GRID_COLS; c++) {
-      ctx.beginPath();
-      ctx.moveTo(c * CELL_SIZE, 0);
-      ctx.lineTo(c * CELL_SIZE, CANVAS_HEIGHT);
-      ctx.stroke();
-    }
-
-    // Title
-    ctx.fillStyle = '#ffffff';
-    ctx.font = "bold 20px 'Space Grotesk', sans-serif";
-    ctx.textAlign = 'center';
-    ctx.fillText('NEON STACKER', CANVAS_WIDTH / 2, 180);
-
-    ctx.fillStyle = '#e11d48';
-    ctx.font = "12px 'JetBrains Mono', monospace";
-    ctx.fillText('TUMPUK BLOK TEPAT DI ATAS SATU SAMA LAIN', CANVAS_WIDTH / 2, 210);
-
-    ctx.fillStyle = '#71717a';
-    ctx.font = "11px 'JetBrains Mono', monospace";
-    ctx.fillText('Klik tombol "STACK!" untuk menumpuk baris', CANVAS_WIDTH / 2, 240);
-  };
-
-  const startNewGame = () => {
-    audio.playCoin();
-    
-    // Explicitly update ref states to guarantee synchronous start
-    isPlayingRef.current = true;
-    gameOverRef.current = false;
-    gameWonRef.current = false;
-    
-    setIsPlaying(true);
-    setGameOver(false);
+  const startGame = useCallback(() => {
     setGameWon(false);
-    setScore(0);
-    onScoreUpdate(0);
-
+    updateScore(0);
     currentRowRef.current = 0;
     activeRowWidthRef.current = 3;
-    activeRowXRef.current = 0;
-    directionRef.current = 1;
+    activeRowXRef.current = Math.floor(Math.random() * (GRID_COLS - 3));
     stackedRowsRef.current = [];
     speedRef.current = 150;
-    lastTickRef.current = performance.now();
     particlesRef.current = [];
+    floatingTextsRef.current = [];
+    shakeRef.current = 0;
 
-    if (gameLoopRef.current) cancelAnimationFrame(gameLoopRef.current);
-    gameLoopRef.current = requestAnimationFrame(update);
-  };
+    startWithCountdown(() => {
+      lastTickRef.current = performance.now();
+      startLoop(gameStep);
+    });
+  }, [startWithCountdown, startLoop, updateScore]);
+
+  const gameStep = useCallback((timestamp: number) => {
+    if (gameStateRef.current !== 'playing') return;
+
+    if (timestamp - lastTickRef.current > speedRef.current) {
+      activeRowXRef.current += directionRef.current;
+      
+      if (activeRowXRef.current <= 0) {
+        activeRowXRef.current = 0;
+        directionRef.current = 1;
+      } else if (activeRowXRef.current + activeRowWidthRef.current >= GRID_COLS) {
+        activeRowXRef.current = GRID_COLS - activeRowWidthRef.current;
+        directionRef.current = -1;
+      }
+      
+      lastTickRef.current = timestamp;
+    }
+
+    draw();
+  }, []);
 
   const createStackParticles = (x: number, y: number, color: string) => {
     for (let i = 0; i < 15; i++) {
@@ -160,7 +134,7 @@ export default function NeonStackerGame({ onGameOver, onScoreUpdate, highScore }
   };
 
   const handleStack = () => {
-    if (!isPlayingRef.current || gameOverRef.current  || gameWon) return;
+    if (gameStateRef.current !== 'playing') return;
 
     const rowIdx = currentRowRef.current;
     const curX = activeRowXRef.current;
@@ -220,9 +194,7 @@ export default function NeonStackerGame({ onGameOver, onScoreUpdate, highScore }
           alpha: 1.0,
           vy: -1.0
         });
-        setGameOver(true);
-        setIsPlaying(false);
-        onGameOver(scoreRef.current);
+        triggerGameOver();
         return;
       }
 
@@ -254,11 +226,7 @@ export default function NeonStackerGame({ onGameOver, onScoreUpdate, highScore }
       // Sparks
       createStackParticles((overlapLeft + overlapWidth / 2) * CELL_SIZE, yVal, rowColor);
 
-      setScore(prev => {
-        const next = prev + pointsWon;
-        onScoreUpdate(next);
-        return next;
-      });
+      addScore(pointsWon);
 
       floatingTextsRef.current.push({
         x: (overlapLeft + overlapWidth / 2) * CELL_SIZE,
@@ -282,8 +250,8 @@ export default function NeonStackerGame({ onGameOver, onScoreUpdate, highScore }
           vy: -1.2
         });
         setGameWon(true);
-        setIsPlaying(false);
-        onGameOver(score + 500); // Massive bonus for winning
+        addScore(500); // Massive bonus for winning
+        triggerGameOver();
         return;
       }
 
@@ -296,30 +264,11 @@ export default function NeonStackerGame({ onGameOver, onScoreUpdate, highScore }
     }
   };
 
-  const update = (timestamp: number) => {
+  const draw = () => {
     const canvas = canvasRef.current;
-    if (!canvas || !isPlayingRef.current) return;
+    if (!canvas) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
-
-    // Moving block ticks
-    const elapsed = timestamp - lastTickRef.current;
-    if (elapsed > speedRef.current) {
-      lastTickRef.current = timestamp;
-
-      // Move row blocks
-      activeRowXRef.current += directionRef.current;
-
-      // Bounce at grid walls
-      const rightLimit = GRID_COLS - activeRowWidthRef.current;
-      if (activeRowXRef.current >= rightLimit) {
-        activeRowXRef.current = rightLimit;
-        directionRef.current = -1;
-      } else if (activeRowXRef.current <= 0) {
-        activeRowXRef.current = 0;
-        directionRef.current = 1;
-      }
-    }
 
     // --- DRAW FRAME ---
     ctx.save();
@@ -359,7 +308,7 @@ export default function NeonStackerGame({ onGameOver, onScoreUpdate, highScore }
     });
 
     // Render active row scrolling
-    if (isPlaying && !gameOver && !gameWon) {
+    if (gameStateRef.current === 'playing') {
       const activeY = CANVAS_HEIGHT - (currentRowRef.current + 1) * CELL_SIZE;
       const colors = ['#f43f5e', '#ec4899', '#d946ef', '#a855f7', '#8b5cf6', '#6366f1', '#3b82f6', '#06b6d4', '#14b8a6', '#10b981', '#22c55e', '#84cc16'];
       const activeColor = colors[currentRowRef.current % colors.length];
@@ -416,18 +365,6 @@ export default function NeonStackerGame({ onGameOver, onScoreUpdate, highScore }
     floatingTextsRef.current = floatingTextsRef.current.filter(t => t.alpha > 0);
 
     ctx.restore();
-    gameLoopRef.current = requestAnimationFrame(update);
-  };
-
-  const toggleMute = () => {
-    const nextMuted = audio.toggleMute();
-    setMuted(nextMuted);
-  };
-
-  const getGameState = () => {
-    if (!isPlaying && score === 0 && !gameOver && !gameWon) return 'ready';
-    if (!isPlaying) return 'gameover';
-    return 'playing';
   };
 
   return (
@@ -459,15 +396,16 @@ export default function NeonStackerGame({ onGameOver, onScoreUpdate, highScore }
         />
 
         <GameOverlay
-          gameState={getGameState()}
+          gameState={gameState}
           score={score}
-          onStart={startNewGame}
-          onRestart={startNewGame}
+          onStart={startGame}
+          onRestart={startGame}
+          countdown={countdown}
           instructions="Klik di mana saja pada layar atau tekan Spasi untuk menumpuk blok tepat di atas satu sama lain!"
         />
       </div>
 
-      {isPlaying && (
+      {gameState === 'playing' && (
         <div className="flex-none mt-2 w-full max-w-xs">
           <button
             onClick={(e) => { e.stopPropagation(); handleStack(); }}

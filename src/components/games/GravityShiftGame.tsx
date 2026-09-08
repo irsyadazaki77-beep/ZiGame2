@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { audio } from '../../utils/audio';
-import { inputManager } from '../../services/inputService';
+import { useGameEngine } from '../../hooks/useGameEngine';
+import { useUnifiedInput } from '../../hooks/useUnifiedInput';
 import { GameOverlay } from '../gameplay/GameOverlay';
 import { Compass, Clock, Award, RotateCcw, Zap, Sparkles, Flag } from 'lucide-react';
 
@@ -176,21 +177,22 @@ const generateLevels = (): LevelDef[] => [
 export default function GravityShiftGame({ onGameOver, onScoreUpdate, highScore }: GravityShiftGameProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
-  const [gameState, setGameState] = useState<'ready' | 'countdown' | 'playing' | 'paused' | 'gameover'>('ready');
-  const [countdown, setCountdown] = useState(3);
+  const {
+    gameState, setGameState, gameStateRef, countdown, score, updateScore, triggerGameOver,
+    startWithCountdown, startLoop, stopLoop, setupCanvasContext, perfSettings,
+  gameLoopRef,
+  } = useGameEngine({
+    onScoreUpdate, onGameOver
+  });
   const [currentLevelIndex, setCurrentLevelIndex] = useState(0);
   const [shardsCollected, setShardsCollected] = useState(0);
   const [totalShards, setTotalShards] = useState(3);
   const [deathCount, setDeathCount] = useState(0);
   const [elapsedMs, setElapsedMs] = useState(0);
   const [gravityDir, setGravityDir] = useState<1 | -1>(1); // 1: Down, -1: Up
-  const [totalScore, setTotalScore] = useState(0);
 
-  const gameStateRef = useRef(gameState);
-  const totalScoreRef = useRef(0);
   const gravityDirRef = useRef<1 | -1>(1);
   const lastTimeRef = useRef(0);
-  const gameLoopRef = useRef<number | null>(null);
   const keysRef = useRef<{ [key: string]: boolean }>({});
 
   const levelsRef = useRef<LevelDef[]>(generateLevels());
@@ -294,85 +296,49 @@ export default function GravityShiftGame({ onGameOver, onScoreUpdate, highScore 
     initLevel(0);
     setDeathCount(0);
     setElapsedMs(0);
-    totalScoreRef.current = 0;
-    setTotalScore(0);
+    updateScore(0);
 
-    setGameState('countdown');
-    setCountdown(3);
-    audio.playCountdown();
+    startWithCountdown();
   }, [initLevel]);
 
-  // Countdown timer
-  useEffect(() => {
-    if (gameState !== 'countdown') return;
-    if (countdown > 1) {
-      const t = setTimeout(() => {
-        setCountdown((c) => c - 1);
-        audio.playCountdown();
-      }, 700);
-      return () => clearTimeout(t);
-    } else {
-      const t = setTimeout(() => {
-        setGameState('playing');
-        audio.playCoin();
-      }, 700);
-      return () => clearTimeout(t);
-    }
-  }, [gameState, countdown]);
-
   // Unified input subscription
-  useEffect(() => {
-    const unsub = inputManager.subscribe({
-      onActionDown: (action) => {
-        if (gameStateRef.current === 'ready') {
-          if (action === 'PRIMARY') startGame();
-          return;
-        }
-        if (gameStateRef.current === 'gameover') {
-          if (action === 'PRIMARY' || action === 'RESTART') startGame();
-          return;
-        }
-        if (gameStateRef.current === 'playing') {
-          if (action === 'PAUSE') setGameState('paused');
-          if (action === 'PRIMARY' || action === 'UP') flipGravity();
-        } else if (gameStateRef.current === 'paused') {
-          if (action === 'PAUSE' || action === 'PRIMARY') setGameState('playing');
-        }
-      },
-      onRawKey: (key, isDown) => {
-        keysRef.current[key.toLowerCase()] = isDown;
-        keysRef.current[key] = isDown;
-        if (isDown && (key === ' ' || key === 'Space' || key === 'ArrowUp' || key === 'w' || key === 'W')) {
+    useUnifiedInput({
+    onActionDown: (action) => {
+      if (gameStateRef.current === 'ready') {
+        if (action === 'PRIMARY') startGame();
+        return;
+      }
+      if (gameStateRef.current === 'gameover') {
+        if (action === 'PRIMARY' || action === 'RESTART') startGame();
+        return;
+      }
+      if (gameStateRef.current === 'playing') {
+        if (action === 'PAUSE') setGameState('paused');
+        if (action === 'PRIMARY' || action === 'SECONDARY') {
           flipGravity();
         }
-      },
-    });
-    return () => unsub();
-  }, [startGame, flipGravity]);
+      } else if (gameStateRef.current === 'paused') {
+        if (action === 'PAUSE' || action === 'PRIMARY') setGameState('playing');
+      }
+    },
+    onRawKey: (key, isDown) => {
+      keysRef.current[key.toLowerCase()] = isDown;
+      keysRef.current[key] = isDown;
+    }
+  });
 
-  // Main 60 FPS requestAnimationFrame loop
+  // Main game loop
   useEffect(() => {
-    let animId: number;
+    if (gameState === 'playing') {
+      startLoop((timestamp, dtMs) => {
+        const dt = dtMs / 1000;
+        const ctx = setupCanvasContext(canvasRef.current, CANVAS_WIDTH, CANVAS_HEIGHT);
+        if (!ctx) return;
 
-    const loop = (timestamp: number) => {
-      animId = requestAnimationFrame(loop);
-      gameLoopRef.current = animId;
+        const lvl = currentLevelRef.current;
+        const player = playerRef.current;
+        const gDir = gravityDirRef.current;
 
-      if (!lastTimeRef.current) lastTimeRef.current = timestamp;
-      const dt = Math.min((timestamp - lastTimeRef.current) / 1000, 0.05);
-      lastTimeRef.current = timestamp;
-
-      const canvas = canvasRef.current;
-      if (!canvas) return;
-      const ctx = canvas.getContext('2d');
-      if (!ctx) return;
-
-      const lvl = currentLevelRef.current;
-      const player = playerRef.current;
-      const gDir = gravityDirRef.current;
-
-      // UPDATE PHASE
-      if (gameStateRef.current === 'playing') {
         setElapsedMs((ms) => ms + dt * 1000);
 
         // Horizontal Movement
@@ -514,9 +480,7 @@ export default function GravityShiftGame({ onGameOver, onScoreUpdate, highScore 
           if (Math.hypot(centerX - col.x, centerY - col.y) < 20) {
             col.collected = true;
             setShardsCollected((s) => s + 1);
-            totalScoreRef.current += 200;
-            setTotalScore(totalScoreRef.current);
-            onScoreUpdate(totalScoreRef.current);
+            updateScore(score + 200);
             spawnParticles(col.x, col.y, '#f59e0b', 12);
             audio.playCoin();
           }
@@ -549,16 +513,13 @@ export default function GravityShiftGame({ onGameOver, onScoreUpdate, highScore 
         ) {
           audio.playLevelUp();
           const levelClearScore = 1000 + Math.max(0, 500 - deathCount * 50);
-          totalScoreRef.current += levelClearScore;
-          setTotalScore(totalScoreRef.current);
-          onScoreUpdate(totalScoreRef.current);
+          updateScore(score + levelClearScore);
 
           if (currentLevelIndex + 1 < levelsRef.current.length) {
             initLevel(currentLevelIndex + 1);
           } else {
             // Game Beat!
-            setGameState('gameover');
-            onGameOver(totalScoreRef.current);
+            triggerGameOver();
           }
         }
 
@@ -569,7 +530,6 @@ export default function GravityShiftGame({ onGameOver, onScoreUpdate, highScore 
           p.alpha -= 0.025;
           return p.alpha > 0;
         });
-      }
 
       // RENDER PHASE
       ctx.fillStyle = '#090b11';
@@ -701,17 +661,17 @@ export default function GravityShiftGame({ onGameOver, onScoreUpdate, highScore 
       });
 
       // Goal Portal
-      const goal = lvl.goal;
+      const renderGoal = lvl.goal;
       ctx.fillStyle = 'rgba(16, 185, 129, 0.25)';
       ctx.strokeStyle = '#10b981';
       ctx.lineWidth = 2;
-      ctx.fillRect(goal.x, goal.y, goal.w, goal.h);
-      ctx.strokeRect(goal.x, goal.y, goal.w, goal.h);
+      ctx.fillRect(renderGoal.x, renderGoal.y, renderGoal.w, renderGoal.h);
+      ctx.strokeRect(renderGoal.x, renderGoal.y, renderGoal.w, renderGoal.h);
 
       ctx.fillStyle = '#10b981';
       ctx.font = 'bold 10px monospace';
       ctx.textAlign = 'center';
-      ctx.fillText('PORTAL', goal.x + goal.w / 2, goal.y + goal.h / 2 + 3);
+      ctx.fillText('PORTAL', renderGoal.x + renderGoal.w / 2, renderGoal.y + renderGoal.h / 2 + 3);
 
       // Particles
       particlesRef.current.forEach((p) => {
@@ -739,13 +699,9 @@ export default function GravityShiftGame({ onGameOver, onScoreUpdate, highScore 
       ctx.fillRect(player.vx >= 0 ? 2 : -8, -player.h / 2 + 4, 6, 6);
 
       ctx.restore();
-    };
-
-    animId = requestAnimationFrame(loop);
-    return () => {
-      if (animId) cancelAnimationFrame(animId);
-    };
-  }, [gameState, onGameOver, onScoreUpdate, currentLevelIndex, deathCount, initLevel]);
+      });
+    }
+  }, [gameState, startLoop, setupCanvasContext, onGameOver, onScoreUpdate, currentLevelIndex, deathCount, initLevel, score, updateScore, triggerGameOver, flipGravity]);
 
   const formatTimer = (ms: number) => {
     const totalSec = Math.floor(ms / 1000);
@@ -792,7 +748,7 @@ export default function GravityShiftGame({ onGameOver, onScoreUpdate, highScore 
 
           <div className="px-3 py-1 bg-zinc-900/90 border border-white/10 rounded-xl flex items-center gap-2">
             <span className="text-zinc-400">SKOR:</span>
-            <span className="text-yellow-400 font-bold">{totalScore}</span>
+            <span className="text-yellow-400 font-bold">{score}</span>
           </div>
         </div>
       </div>
@@ -807,7 +763,7 @@ export default function GravityShiftGame({ onGameOver, onScoreUpdate, highScore 
       <GameOverlay
         gameState={gameState}
         countdown={countdown}
-        score={totalScore}
+        score={score}
         highScore={highScore}
         onStart={startGame}
         onResume={() => setGameState('playing')}

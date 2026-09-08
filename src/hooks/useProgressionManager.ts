@@ -7,7 +7,7 @@ import { storageService } from '../services/storageService';
 
 export function useProgressionManager(
   profile: PlayerProfile,
-  onUpdateProfile: (p: PlayerProfile) => void,
+  onUpdateProfile: (updates: Partial<PlayerProfile> | ((prev: PlayerProfile) => PlayerProfile)) => void,
   games: GameStats[]
 ) {
   const { showToast } = useToast();
@@ -32,7 +32,7 @@ export function useProgressionManager(
     const game = games.find(g => g.id === gameId);
     
     // Calculate XP payload
-    const xpResult = progressionService.calculateSessionXp(game, score, durationSec);
+    const xpResult = progressionService.calculateSessionXp(gameId, score, durationSec);
     const { earnedXp } = xpResult;
     
     if (earnedXp <= 0) return;
@@ -51,13 +51,14 @@ export function useProgressionManager(
       audio.playLevelUp();
     }
 
-    onUpdateProfile({
-      ...profile,
+    onUpdateProfile(prev => ({
+      ...prev,
       xp: newTotalXp,
       level: newLevelData.level,
-      totalPlaytimeSec: (profile.totalPlaytimeSec || 0) + durationSec
-    });
+      totalPlaytimeSec: (prev.totalPlaytimeSec || 0) + durationSec
+    }));
 
+    
     // --- 2. PER-GAME MASTERY PROGRESSION ---
     setMasteries(prev => {
       const currentMastery = prev[gameId] || {
@@ -68,15 +69,22 @@ export function useProgressionManager(
         highestScore: 0,
         totalPlays: 0
       };
-
-      const newMasteryXp = currentMastery.xp + earnedXp;
+      
+      const isPB = score > currentMastery.highestScore;
+      // Basic mastery XP from play
+      let masteryEarned = 25; // base per play
+      if (durationSec > 30) masteryEarned += 25; // valid play
+      if (isPB) masteryEarned += 150; // PB bonus
+      masteryEarned += Math.floor(earnedXp * 0.5); // 50% of account XP goes to mastery
+      
+      const newMasteryXp = currentMastery.xp + masteryEarned;
       const masteryLvlData = progressionService.calculateMasteryLevel(newMasteryXp);
       
       const masteryLeveledUp = masteryLvlData.level > currentMastery.level;
       
       if (masteryLeveledUp && !masteryLvlData.maxLevel) {
         setTimeout(() => {
-          showToast('Mastery Up!', `Mastery ${game?.title || gameId} naik ke Lv.${masteryLvlData.level}!`, 'success', '🔥');
+          showToast('Mastery Up!', `Mastery ${game?.title || gameId} naik ke Lv.${masteryLvlData.level} (${masteryLvlData.title})!`, 'success', '🔥');
         }, 1500); // offset toast
       }
 

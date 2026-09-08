@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { audio } from '../../utils/audio';
+import { useGameEngine } from '../../hooks/useGameEngine';
 import { inputManager } from '../../services/inputService';
 import { GameOverlay } from '../gameplay/GameOverlay';
 import { Sparkles, Trophy, Flame } from 'lucide-react';
@@ -41,9 +42,23 @@ export default function NeonPongGame({ onGameOver, onScoreUpdate, highScore }: N
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
 
-  const [gameState, setGameState] = useState<'ready' | 'countdown' | 'playing' | 'paused' | 'gameover'>('ready');
-  const [countdown, setCountdown] = useState(3);
-  const [playerScore, setPlayerScore] = useState(0);
+  const {
+    gameState,
+    setGameState,
+    score,
+    updateScore,
+    addScore,
+    startLoop,
+    stopLoop,
+    triggerGameOver,
+    startWithCountdown,
+    countdown,
+  } = useGameEngine({
+    gameId: 'pong',
+    onGameOver,
+    onScoreUpdate,
+  });
+
   const [botScore, setBotScore] = useState(0);
   const [rallyStreak, setRallyStreak] = useState(0);
 
@@ -51,8 +66,6 @@ export default function NeonPongGame({ onGameOver, onScoreUpdate, highScore }: N
   const playerScoreRef = useRef(0);
   const botScoreRef = useRef(0);
   const rallyRef = useRef(0);
-  const gameLoopRef = useRef<number | null>(null);
-  const lastTimeRef = useRef<number>(0);
   const shakeRef = useRef<number>(0);
   const hitStopRef = useRef<number>(0);
 
@@ -136,9 +149,8 @@ export default function NeonPongGame({ onGameOver, onScoreUpdate, highScore }: N
   const resetGame = useCallback(() => {
     playerScoreRef.current = 0;
     botScoreRef.current = 0;
-    setPlayerScore(0);
+    updateScore(0);
     setBotScore(0);
-    onScoreUpdate(0);
     rallyRef.current = 0;
     setRallyStreak(0);
 
@@ -154,26 +166,10 @@ export default function NeonPongGame({ onGameOver, onScoreUpdate, highScore }: N
 
   const startGame = useCallback(() => {
     resetGame();
-    setGameState('countdown');
-    setCountdown(3);
-    audio.playCountdownTick();
-
-    let count = 3;
-    const interval = setInterval(() => {
-      count--;
-      if (count > 0) {
-        setCountdown(count);
-        audio.playCountdownTick();
-      } else {
-        clearInterval(interval);
-        audio.playCountdownGo();
-        setGameState('playing');
-        lastTimeRef.current = performance.now();
-        if (gameLoopRef.current) cancelAnimationFrame(gameLoopRef.current);
-        gameLoopRef.current = requestAnimationFrame(gameLoop);
-      }
-    }, 800);
-  }, [resetGame]);
+    startWithCountdown(() => {
+      startLoop(gameStep);
+    });
+  }, [resetGame, startWithCountdown, startLoop]);
 
   // Keyboard controls
   useEffect(() => {
@@ -200,28 +196,20 @@ export default function NeonPongGame({ onGameOver, onScoreUpdate, highScore }: N
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
-  }, []);
+  }, [setGameState]);
 
-  const gameLoop = (timestamp: number) => {
+  const gameStep = useCallback((timestamp: number, dt: number) => {
     if (gameStateRef.current !== 'playing') return;
-
-    const dt = Math.min(timestamp - lastTimeRef.current, 100);
-    lastTimeRef.current = timestamp;
 
     if (hitStopRef.current > 0) {
       hitStopRef.current -= dt;
       draw();
-      gameLoopRef.current = requestAnimationFrame(gameLoop);
       return;
     }
 
     updatePhysics(dt);
     draw();
-
-    if (gameStateRef.current === 'playing') {
-      gameLoopRef.current = requestAnimationFrame(gameLoop);
-    }
-  };
+  }, []);
 
   const updatePhysics = (dt: number) => {
     const keys = activeKeysRef.current;
@@ -350,8 +338,7 @@ export default function NeonPongGame({ onGameOver, onScoreUpdate, highScore }: N
       const points = 10 + rallyBonus * 5;
       const nextScore = playerScoreRef.current + points;
       playerScoreRef.current = nextScore;
-      setPlayerScore(nextScore);
-      onScoreUpdate(nextScore);
+      addScore(points);
 
       spawnFloatingText(CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2, `+${points} POINT!`, '#10b981');
       spawnParticles(CANVAS_WIDTH - 20, ball.y, '#10b981', 18);
@@ -408,9 +395,7 @@ export default function NeonPongGame({ onGameOver, onScoreUpdate, highScore }: N
     if (playerWon) audio.playLevelUp();
     else audio.playExplosion();
 
-    setGameState('gameover');
-    if (gameLoopRef.current) cancelAnimationFrame(gameLoopRef.current);
-    onGameOver(playerScoreRef.current);
+    triggerGameOver();
   };
 
   const draw = () => {
@@ -536,7 +521,7 @@ export default function NeonPongGame({ onGameOver, onScoreUpdate, highScore }: N
       {/* Pong Scoreboard Header */}
       <div className="w-full max-w-[600px] flex-none flex justify-between items-center mb-2 px-3 py-1 bg-[#121622]/80 border border-white/[0.06] rounded-xl text-xs font-mono">
         <div className="flex items-center gap-1.5 text-emerald-400 font-bold">
-          <span>YOU: {playerScore}</span>
+          <span>YOU: {score}</span>
         </div>
 
         {rallyStreak >= 3 && (
@@ -571,7 +556,7 @@ export default function NeonPongGame({ onGameOver, onScoreUpdate, highScore }: N
 
         <GameOverlay
           gameState={gameState}
-          score={playerScore}
+          score={score}
           highScore={highScore}
           countdown={countdown}
           onStart={startGame}

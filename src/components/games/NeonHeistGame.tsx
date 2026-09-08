@@ -1,8 +1,11 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { audio } from '../../utils/audio';
-import { inputManager } from '../../services/inputService';
+import { useGameEngine } from '../../hooks/useGameEngine';
+import { useUnifiedInput } from '../../hooks/useUnifiedInput';
 import { GameOverlay } from '../gameplay/GameOverlay';
 import { Shield, Radio, Key, Zap, Flame, Eye, Lock, Unlock, AlertTriangle } from 'lucide-react';
+import { LevelData, Distraction, Terminal } from './neon-heist/types';
+import { generateLevels } from './neon-heist/levels';
 
 interface NeonHeistGameProps {
   onGameOver: (score: number) => void;
@@ -13,514 +16,24 @@ interface NeonHeistGameProps {
 const CANVAS_WIDTH = 800;
 const CANVAS_HEIGHT = 500;
 
-interface Guard {
-  id: number;
-  x: number;
-  y: number;
-  vx: number;
-  vy: number;
-  angle: number;
-  targetAngle: number;
-  speed: number;
-  waypoints: { x: number; y: number }[];
-  currentWaypoint: number;
-  state: 'patrol' | 'suspicious' | 'chase' | 'search';
-  investigatePos?: { x: number; y: number };
-  searchTimer: number;
-  visionRange: number;
-  visionAngle: number;
-}
 
-interface Camera {
-  x: number;
-  y: number;
-  angle: number;
-  minAngle: number;
-  maxAngle: number;
-  rotSpeed: number;
-  range: number;
-  fov: number;
-  disabled: boolean;
-  disableTimer: number;
-}
-
-interface LaserBarrier {
-  x1: number;
-  y1: number;
-  x2: number;
-  y2: number;
-  active: boolean;
-  cycleTime: number;
-  cycleTimer: number;
-  activeDuration: number;
-  switchControlled?: boolean;
-}
-
-interface Terminal {
-  x: number;
-  y: number;
-  type: 'intel' | 'laser_switch' | 'camera_jam';
-  hacked: boolean;
-  progress: number;
-  label: string;
-}
-
-interface Obstacle {
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-  type: 'wall' | 'server' | 'vent';
-}
-
-interface Distraction {
-  x: number;
-  y: number;
-  radius: number;
-  maxRadius: number;
-  alpha: number;
-  lifetime: number;
-}
-
-interface LevelData {
-  level: number;
-  name: string;
-  playerStart: { x: number; y: number };
-  exit: { x: number; y: number; w: number; h: number };
-  obstacles: Obstacle[];
-  guards: Guard[];
-  cameras: Camera[];
-  lasers: LaserBarrier[];
-  terminals: Terminal[];
-  requiredIntel: number;
-}
-
-const generateLevels = (): LevelData[] => [
-  {
-    level: 1,
-    name: 'SEKTOR A: SERVER ACCESS',
-    playerStart: { x: 60, y: 440 },
-    exit: { x: 720, y: 50, w: 50, h: 50 },
-    requiredIntel: 2,
-    obstacles: [
-      { x: 180, y: 100, w: 20, h: 320, type: 'wall' },
-      { x: 380, y: 60, w: 20, h: 300, type: 'wall' },
-      { x: 580, y: 150, w: 20, h: 350, type: 'wall' },
-      { x: 260, y: 220, w: 60, h: 40, type: 'server' },
-      { x: 460, y: 140, w: 60, h: 40, type: 'server' },
-      { x: 100, y: 200, w: 40, h: 40, type: 'vent' },
-      { x: 480, y: 380, w: 40, h: 40, type: 'vent' },
-    ],
-    guards: [
-      {
-        id: 1,
-        x: 280,
-        y: 120,
-        vx: 0,
-        vy: 0,
-        angle: Math.PI / 2,
-        targetAngle: Math.PI / 2,
-        speed: 1.2,
-        waypoints: [
-          { x: 280, y: 120 },
-          { x: 280, y: 400 },
-        ],
-        currentWaypoint: 0,
-        state: 'patrol',
-        searchTimer: 0,
-        visionRange: 130,
-        visionAngle: Math.PI / 3,
-      },
-      {
-        id: 2,
-        x: 480,
-        y: 380,
-        vx: 0,
-        vy: 0,
-        angle: -Math.PI / 2,
-        targetAngle: -Math.PI / 2,
-        speed: 1.3,
-        waypoints: [
-          { x: 480, y: 380 },
-          { x: 480, y: 100 },
-        ],
-        currentWaypoint: 0,
-        state: 'patrol',
-        searchTimer: 0,
-        visionRange: 130,
-        visionAngle: Math.PI / 3,
-      },
-    ],
-    cameras: [
-      {
-        x: 390,
-        y: 30,
-        angle: Math.PI / 2,
-        minAngle: Math.PI / 4,
-        maxAngle: (3 * Math.PI) / 4,
-        rotSpeed: 0.015,
-        range: 150,
-        fov: Math.PI / 3.5,
-        disabled: false,
-        disableTimer: 0,
-      },
-    ],
-    lasers: [
-      {
-        x1: 200,
-        y1: 430,
-        x2: 380,
-        y2: 430,
-        active: true,
-        cycleTime: 4000,
-        cycleTimer: 0,
-        activeDuration: 2400,
-      },
-      {
-        x1: 400,
-        y1: 80,
-        x2: 580,
-        y2: 80,
-        active: true,
-        cycleTime: 3500,
-        cycleTimer: 1500,
-        activeDuration: 2000,
-      },
-    ],
-    terminals: [
-      { x: 270, y: 420, type: 'intel', hacked: false, progress: 0, label: 'INTEL ALPHA' },
-      { x: 470, y: 80, type: 'intel', hacked: false, progress: 0, label: 'INTEL BETA' },
-      { x: 80, y: 100, type: 'camera_jam', hacked: false, progress: 0, label: 'CAM JAMMER' },
-    ],
-  },
-  {
-    level: 2,
-    name: 'SEKTOR B: CYBER VAULT',
-    playerStart: { x: 60, y: 60 },
-    exit: { x: 720, y: 420, w: 50, h: 50 },
-    requiredIntel: 3,
-    obstacles: [
-      { x: 160, y: 0, w: 20, h: 220, type: 'wall' },
-      { x: 160, y: 300, w: 20, h: 200, type: 'wall' },
-      { x: 340, y: 120, w: 20, h: 260, type: 'wall' },
-      { x: 520, y: 0, w: 20, h: 200, type: 'wall' },
-      { x: 520, y: 280, w: 20, h: 220, type: 'wall' },
-      { x: 240, y: 180, w: 50, h: 50, type: 'server' },
-      { x: 420, y: 280, w: 50, h: 50, type: 'server' },
-      { x: 620, y: 160, w: 50, h: 50, type: 'server' },
-      { x: 240, y: 60, w: 40, h: 40, type: 'vent' },
-      { x: 420, y: 420, w: 40, h: 40, type: 'vent' },
-      { x: 620, y: 60, w: 40, h: 40, type: 'vent' },
-    ],
-    guards: [
-      {
-        id: 1,
-        x: 250,
-        y: 100,
-        vx: 0,
-        vy: 0,
-        angle: 0,
-        targetAngle: 0,
-        speed: 1.4,
-        waypoints: [
-          { x: 250, y: 100 },
-          { x: 250, y: 400 },
-        ],
-        currentWaypoint: 0,
-        state: 'patrol',
-        searchTimer: 0,
-        visionRange: 140,
-        visionAngle: Math.PI / 3,
-      },
-      {
-        id: 2,
-        x: 430,
-        y: 400,
-        vx: 0,
-        vy: 0,
-        angle: -Math.PI / 2,
-        targetAngle: -Math.PI / 2,
-        speed: 1.5,
-        waypoints: [
-          { x: 430, y: 400 },
-          { x: 430, y: 100 },
-        ],
-        currentWaypoint: 0,
-        state: 'patrol',
-        searchTimer: 0,
-        visionRange: 140,
-        visionAngle: Math.PI / 3,
-      },
-      {
-        id: 3,
-        x: 630,
-        y: 100,
-        vx: 0,
-        vy: 0,
-        angle: Math.PI / 2,
-        targetAngle: Math.PI / 2,
-        speed: 1.5,
-        waypoints: [
-          { x: 630, y: 100 },
-          { x: 630, y: 380 },
-        ],
-        currentWaypoint: 0,
-        state: 'patrol',
-        searchTimer: 0,
-        visionRange: 140,
-        visionAngle: Math.PI / 3,
-      },
-    ],
-    cameras: [
-      {
-        x: 170,
-        y: 290,
-        angle: 0,
-        minAngle: -Math.PI / 4,
-        maxAngle: Math.PI / 4,
-        rotSpeed: 0.02,
-        range: 160,
-        fov: Math.PI / 3.5,
-        disabled: false,
-        disableTimer: 0,
-      },
-      {
-        x: 530,
-        y: 210,
-        angle: Math.PI,
-        minAngle: (3 * Math.PI) / 4,
-        maxAngle: (5 * Math.PI) / 4,
-        rotSpeed: 0.02,
-        range: 160,
-        fov: Math.PI / 3.5,
-        disabled: false,
-        disableTimer: 0,
-      },
-    ],
-    lasers: [
-      {
-        x1: 180,
-        y1: 260,
-        x2: 340,
-        y2: 260,
-        active: true,
-        cycleTime: 3200,
-        cycleTimer: 0,
-        activeDuration: 1800,
-      },
-      {
-        x1: 360,
-        y1: 220,
-        x2: 520,
-        y2: 220,
-        active: true,
-        cycleTime: 3200,
-        cycleTimer: 1600,
-        activeDuration: 1800,
-      },
-      {
-        x1: 540,
-        y1: 260,
-        x2: 700,
-        y2: 260,
-        active: true,
-        cycleTime: 3500,
-        cycleTimer: 800,
-        activeDuration: 2000,
-      },
-    ],
-    terminals: [
-      { x: 250, y: 440, type: 'intel', hacked: false, progress: 0, label: 'VAULT KEY 1' },
-      { x: 430, y: 60, type: 'intel', hacked: false, progress: 0, label: 'VAULT KEY 2' },
-      { x: 650, y: 440, type: 'intel', hacked: false, progress: 0, label: 'MASTER CYPHER' },
-      { x: 650, y: 60, type: 'laser_switch', hacked: false, progress: 0, label: 'LASER BYPASS' },
-    ],
-  },
-  {
-    level: 3,
-    name: 'SEKTOR C: QUANTUM CORE',
-    playerStart: { x: 50, y: 250 },
-    exit: { x: 720, y: 230, w: 50, h: 50 },
-    requiredIntel: 3,
-    obstacles: [
-      { x: 140, y: 60, w: 20, h: 160, type: 'wall' },
-      { x: 140, y: 280, w: 20, h: 160, type: 'wall' },
-      { x: 280, y: 140, w: 20, h: 220, type: 'wall' },
-      { x: 440, y: 60, w: 20, h: 160, type: 'wall' },
-      { x: 440, y: 280, w: 20, h: 160, type: 'wall' },
-      { x: 580, y: 140, w: 20, h: 220, type: 'wall' },
-      { x: 200, y: 80, w: 50, h: 40, type: 'server' },
-      { x: 200, y: 380, w: 50, h: 40, type: 'server' },
-      { x: 350, y: 230, w: 60, h: 40, type: 'server' },
-      { x: 500, y: 80, w: 50, h: 40, type: 'server' },
-      { x: 500, y: 380, w: 50, h: 40, type: 'server' },
-      { x: 60, y: 60, w: 40, h: 40, type: 'vent' },
-      { x: 60, y: 400, w: 40, h: 40, type: 'vent' },
-      { x: 360, y: 80, w: 40, h: 40, type: 'vent' },
-      { x: 360, y: 380, w: 40, h: 40, type: 'vent' },
-    ],
-    guards: [
-      {
-        id: 1,
-        x: 210,
-        y: 100,
-        vx: 0,
-        vy: 0,
-        angle: Math.PI / 2,
-        targetAngle: Math.PI / 2,
-        speed: 1.6,
-        waypoints: [
-          { x: 210, y: 100 },
-          { x: 210, y: 400 },
-        ],
-        currentWaypoint: 0,
-        state: 'patrol',
-        searchTimer: 0,
-        visionRange: 150,
-        visionAngle: Math.PI / 3,
-      },
-      {
-        id: 2,
-        x: 360,
-        y: 400,
-        vx: 0,
-        vy: 0,
-        angle: -Math.PI / 2,
-        targetAngle: -Math.PI / 2,
-        speed: 1.7,
-        waypoints: [
-          { x: 360, y: 400 },
-          { x: 360, y: 100 },
-        ],
-        currentWaypoint: 0,
-        state: 'patrol',
-        searchTimer: 0,
-        visionRange: 150,
-        visionAngle: Math.PI / 3,
-      },
-      {
-        id: 3,
-        x: 510,
-        y: 100,
-        vx: 0,
-        vy: 0,
-        angle: Math.PI / 2,
-        targetAngle: Math.PI / 2,
-        speed: 1.7,
-        waypoints: [
-          { x: 510, y: 100 },
-          { x: 510, y: 400 },
-        ],
-        currentWaypoint: 0,
-        state: 'patrol',
-        searchTimer: 0,
-        visionRange: 150,
-        visionAngle: Math.PI / 3,
-      },
-      {
-        id: 4,
-        x: 650,
-        y: 250,
-        vx: 0,
-        vy: 0,
-        angle: Math.PI,
-        targetAngle: Math.PI,
-        speed: 1.8,
-        waypoints: [
-          { x: 650, y: 100 },
-          { x: 650, y: 400 },
-        ],
-        currentWaypoint: 0,
-        state: 'patrol',
-        searchTimer: 0,
-        visionRange: 150,
-        visionAngle: Math.PI / 3,
-      },
-    ],
-    cameras: [
-      {
-        x: 290,
-        y: 50,
-        angle: Math.PI / 2,
-        minAngle: Math.PI / 4,
-        maxAngle: (3 * Math.PI) / 4,
-        rotSpeed: 0.025,
-        range: 170,
-        fov: Math.PI / 3.5,
-        disabled: false,
-        disableTimer: 0,
-      },
-      {
-        x: 590,
-        y: 450,
-        angle: -Math.PI / 2,
-        minAngle: (-3 * Math.PI) / 4,
-        maxAngle: -Math.PI / 4,
-        rotSpeed: 0.025,
-        range: 170,
-        fov: Math.PI / 3.5,
-        disabled: false,
-        disableTimer: 0,
-      },
-    ],
-    lasers: [
-      {
-        x1: 150,
-        y1: 240,
-        x2: 280,
-        y2: 240,
-        active: true,
-        cycleTime: 2800,
-        cycleTimer: 0,
-        activeDuration: 1500,
-      },
-      {
-        x1: 300,
-        y1: 120,
-        x2: 440,
-        y2: 120,
-        active: true,
-        cycleTime: 2800,
-        cycleTimer: 1000,
-        activeDuration: 1500,
-      },
-      {
-        x1: 450,
-        y1: 240,
-        x2: 580,
-        y2: 240,
-        active: true,
-        cycleTime: 2800,
-        cycleTimer: 500,
-        activeDuration: 1500,
-      },
-    ],
-    terminals: [
-      { x: 210, y: 60, type: 'intel', hacked: false, progress: 0, label: 'CORE DATA 1' },
-      { x: 360, y: 240, type: 'intel', hacked: false, progress: 0, label: 'CORE DATA 2' },
-      { x: 510, y: 420, type: 'intel', hacked: false, progress: 0, label: 'QUANTUM KEY' },
-      { x: 650, y: 60, type: 'camera_jam', hacked: false, progress: 0, label: 'GLOBAL JAMMER' },
-    ],
-  },
-];
 
 export default function NeonHeistGame({ onGameOver, onScoreUpdate, highScore }: NeonHeistGameProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const [gameState, setGameState] = useState<'ready' | 'countdown' | 'playing' | 'paused' | 'gameover'>('ready');
-  const [countdown, setCountdown] = useState(3);
+  const {
+    gameState, setGameState, gameStateRef, countdown, score, updateScore, triggerGameOver,
+    startWithCountdown, startLoop, stopLoop, setupCanvasContext, perfSettings
+  } = useGameEngine({
+    onScoreUpdate, onGameOver
+  });
   const [currentLevelIndex, setCurrentLevelIndex] = useState(0);
-  const [totalScore, setTotalScore] = useState(0);
   const [alarmLevel, setAlarmLevel] = useState<0 | 1 | 2>(0); // 0: normal, 1: suspicious, 2: alert
   const [intelCollected, setIntelCollected] = useState(0);
   const [intelRequired, setIntelRequired] = useState(2);
   const [distractionCharges, setDistractionCharges] = useState(3);
   const [stealthRank, setStealthRank] = useState<'Ghost' | 'Shadow' | 'Phantom' | 'Detected'>('Ghost');
 
-  const gameStateRef = useRef(gameState);
-  const totalScoreRef = useRef(0);
   const alarmLevelRef = useRef<0 | 1 | 2>(0);
-  const gameLoopRef = useRef<number | null>(null);
-  const lastTimeRef = useRef(0);
   const levelsRef = useRef<LevelData[]>(generateLevels());
   const currentLevelRef = useRef<LevelData>(levelsRef.current[0]);
 
@@ -549,20 +62,7 @@ export default function NeonHeistGame({ onGameOver, onScoreUpdate, highScore }: 
   // Active keys
   const keysRef = useRef<{ [key: string]: boolean }>({});
 
-  useEffect(() => {
-    gameStateRef.current = gameState;
-  }, [gameState]);
 
-  // Handle visibility change
-  useEffect(() => {
-    const handleVis = () => {
-      if (document.hidden && gameStateRef.current === 'playing') {
-        setGameState('paused');
-      }
-    };
-    document.addEventListener('visibilitychange', handleVis);
-    return () => document.removeEventListener('visibilitychange', handleVis);
-  }, []);
 
   const initLevel = useCallback((lvlIndex: number) => {
     const lvl = JSON.parse(JSON.stringify(levelsRef.current[lvlIndex % levelsRef.current.length])) as LevelData;
@@ -630,65 +130,40 @@ export default function NeonHeistGame({ onGameOver, onScoreUpdate, highScore }: 
   const startGame = useCallback(() => {
     levelsRef.current = generateLevels();
     initLevel(0);
-    totalScoreRef.current = 0;
-    setTotalScore(0);
+    updateScore(0);
     setDistractionCharges(3);
     setStealthRank('Ghost');
-    setGameState('countdown');
-    setCountdown(3);
-    audio.playCountdown();
+    startWithCountdown();
   }, [initLevel]);
 
-  // Countdown timer
-  useEffect(() => {
-    if (gameState !== 'countdown') return;
-    if (countdown > 1) {
-      const t = setTimeout(() => {
-        setCountdown((c) => c - 1);
-        audio.playCountdown();
-      }, 700);
-      return () => clearTimeout(t);
-    } else {
-      const t = setTimeout(() => {
-        setGameState('playing');
-        audio.playCoin();
-      }, 700);
-      return () => clearTimeout(t);
-    }
-  }, [gameState, countdown]);
-
   // Unified input subscription
-  useEffect(() => {
-    const unsub = inputManager.subscribe({
-      onActionDown: (action) => {
-        if (gameStateRef.current === 'ready') {
-          if (action === 'PRIMARY') startGame();
-          return;
+  useUnifiedInput({
+    onActionDown: (action) => {
+      if (gameStateRef.current === 'ready') {
+        if (action === 'PRIMARY') startGame();
+        return;
+      }
+      if (gameStateRef.current === 'gameover') {
+        if (action === 'PRIMARY' || action === 'RESTART') startGame();
+        return;
+      }
+      if (gameStateRef.current === 'playing') {
+        if (action === 'PAUSE') setGameState('paused');
+        if (action === 'SECONDARY') {
+          const angle = playerRef.current.angle;
+          const targetX = playerRef.current.x + Math.cos(angle) * 120;
+          const targetY = playerRef.current.y + Math.sin(angle) * 120;
+          throwDistraction(targetX, targetY);
         }
-        if (gameStateRef.current === 'gameover') {
-          if (action === 'PRIMARY' || action === 'RESTART') startGame();
-          return;
-        }
-        if (gameStateRef.current === 'playing') {
-          if (action === 'PAUSE') setGameState('paused');
-          if (action === 'SECONDARY') {
-            // Throw distraction forward
-            const angle = playerRef.current.angle;
-            const targetX = playerRef.current.x + Math.cos(angle) * 120;
-            const targetY = playerRef.current.y + Math.sin(angle) * 120;
-            throwDistraction(targetX, targetY);
-          }
-        } else if (gameStateRef.current === 'paused') {
-          if (action === 'PAUSE' || action === 'PRIMARY') setGameState('playing');
-        }
-      },
-      onRawKey: (key, isDown) => {
-        keysRef.current[key.toLowerCase()] = isDown;
-        keysRef.current[key] = isDown;
-      },
-    });
-    return () => unsub();
-  }, [startGame, throwDistraction]);
+      } else if (gameStateRef.current === 'paused') {
+        if (action === 'PAUSE' || action === 'PRIMARY') setGameState('playing');
+      }
+    },
+    onRawKey: (key, isDown) => {
+      keysRef.current[key.toLowerCase()] = isDown;
+      keysRef.current[key] = isDown;
+    }
+  });
 
   // Handle canvas click for distraction
   const handleCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -705,20 +180,11 @@ export default function NeonHeistGame({ onGameOver, onScoreUpdate, highScore }: 
 
   // Main game loop
   useEffect(() => {
-    let animId: number;
-
-    const loop = (timestamp: number) => {
-      animId = requestAnimationFrame(loop);
-      gameLoopRef.current = animId;
-
-      if (!lastTimeRef.current) lastTimeRef.current = timestamp;
-      const dt = Math.min((timestamp - lastTimeRef.current) / 1000, 0.1);
-      lastTimeRef.current = timestamp;
-
-      const canvas = canvasRef.current;
-      if (!canvas) return;
-      const ctx = canvas.getContext('2d');
-      if (!ctx) return;
+    if (gameState === 'playing') {
+      startLoop((timestamp, dtMs) => {
+        const dt = Math.min(dtMs / 1000, 0.1);
+        const ctx = setupCanvasContext(canvasRef.current, CANVAS_WIDTH, CANVAS_HEIGHT);
+        if (!ctx) return;
 
       const lvl = currentLevelRef.current;
       const player = playerRef.current;
@@ -747,8 +213,10 @@ export default function NeonHeistGame({ onGameOver, onScoreUpdate, highScore }: 
           player.angle = Math.atan2(dy, dx);
         }
 
-        let newX = player.x + dx * currentSpeed;
-        let newY = player.y + dy * currentSpeed;
+        const dtScale = dt * 60; // Assuming 60fps baseline for old speed values
+
+        let newX = player.x + dx * currentSpeed * dtScale;
+        let newY = player.y + dy * currentSpeed * dtScale;
 
         // Collision with canvas bounds
         newX = Math.max(player.radius, Math.min(CANVAS_WIDTH - player.radius, newX));
@@ -889,8 +357,7 @@ export default function NeonHeistGame({ onGameOver, onScoreUpdate, highScore }: 
               setAlarmLevel(2);
               if (player.health <= 0) {
                 audio.playGameOver();
-                setGameState('gameover');
-                onGameOver(totalScoreRef.current);
+                triggerGameOver();
               }
             }
           }
@@ -908,26 +375,26 @@ export default function NeonHeistGame({ onGameOver, onScoreUpdate, highScore }: 
               guard.currentWaypoint = (guard.currentWaypoint + 1) % guard.waypoints.length;
             } else {
               guard.targetAngle = Math.atan2(wp.y - guard.y, wp.x - guard.x);
-              guard.x += Math.cos(guard.targetAngle) * guard.speed;
-              guard.y += Math.sin(guard.targetAngle) * guard.speed;
+              guard.x += Math.cos(guard.targetAngle) * guard.speed * dtScale;
+              guard.y += Math.sin(guard.targetAngle) * guard.speed * dtScale;
             }
           } else if (guard.state === 'suspicious' && guard.investigatePos) {
             const dist = Math.hypot(guard.investigatePos.x - guard.x, guard.investigatePos.y - guard.y);
             if (dist < 10) {
               guard.searchTimer--;
-              guard.angle += 0.05;
+              guard.angle += 0.05 * dtScale;
               if (guard.searchTimer <= 0) {
                 guard.state = 'patrol';
               }
             } else {
               guard.targetAngle = Math.atan2(guard.investigatePos.y - guard.y, guard.investigatePos.x - guard.x);
-              guard.x += Math.cos(guard.targetAngle) * (guard.speed * 1.2);
-              guard.y += Math.sin(guard.targetAngle) * (guard.speed * 1.2);
+              guard.x += Math.cos(guard.targetAngle) * (guard.speed * 1.2) * dtScale;
+              guard.y += Math.sin(guard.targetAngle) * (guard.speed * 1.2) * dtScale;
             }
           } else if (guard.state === 'chase') {
             guard.targetAngle = Math.atan2(player.y - guard.y, player.x - guard.x);
-            guard.x += Math.cos(guard.targetAngle) * (guard.speed * 1.8);
-            guard.y += Math.sin(guard.targetAngle) * (guard.speed * 1.8);
+            guard.x += Math.cos(guard.targetAngle) * (guard.speed * 1.8) * dtScale;
+            guard.y += Math.sin(guard.targetAngle) * (guard.speed * 1.8) * dtScale;
 
             // Damage player if reached
             const distToPlayer = Math.hypot(player.x - guard.x, player.y - guard.y);
@@ -937,8 +404,7 @@ export default function NeonHeistGame({ onGameOver, onScoreUpdate, highScore }: 
               spawnParticles(player.x, player.y, '#f43f5e', 4);
               if (player.health <= 0) {
                 audio.playGameOver();
-                setGameState('gameover');
-                onGameOver(totalScoreRef.current);
+                triggerGameOver();
               }
             }
           }
@@ -947,7 +413,7 @@ export default function NeonHeistGame({ onGameOver, onScoreUpdate, highScore }: 
           let angleDiff = guard.targetAngle - guard.angle;
           while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
           while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
-          guard.angle += angleDiff * 0.1;
+          guard.angle += angleDiff * 0.1 * dtScale;
 
           // Vision check
           if (!player.isHidden) {
@@ -1017,24 +483,18 @@ export default function NeonHeistGame({ onGameOver, onScoreUpdate, highScore }: 
                 setIntelCollected((prev) => {
                   const next = prev + 1;
                   const pts = 250;
-                  totalScoreRef.current += pts;
-                  setTotalScore(totalScoreRef.current);
-                  onScoreUpdate(totalScoreRef.current);
+                  updateScore(score + pts);
                   return next;
                 });
               } else if (term.type === 'laser_switch') {
                 lvl.lasers.forEach((l) => (l.active = false));
-                totalScoreRef.current += 150;
-                setTotalScore(totalScoreRef.current);
-                onScoreUpdate(totalScoreRef.current);
+                updateScore(score + 150);
               } else if (term.type === 'camera_jam') {
                 lvl.cameras.forEach((c) => {
                   c.disabled = true;
                   c.disableTimer = 12000;
                 });
-                totalScoreRef.current += 150;
-                setTotalScore(totalScoreRef.current);
-                onScoreUpdate(totalScoreRef.current);
+                updateScore(score + 150);
               }
             }
           } else {
@@ -1057,17 +517,14 @@ export default function NeonHeistGame({ onGameOver, onScoreUpdate, highScore }: 
           const stealthBonus = detectionCounterRef.current === 0 ? 500 : 200;
           const levelTotal = 500 + timeBonus + stealthBonus;
 
-          totalScoreRef.current += levelTotal;
-          setTotalScore(totalScoreRef.current);
-          onScoreUpdate(totalScoreRef.current);
+          updateScore(score + levelTotal);
 
           if (currentLevelIndex + 1 < levelsRef.current.length) {
             initLevel(currentLevelIndex + 1);
           } else {
             // Victory / Game Complete!
             audio.playLevelUp();
-            setGameState('gameover');
-            onGameOver(totalScoreRef.current);
+            triggerGameOver();
           }
         }
 
@@ -1332,13 +789,9 @@ export default function NeonHeistGame({ onGameOver, onScoreUpdate, highScore }: 
         ctx.fillStyle = `rgba(239, 68, 68, ${strobe * 0.15})`;
         ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
       }
-    };
-
-    animId = requestAnimationFrame(loop);
-    return () => {
-      if (animId) cancelAnimationFrame(animId);
-    };
-  }, [gameState, onGameOver, onScoreUpdate, currentLevelIndex, intelCollected, initLevel]);
+      });
+    }
+  }, [gameState, startLoop, setupCanvasContext, currentLevelIndex, initLevel, intelCollected, triggerGameOver, updateScore, score]);
 
   return (
     <div className="relative w-full h-full flex flex-col items-center justify-center select-none bg-[#090b10] font-sans">
@@ -1379,7 +832,7 @@ export default function NeonHeistGame({ onGameOver, onScoreUpdate, highScore }: 
 
           <div className="px-3 py-1 bg-zinc-900/90 border border-white/10 rounded-xl flex items-center gap-2">
             <span className="text-zinc-400">SKOR:</span>
-            <span className="text-yellow-400 font-bold">{totalScore}</span>
+            <span className="text-yellow-400 font-bold">{score}</span>
           </div>
         </div>
       </div>
@@ -1395,7 +848,7 @@ export default function NeonHeistGame({ onGameOver, onScoreUpdate, highScore }: 
       <GameOverlay
         gameState={gameState}
         countdown={countdown}
-        score={totalScore}
+        score={score}
         highScore={highScore}
         onStart={startGame}
         onResume={() => setGameState('playing')}

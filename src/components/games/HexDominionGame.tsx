@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { audio } from '../../utils/audio';
-import { inputManager } from '../../services/inputService';
+import { useGameEngine } from '../../hooks/useGameEngine';
+import { useUnifiedInput } from '../../hooks/useUnifiedInput';
 import { GameOverlay } from '../gameplay/GameOverlay';
 import { Shield, Zap, Crosshair, Award, Radio, RotateCcw, Play, CheckCircle2, AlertTriangle, Swords } from 'lucide-react';
 
@@ -114,22 +115,25 @@ interface FloatingText {
 export default function HexDominionGame({ onGameOver, onScoreUpdate, highScore }: HexDominionGameProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
-  const [gameState, setGameState] = useState<'ready' | 'countdown' | 'playing' | 'paused' | 'gameover'>('ready');
-  const [countdown, setCountdown] = useState(3);
+  const {
+    gameState, setGameState, gameStateRef, countdown, score, updateScore, triggerGameOver,
+    startWithCountdown, startLoop, stopLoop, setupCanvasContext, perfSettings,
+  scoreRef,
+    gameLoopRef
+  } = useGameEngine({
+    onScoreUpdate, onGameOver
+  });
   const [turn, setTurn] = useState<'player' | 'enemy'>('player');
   const [roundNumber, setRoundNumber] = useState(1);
   const [playerEnergy, setPlayerEnergy] = useState(120);
   const [enemyEnergy, setEnemyEnergy] = useState(120);
-  const [playerScore, setPlayerScore] = useState(0);
 
   const [selectedCell, setSelectedCell] = useState<HexCell | null>(null);
   const [selectedUnit, setSelectedUnit] = useState<Unit | null>(null);
   const [spawnMenuUnit, setSpawnMenuUnit] = useState<UnitType | null>(null);
   const [isAiThinking, setIsAiThinking] = useState(false);
 
-  const gameStateRef = useRef(gameState);
   const turnRef = useRef<'player' | 'enemy'>('player');
-  const playerScoreRef = useRef(0);
   const playerEnergyRef = useRef(120);
   const enemyEnergyRef = useRef(120);
 
@@ -192,19 +196,8 @@ export default function HexDominionGame({ onGameOver, onScoreUpdate, highScore }
   };
 
   useEffect(() => { gameStateRef.current = gameState; }, [gameState]);
-  useEffect(() => { turnRef.current = turn; }, [turn]);
 
   // Tab visibility auto-pause
-  useEffect(() => {
-    const handleVis = () => {
-      if (document.hidden && gameStateRef.current === 'playing') {
-        setGameState('paused');
-      }
-    };
-    document.addEventListener('visibilitychange', handleVis);
-    return () => document.removeEventListener('visibilitychange', handleVis);
-  }, []);
-
   const spawnParticles = (x: number, y: number, color: string, count = 10) => {
     for (let i = 0; i < count; i++) {
       const angle = Math.random() * Math.PI * 2;
@@ -300,53 +293,33 @@ export default function HexDominionGame({ onGameOver, onScoreUpdate, highScore }
     turnRef.current = 'player';
     setSelectedCell(null);
     setSelectedUnit(null);
-    playerScoreRef.current = 0;
-    setPlayerScore(0);
+    updateScore(0);
 
-    setGameState('countdown');
-    setCountdown(3);
-    audio.playCountdown();
+    startWithCountdown();
   }, []);
 
-  // Countdown timer
-  useEffect(() => {
-    if (gameState !== 'countdown') return;
-    if (countdown > 1) {
-      const t = setTimeout(() => {
-        setCountdown((c) => c - 1);
-        audio.playCountdown();
-      }, 700);
-      return () => clearTimeout(t);
-    } else {
-      const t = setTimeout(() => {
-        setGameState('playing');
-        audio.playCoin();
-      }, 700);
-      return () => clearTimeout(t);
-    }
-  }, [gameState, countdown]);
 
   // Unified input subscription
-  useEffect(() => {
-    const unsub = inputManager.subscribe({
-      onActionDown: (action) => {
-        if (gameStateRef.current === 'ready') {
-          if (action === 'PRIMARY') startGame();
-          return;
-        }
-        if (gameStateRef.current === 'gameover') {
-          if (action === 'PRIMARY' || action === 'RESTART') startGame();
-          return;
-        }
-        if (gameStateRef.current === 'playing') {
-          if (action === 'PAUSE') setGameState('paused');
-        } else if (gameStateRef.current === 'paused') {
-          if (action === 'PAUSE' || action === 'PRIMARY') setGameState('playing');
-        }
-      },
-    });
-    return () => unsub();
-  }, [startGame]);
+    useUnifiedInput({
+    onActionDown: (action) => {
+      if (gameStateRef.current === 'ready') {
+        if (action === 'PRIMARY') startGame();
+        return;
+      }
+      if (gameStateRef.current === 'gameover') {
+        if (action === 'PRIMARY' || action === 'RESTART') startGame();
+        return;
+      }
+      if (gameStateRef.current === 'playing') {
+        if (action === 'PAUSE') setGameState('paused');
+      } else if (gameStateRef.current === 'paused') {
+        if (action === 'PAUSE' || action === 'PRIMARY') setGameState('playing');
+      }
+    },
+    onRawKey: (key, isDown) => {
+      // no-op for now unless keyboard mapping is needed
+    }
+  });
 
   // Check Victory Condition
   const checkVictory = useCallback(() => {
@@ -357,19 +330,15 @@ export default function HexDominionGame({ onGameOver, onScoreUpdate, highScore }
       // Player Victory!
       audio.playLevelUp();
       const winBonus = 2000 + Math.max(0, 500 - roundNumber * 30);
-      playerScoreRef.current += winBonus;
-      setPlayerScore(playerScoreRef.current);
-      onScoreUpdate(playerScoreRef.current);
-      setGameState('gameover');
-      onGameOver(playerScoreRef.current);
+      updateScore(score + winBonus);
+      triggerGameOver();
       return true;
     }
 
     if (!playerBase || (playerBase.hp && playerBase.hp <= 0)) {
       // Player Defeated
       audio.playGameOver();
-      setGameState('gameover');
-      onGameOver(playerScoreRef.current);
+      triggerGameOver();
       return true;
     }
 
@@ -626,9 +595,7 @@ export default function HexDominionGame({ onGameOver, onScoreUpdate, highScore }
         // Capture hex node
         if ((clickedCell as HexCell).owner !== 'player' && (clickedCell as HexCell).type !== 'base_enemy') {
           (clickedCell as HexCell).owner = 'player';
-          playerScoreRef.current += 100;
-          setPlayerScore(playerScoreRef.current);
-          onScoreUpdate(playerScoreRef.current);
+          updateScore(score + 100);
           spawnParticles((clickedCell as HexCell).x, (clickedCell as HexCell).y, '#06b6d4', 12);
         }
 
@@ -649,9 +616,7 @@ export default function HexDominionGame({ onGameOver, onScoreUpdate, highScore }
 
         if (clickedUnit.hp <= 0) {
           unitsRef.current = unitsRef.current.filter((u) => u.id !== clickedUnit.id);
-          playerScoreRef.current += 250;
-          setPlayerScore(playerScoreRef.current);
-          onScoreUpdate(playerScoreRef.current);
+          updateScore(score + 250);
           audio.playExplosion();
         }
 
@@ -686,31 +651,36 @@ export default function HexDominionGame({ onGameOver, onScoreUpdate, highScore }
     }
   };
 
-  // Main 60 FPS requestAnimationFrame render loop
-  useEffect(() => {
-    let animId: number;
+  const needsRedrawRef = useRef(true);
 
-    const loop = () => {
-      animId = requestAnimationFrame(loop);
+  // Main game loop via useGameEngine
+  const gameStep = useCallback((timestamp: number, dtMs: number) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
 
-      const canvas = canvasRef.current;
-      if (!canvas) return;
-      const ctx = canvas.getContext('2d');
-      if (!ctx) return;
+    let hasAnimations = floatingTextsRef.current.length > 0 || particlesRef.current.length > 0;
 
-      // UPDATE FLOATING TEXTS & PARTICLES
-      floatingTextsRef.current.forEach((ft) => {
-        ft.y += ft.vy;
-        ft.alpha -= 0.02;
-      });
-      floatingTextsRef.current = floatingTextsRef.current.filter((ft) => ft.alpha > 0);
+    if (!needsRedrawRef.current && !hasAnimations) {
+      return; // Skip rendering if idle
+    }
 
-      particlesRef.current.forEach((p) => {
-        p.x += p.vx;
-        p.y += p.vy;
-        p.alpha -= 0.025;
-      });
-      particlesRef.current = particlesRef.current.filter((p) => p.alpha > 0);
+    needsRedrawRef.current = false; // Reset flag after drawing
+
+    // UPDATE FLOATING TEXTS & PARTICLES
+    floatingTextsRef.current.forEach((ft) => {
+      ft.y += ft.vy;
+      ft.alpha -= 0.02;
+    });
+    floatingTextsRef.current = floatingTextsRef.current.filter((ft) => ft.alpha > 0);
+
+    particlesRef.current.forEach((p) => {
+      p.x += p.vx;
+      p.y += p.vy;
+      p.alpha -= 0.025;
+    });
+    particlesRef.current = particlesRef.current.filter((p) => p.alpha > 0);
 
       // RENDER PHASE
       ctx.fillStyle = '#080a10';
@@ -874,13 +844,19 @@ export default function HexDominionGame({ onGameOver, onScoreUpdate, highScore }
         ctx.fillText(ft.text, ft.x, ft.y);
         ctx.globalAlpha = 1;
       });
-    };
+    }, [selectedCell, selectedUnit]);
 
-    animId = requestAnimationFrame(loop);
-    return () => {
-      if (animId) cancelAnimationFrame(animId);
-    };
-  }, [selectedCell, selectedUnit]);
+    useEffect(() => {
+      needsRedrawRef.current = true;
+    }, [selectedCell, selectedUnit, turn, roundNumber, playerEnergy, enemyEnergy, gameState]);
+
+    useEffect(() => {
+      if (gameState === 'playing') {
+        startLoop(gameStep);
+      } else {
+        if (gameLoopRef?.current) cancelAnimationFrame(gameLoopRef.current);
+      }
+    }, [gameState, startLoop, stopLoop, gameStep]);
 
   return (
     <div className="relative w-full h-full flex flex-col items-center justify-between select-none bg-[#080a10] font-sans">
@@ -926,7 +902,7 @@ export default function HexDominionGame({ onGameOver, onScoreUpdate, highScore }
 
           <div className="px-3 py-1 bg-zinc-900/90 border border-white/10 rounded-xl flex items-center gap-2">
             <span className="text-zinc-400">SKOR:</span>
-            <span className="text-yellow-400 font-bold">{playerScore}</span>
+            <span className="text-yellow-400 font-bold">{score}</span>
           </div>
         </div>
       </div>
@@ -974,7 +950,7 @@ export default function HexDominionGame({ onGameOver, onScoreUpdate, highScore }
       <GameOverlay
         gameState={gameState}
         countdown={countdown}
-        score={playerScore}
+        score={score}
         highScore={highScore}
         onStart={startGame}
         onResume={() => setGameState('playing')}

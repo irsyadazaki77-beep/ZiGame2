@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { audio } from '../../utils/audio';
+import { useGameEngine } from '../../hooks/useGameEngine';
 import { inputManager } from '../../services/inputService';
 import { GameOverlay } from '../gameplay/GameOverlay';
 import { Sparkles, Trophy, Zap } from 'lucide-react';
@@ -57,18 +58,30 @@ export default function CyberRunnerGame({ onGameOver, onScoreUpdate, highScore }
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
 
-  const [gameState, setGameState] = useState<'ready' | 'countdown' | 'playing' | 'paused' | 'gameover'>('ready');
-  const [countdown, setCountdown] = useState(3);
-  const [score, setScore] = useState(0);
+  const {
+    gameState,
+    setGameState,
+    score,
+    updateScore,
+    addScore,
+    startLoop,
+    stopLoop,
+    triggerGameOver,
+    startWithCountdown,
+    countdown,
+    gameLoopRef
+  } = useGameEngine({
+    gameId: 'cyberrunner',
+    onGameOver,
+    onScoreUpdate,
+  });
+
   const [combo, setCombo] = useState(0);
   const [distance, setDistance] = useState(0);
 
   const gameStateRef = useRef(gameState);
-  const scoreRef = useRef(0);
   const comboRef = useRef(0);
   const comboTimerRef = useRef(0);
-  const gameLoopRef = useRef<number | null>(null);
-  const lastTimeRef = useRef<number>(0);
   const hitStopRef = useRef<number>(0);
   const shakeRef = useRef<number>(0);
 
@@ -121,7 +134,7 @@ export default function CyberRunnerGame({ onGameOver, onScoreUpdate, highScore }
     initSkyline();
     draw();
     return () => {
-      if (gameLoopRef.current) cancelAnimationFrame(gameLoopRef.current);
+      if (gameLoopRef?.current) cancelAnimationFrame(gameLoopRef.current);
     };
   }, [initSkyline]);
 
@@ -197,9 +210,7 @@ export default function CyberRunnerGame({ onGameOver, onScoreUpdate, highScore }
   }, []);
 
   const resetGame = useCallback(() => {
-    scoreRef.current = 0;
-    setScore(0);
-    onScoreUpdate(0);
+    updateScore(0);
     setDistance(0);
     comboRef.current = 0;
     setCombo(0);
@@ -233,30 +244,14 @@ export default function CyberRunnerGame({ onGameOver, onScoreUpdate, highScore }
 
     initSkyline();
     draw();
-  }, [initSkyline, onScoreUpdate]);
+  }, [initSkyline, updateScore]);
 
   const startGame = useCallback(() => {
     resetGame();
-    setGameState('countdown');
-    setCountdown(3);
-    audio.playCountdownTick();
-
-    let count = 3;
-    const interval = setInterval(() => {
-      count--;
-      if (count > 0) {
-        setCountdown(count);
-        audio.playCountdownTick();
-      } else {
-        clearInterval(interval);
-        audio.playCountdownGo();
-        setGameState('playing');
-        lastTimeRef.current = performance.now();
-        if (gameLoopRef.current) cancelAnimationFrame(gameLoopRef.current);
-        gameLoopRef.current = requestAnimationFrame(gameLoop);
-      }
-    }, 800);
-  }, [resetGame]);
+    startWithCountdown(() => {
+      startLoop(gameStep);
+    });
+  }, [resetGame, startWithCountdown, startLoop]);
 
   // Keyboard controls
   useEffect(() => {
@@ -336,26 +331,18 @@ export default function CyberRunnerGame({ onGameOver, onScoreUpdate, highScore }
     }
   };
 
-  const gameLoop = (timestamp: number) => {
+  const gameStep = useCallback((timestamp: number, dt: number) => {
     if (gameStateRef.current !== 'playing') return;
-
-    const dt = Math.min(timestamp - lastTimeRef.current, 100);
-    lastTimeRef.current = timestamp;
 
     if (hitStopRef.current > 0) {
       hitStopRef.current -= dt;
       draw();
-      gameLoopRef.current = requestAnimationFrame(gameLoop);
       return;
     }
 
     updatePhysics(dt);
     draw();
-
-    if (gameStateRef.current === 'playing') {
-      gameLoopRef.current = requestAnimationFrame(gameLoop);
-    }
-  };
+  }, []);
 
   const updatePhysics = (dt: number) => {
     const p = playerRef.current;
@@ -371,7 +358,7 @@ export default function CyberRunnerGame({ onGameOver, onScoreUpdate, highScore }
 
     // Distance progression & gradual speed increase
     setDistance(d => d + 1);
-    speedMultRef.current = Math.min(1.75, 1 + scoreRef.current * 0.003);
+    speedMultRef.current = Math.min(1.75, 1 + score * 0.003);
 
     // Player Height based on ducking
     p.height = p.isDucking ? p.duckHeight : p.normalHeight;
@@ -402,7 +389,7 @@ export default function CyberRunnerGame({ onGameOver, onScoreUpdate, highScore }
 
     // Spawning logic
     spawnTimerRef.current += dt;
-    const spawnInterval = Math.max(900, 1900 - scoreRef.current * 8);
+    const spawnInterval = Math.max(900, 1900 - score * 8);
     if (spawnTimerRef.current >= spawnInterval) {
       spawnObstacle();
       spawnTimerRef.current = 0;
@@ -438,9 +425,7 @@ export default function CyberRunnerGame({ onGameOver, onScoreUpdate, highScore }
           obs.nearMissed = true;
           audio.playNearMiss();
           const bonus = 10;
-          scoreRef.current += bonus;
-          setScore(scoreRef.current);
-          onScoreUpdate(scoreRef.current);
+          addScore(bonus);
           spawnFloatingText(p.x + 20, p.y - 12, 'SLIDE BONUS! +10', '#38bdf8');
           shakeRef.current = 2;
         }
@@ -461,9 +446,7 @@ export default function CyberRunnerGame({ onGameOver, onScoreUpdate, highScore }
       if (!obs.passed && obs.x + obs.width < p.x) {
         obs.passed = true;
         const passBonus = 5;
-        scoreRef.current += passBonus;
-        setScore(scoreRef.current);
-        onScoreUpdate(scoreRef.current);
+        addScore(passBonus);
       }
     }
 
@@ -486,9 +469,7 @@ export default function CyberRunnerGame({ onGameOver, onScoreUpdate, highScore }
         setCombo(newCombo);
 
         const earned = c.value * newCombo;
-        scoreRef.current += earned;
-        setScore(scoreRef.current);
-        onScoreUpdate(scoreRef.current);
+        addScore(earned);
 
         audio.playCombo(newCombo);
         inputManager.vibrateGamepad(40, 0.3);
@@ -526,9 +507,7 @@ export default function CyberRunnerGame({ onGameOver, onScoreUpdate, highScore }
     const p = playerRef.current;
     spawnParticles(p.x + p.width / 2, p.y + p.height / 2, '#f43f5e', 24, 3.5);
 
-    setGameState('gameover');
-    if (gameLoopRef.current) cancelAnimationFrame(gameLoopRef.current);
-    onGameOver(scoreRef.current);
+    triggerGameOver();
   };
 
   const draw = () => {

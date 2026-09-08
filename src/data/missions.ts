@@ -1,54 +1,107 @@
 import { DailyMission, GameStats } from '../types';
 
+// Use UTC for daily reset to prevent local clock manipulation
 export const getTodayDateString = (): string => {
-  return new Date().toLocaleDateString('en-CA');
+  const d = new Date();
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
 };
+
+// Seeded random number generator
+function sfc32(a: number, b: number, c: number, d: number) {
+  return function() {
+    a >>>= 0; b >>>= 0; c >>>= 0; d >>>= 0; 
+    let t = (a + b) | 0;
+    a = b ^ b >>> 9;
+    b = c + (c << 3) | 0;
+    c = (c << 21 | c >>> 11);
+    d = d + 1 | 0;
+    t = t + d | 0;
+    c = c + t | 0;
+    return (t >>> 0) / 4294967296;
+  }
+}
 
 export const generateDailyMissions = (games: GameStats[]): DailyMission[] => {
   const date = getTodayDateString();
-  const seed = new Date().getDate(); 
   
+  // Create a seed based on the date string
+  let seedNum = 0;
+  for (let i = 0; i < date.length; i++) {
+    seedNum += date.charCodeAt(i) * Math.pow(10, i % 3);
+  }
+  const rand = sfc32(seedNum, seedNum * 2, seedNum * 3, 1);
+
   const missions: DailyMission[] = [];
   
-  // Mission 1: Specific game challenge (more meaningful than just 'play')
+  // Mission 1: Specific game challenge
   if (games.length > 0) {
-    const gameIdx = seed % games.length;
+    const gameIdx = Math.floor(rand() * games.length);
     const selectedGame = games[gameIdx];
-    const target = 50 + (seed % 3) * 50; // 50, 100, 150
+    // Vary the target
+    const targetScore = 500 + Math.floor(rand() * 5) * 500;
     missions.push({
       id: `m_${date}_1`,
       type: 'score_target',
-      target: target,
+      target: targetScore,
       progress: 0,
-      rewardCoins: target,
+      rewardCoins: 100,
       completed: false,
       gameId: selectedGame.id,
-      description: `Buktikan keahlian: Raih skor ${target} di ${selectedGame.title}`,
+      description: `Raih skor minimal ${targetScore} di game ${selectedGame.title}`,
       date
     });
   }
 
-  // Mission 2: Beat High Score (simulated by checking if highscore changes during the day)
-  missions.push({
-    id: `m_${date}_2`,
-    type: 'unique_games', // We'll just hijack this type and handle it in App.tsx as 'beat_highscore'
-    target: 1,
-    progress: 0,
-    rewardCoins: 100,
-    completed: false,
-    description: `Lampaui batas: Pecahkan rekor tertinggi Anda di game apa pun hari ini`,
-    date
-  });
+  // Mission 2: Meaningful Engagement
+  const mission2Types = ['beat_pb', 'total_score', 'play_genre_count'];
+  const m2Type = mission2Types[Math.floor(rand() * mission2Types.length)];
+  
+  if (m2Type === 'beat_pb') {
+    missions.push({
+      id: `m_${date}_2`,
+      type: 'beat_pb',
+      target: 1,
+      progress: 0,
+      rewardCoins: 150,
+      completed: false,
+      description: 'Pecahkan Rekor (PB) di game mana saja',
+      date
+    });
+  } else if (m2Type === 'total_score') {
+    const totalScoreTarget = 10000 + Math.floor(rand() * 5) * 5000;
+    missions.push({
+      id: `m_${date}_2`,
+      type: 'total_score',
+      target: totalScoreTarget,
+      progress: 0,
+      rewardCoins: 120,
+      completed: false,
+      description: `Kumpulkan total skor ${totalScoreTarget} hari ini di semua game`,
+      date
+    });
+  } else {
+    missions.push({
+      id: `m_${date}_2`,
+      type: 'play_genre_count',
+      target: 3,
+      progress: 0,
+      rewardCoins: 100,
+      completed: false,
+      description: 'Mainkan 3 genre game yang berbeda',
+      metadata: { genresPlayed: [] },
+      date
+    });
+  }
 
-  // Mission 3: Consistency
+  // Mission 3: Consistency / Milestone
   missions.push({
     id: `m_${date}_3`,
-    type: 'play_count', // We'll use this for playing different genres
-    target: 3,
+    type: 'play_count',
+    target: 5,
     progress: 0,
-    rewardCoins: 50,
+    rewardCoins: 80,
     completed: false,
-    description: `Jelajahi dunia: Mainkan 3 genre game yang berbeda`,
+    description: `Mainkan 5 sesi game yang valid (minimal 30 detik atau raih skor layak)`,
     date
   });
 
