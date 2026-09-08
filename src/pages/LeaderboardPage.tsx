@@ -16,6 +16,8 @@ export default function LeaderboardPage({ games, currentUsername }: LeaderboardP
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [leaderboard, setLeaderboard] = useState<any[]>([]);
+  const [userRank, setUserRank] = useState<number | null>(null);
+  const [userEntry, setUserEntry] = useState<any | null>(null);
   const [rivalryInsight, setRivalryInsight] = useState<RivalryInsight | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -24,11 +26,26 @@ export default function LeaderboardPage({ games, currentUsername }: LeaderboardP
     const fetchLeaderboard = async () => {
       setLoading(true);
       try {
-        const res = await fetch(`/api/leaderboard/${selectedGameId}?category=${category}&page=${page}&limit=10&username=${encodeURIComponent(currentUsername)}`);
+        let url = `/api/leaderboard/${selectedGameId}?category=${category}&page=${page}&limit=10&username=${encodeURIComponent(currentUsername)}`;
+        
+        if (category === 'ranked') {
+          url = `/api/competitive/leaderboard/${selectedGameId}?limit=50`;
+        }
+
+        const res = await fetch(url);
         const data = await res.json();
         if (data.success) {
-          setLeaderboard(data.leaderboard || []);
-          setTotalPages(data.totalPages || 1);
+          if (category === 'ranked') {
+            setLeaderboard(data.entries || []);
+            setUserRank(data.userRank || null);
+            setUserEntry(data.userEntry || null);
+            setTotalPages(1);
+          } else {
+            setLeaderboard(data.leaderboard || []);
+            setTotalPages(data.totalPages || 1);
+            setUserRank(null);
+            setUserEntry(null);
+          }
           setRivalryInsight(data.rivalryInsight || null);
         }
       } catch (e) {
@@ -95,6 +112,14 @@ export default function LeaderboardPage({ games, currentUsername }: LeaderboardP
             }`}
           >
             <Sparkles size={13} /> Season 1
+          </button>
+          <button
+            onClick={() => { audio.playCoin(); setCategory('ranked'); setPage(1); }}
+            className={`px-4 py-1.5 rounded-full text-xs font-mono font-bold uppercase transition duration-200 cursor-pointer flex items-center gap-1.5 ${
+              category === 'ranked' ? 'bg-rose-500 text-white' : 'text-zinc-400 hover:text-white'
+            }`}
+          >
+            <ShieldCheck size={13} /> Ranked
           </button>
         </div>
 
@@ -232,6 +257,11 @@ export default function LeaderboardPage({ games, currentUsername }: LeaderboardP
                       <div className="flex items-center gap-1.5">
                         <span className="text-xs font-bold text-white uppercase">{entry.playerName}</span>
                         <CheckCircle size={11} className="text-emerald-500" />
+                        {entry.tier && (
+                          <span className="text-[9px] px-1.5 py-0.5 bg-zinc-800 text-zinc-300 border border-zinc-700 rounded font-bold">
+                            {entry.tier}
+                          </span>
+                        )}
                         {isUser && (
                           <span className="text-[8px] font-mono px-1 bg-amber-500 text-black rounded font-black uppercase">
                             Anda
@@ -245,14 +275,53 @@ export default function LeaderboardPage({ games, currentUsername }: LeaderboardP
                   </div>
 
                   <div className="text-right">
-                    <span className="text-xs sm:text-sm font-mono font-black text-amber-400">
-                      {entry.score.toLocaleString()}
+                    <span className={`text-xs sm:text-sm font-mono font-black ${category === 'ranked' ? 'text-rose-400' : 'text-amber-400'}`}>
+                      {category === 'ranked' ? (entry.rating || 1000) : entry.score.toLocaleString()}
                     </span>
-                    <span className="text-[9px] font-mono text-zinc-500 block uppercase">pts</span>
+                    <span className="text-[9px] font-mono text-zinc-500 block uppercase">
+                      {category === 'ranked' ? 'RP' : 'pts'}
+                    </span>
                   </div>
                 </div>
               );
             })}
+            
+            {/* My Position context if not in top list */}
+            {userRank && userRank > leaderboard.length && userEntry && (
+              <div className="mt-4 pt-4 border-t border-white/[0.04]">
+                <div className="p-3 rounded-xl border bg-rose-500/10 border-rose-500/40 flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <span className="font-mono text-xs font-black w-6 text-center text-rose-400">
+                      #{userRank}
+                    </span>
+                    <span className="text-xl p-1 bg-zinc-900 border border-zinc-800 rounded-xl">
+                      {userEntry.playerAvatar || '👤'}
+                    </span>
+                    <div>
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-xs font-bold text-white uppercase">{userEntry.playerName}</span>
+                        <CheckCircle size={11} className="text-emerald-500" />
+                        <span className="text-[9px] px-1.5 py-0.5 bg-zinc-800 text-zinc-300 border border-zinc-700 rounded font-bold uppercase">
+                          {userEntry.tier || 'BRONZE'}
+                        </span>
+                        <span className="text-[8px] font-mono px-1 bg-rose-500 text-white rounded font-black uppercase">
+                          POSISI ANDA
+                        </span>
+                      </div>
+                      <span className="text-[10px] font-mono text-zinc-500 italic">
+                        Terus bermain untuk masuk ke TOP 50!
+                      </span>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <span className="text-xs sm:text-sm font-mono font-black text-rose-400">
+                      {userEntry.rating || 1000}
+                    </span>
+                    <span className="text-[9px] font-mono text-zinc-500 block uppercase">RP</span>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Pagination */}

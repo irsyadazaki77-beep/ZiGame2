@@ -130,6 +130,7 @@ export function useGameEngine({
   const addScore = useCallback((points: number) => {
     setScore(prev => {
       const next = prev + points;
+      scoreRef.current = next;
       if (onScoreUpdate) onScoreUpdate(next);
       return next;
     });
@@ -163,16 +164,17 @@ export function useGameEngine({
   const triggerGameOver = useCallback((finalScore?: number) => {
     stopLoop();
     setGameState('gameover');
-    const s = finalScore !== undefined ? finalScore : score;
+    const s = finalScore !== undefined ? finalScore : scoreRef.current;
     if (onGameOver) {
       onGameOver(s);
     }
-  }, [onGameOver, score, stopLoop]);
+  }, [onGameOver, stopLoop]);
 
   // Restart trigger
   const triggerRestart = useCallback(() => {
     stopLoop();
     setScore(0);
+    scoreRef.current = 0;
     setGameState('ready');
     if (onRestart) onRestart();
   }, [onRestart, stopLoop]);
@@ -188,6 +190,7 @@ export function useGameEngine({
     setGameState('countdown');
     setCountdown(3);
     setScore(0);
+    scoreRef.current = 0;
     audio.playCountdownTick();
 
     let current = 3;

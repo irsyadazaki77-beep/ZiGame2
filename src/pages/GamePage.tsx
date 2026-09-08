@@ -8,6 +8,7 @@ import { audio } from '../utils/audio';
 import { scoreService } from '../services/scoreService';
 import { saveStateService } from '../services/saveStateService';
 import { competitiveService } from '../services/competitiveService';
+import { RANKED_GAME_ALLOWLIST } from '../config/competitiveConfig';
 import { telemetryService } from '../services/telemetryService';
 import { inputManager } from '../services/inputService';
 
@@ -29,43 +30,6 @@ interface GamePageProps {
   onScoreUpdate: (gameId: string, score: number) => void;
   onGameOver: (gameId: string, score: number, sessionId?: string) => void;
 }
-
-export type GameControlType = 'directional' | 'directional-action' | 'tap' | 'action' | 'keyboard' | 'none';
-
-const GAME_CONTROLS_MAP: Record<string, { keys: string[]; mouse?: string; tips: string; controlType: GameControlType }> = {
-  snake: { keys: ['⬆️', '⬇️', '⬅️', '➡️', 'SPASI'], tips: 'Kendalikan ular siber di arena grid siber. Kumpulkan siber-kapsul neon tanpa menabrak ekor Anda sendiri atau batas grid luar.', controlType: 'directional' },
-  brick: { keys: ['⬅️', '➡️', 'SPASI'], mouse: 'Gerakan Mouse', tips: 'Pantulkan bola plasma untuk menghancurkan barisan balok pertahanan grid siber.', controlType: 'directional' },
-  flappy: { keys: ['SPASI'], mouse: 'Klik Kiri', tips: 'Jaga ketinggian sayap piksel agar tidak menabrak tiang-tiang gerbang neon.', controlType: 'action' },
-  space: { keys: ['⬅️', '➡️', 'SPASI'], tips: 'Hancurkan gelombang armada alien penyerang luar angkasa sebelum menabrak baris bawah!', controlType: 'directional-action' },
-  memory: { keys: [], mouse: 'Klik Kotak Grid', tips: 'Ingat pola kotak-kotak biru yang menyala, lalu klik ulang sesuai urutan yang tepat.', controlType: 'tap' },
-  runner: { keys: ['SPASI', '⬇️'], mouse: 'Klik Kiri', tips: 'Lompati rintangan laser siber berkecepatan tinggi demi bertahan sedalam mungkin.', controlType: 'action' },
-  pong: { keys: ['⬆️', '⬇️'], mouse: 'Gerakkan Mouse', tips: 'Pantulkan bola neon melewati pertahanan musuh AI berkecepatan dinamis.', controlType: 'directional' },
-  stacker: { keys: ['SPASI'], mouse: 'Klik Layar', tips: 'Tumpuk lapisan balok siber tepat di atas balok sebelumnya untuk menyusun menara neon!', controlType: 'action' },
-  racer: { keys: ['⬅️', '➡️', '⬆️', '⬇️'], tips: 'Hindari rintangan mobil siber lain di lintasan Synthwave Miami retro.', controlType: 'directional' },
-  lockbreaker: { keys: [], mouse: 'Klik Kiri saat Pas', tips: 'Tekan tombol kunci tepat saat jarum pemutar berada di zona target hijau neon!', controlType: 'tap' },
-  sinerider: { keys: ['⬆️', '⬇️'], tips: 'Sesuaikan frekuensi gelombang sinus agar cocok dengan target rintangan garis siber.', controlType: 'directional' },
-  cosmicdodge: { keys: ['⬆️', '⬇️', '⬅️', '➡️'], mouse: 'Klik/Sentuh Layar', tips: 'Hindari meteor dan rintangan asteroid kosmis yang bertebaran di luar angkasa.', controlType: 'directional' },
-  lasergrid: { keys: ['⬆️', '⬇️', '⬅️', '➡️'], tips: 'Pindahkan detektor siber untuk menghindari tembakan laser merah yang menyilang.', controlType: 'directional' },
-  simon: { keys: [], mouse: 'Klik Tombol Warna', tips: 'Ulangi urutan melodi warna audio siber yang menyala sesuai contoh aslinya.', controlType: 'tap' },
-  plinko: { keys: [], mouse: 'Klik Jalur Atas', tips: 'Jatuhkan bola koin ke dalam paku siber Plinko untuk mendarat di keranjang skor tinggi!', controlType: 'tap' },
-  asteroid: { keys: ['⬅️', '➡️', '⬆️', 'SPASI'], tips: 'Hancurkan meteor batu raksasa sebelum menabrak tameng kapal pelindung siber Anda.', controlType: 'directional-action' },
-  slasher: { keys: [], mouse: 'Sapu / Klik Cepat', tips: 'Tebas buah-buah piksel neon yang melayang menggunakan pedang laser siber Anda!', controlType: 'tap' },
-  clicker: { keys: [], mouse: 'Klik Cepat Core', tips: 'Klik quantum core di tengah layar secepat mungkin untuk mengumpulkan energi, dan beli upgrade peningkatan CPS otomatis.', controlType: 'tap' },
-  blockmatch: { keys: [], mouse: 'Klik Kelompok Warna', tips: 'Ketuk kelompok balok berwarna sama yang saling terhubung (minimal 2 balok) untuk meledakkannya demi poin combo.', controlType: 'tap' },
-  typer: { keys: ['A-Z Keyboard'], tips: 'Ketik kata-kata neon yang meluncur turun secepatnya sebelum mereka menembus barisan firewall pertahanan bawah!', controlType: 'keyboard' },
-  maze: { keys: ['⬆️', '⬇️', '⬅️', '➡️'], tips: 'Arahkan node siber Anda melewati labirin berkelok menuju portal keluar ungu neon untuk lolos ke level selanjutnya.', controlType: 'directional' },
-  matrixmemory: { keys: [], mouse: 'Klik Ulang Sel', tips: 'Hafalkan posisi kotak biru yang menyala sekejap, lalu klik kembali sel-sel tersebut secara presisi.', controlType: 'tap' },
-  rhythm: { keys: ['D', 'F', 'J', 'K'], tips: 'Ketuk tombol D, F, J, K tepat saat lingkaran not musik siber sejajar dengan baris target bagian bawah.', controlType: 'keyboard' },
-  puttgolf: { keys: [], mouse: 'Tarik & Lepas Bola (Slingshot)', tips: 'Tarik bola hijau neon untuk mengatur kekuatan dan sudut tembakan, lalu lepas untuk memasukkannya ke lubang hitam siber.', controlType: 'tap' },
-  dinorun: { keys: ['SPASI', '⬇️'], tips: 'Melompati rintangan laser bawah dan merunduk di bawah rintangan drone terbang untuk bertahan hidup selama mungkin.', controlType: 'directional-action' },
-  tetris: { keys: ['⬅️', '➡️', '⬆️', '⬇️', 'SPASI'], tips: 'Susun balok neon yang jatuh untuk melengkapi baris horizontal penuh. Setiap baris lengkap akan hancur dan menambah skor.', controlType: 'directional' },
-  archery: { keys: [], mouse: 'Goyang Arah / Klik Tembak', tips: 'Arahkan meriam laser siber di bawah, lalu klik layar untuk meluncurkan panah laser penghancur balon gelembung udara.', controlType: 'tap' },
-  mines: { keys: [], mouse: 'Klik Kiri Buka / Klik Kanan Bendera', tips: 'Buka semua kotak yang aman. Gunakan angka untuk mengetahui jumlah ranjau di sekitarnya. Jangan sampai meledak!', controlType: 'tap' },
-  '2048': { keys: ['⬆️', '⬇️', '⬅️', '➡️'], tips: 'Gabungkan balok angka yang sama untuk membentuk angka yang lebih besar hingga 2048.', controlType: 'directional' },
-  whack: { keys: [], mouse: 'Klik Target', tips: 'Pukul drone secepat mungkin. Hindari bom dan incar drone emas untuk skor maksimal.', controlType: 'tap' },
-  jumprope: { keys: ['SPASI'], mouse: 'Klik/Sentuh Layar', tips: 'Lompati tali laser siber dengan tepat waktu.', controlType: 'action' },
-  neondrift: { keys: ['⬅️', '➡️'], mouse: 'Sentuh Kiri/Kanan Layar', tips: 'Hindari blok neon yang berjatuhan. Bertahan selama mungkin!', controlType: 'directional' }
-};
 
 const BACKGROUND_AMBIENTS = [
   { id: 'indigo', name: 'Cosmic Indigo', class: 'from-indigo-950/40 via-zinc-950 to-zinc-950', color: '#6366f1' },
@@ -89,6 +53,7 @@ export default function GamePage({ games, profile, dailyMissions, onScoreUpdate,
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<'chat' | 'leaderboard' | 'quests'>('chat');
   const [isCrtFilter, setIsCrtFilter] = useState(false);
+  const [isRankedMode, setIsRankedMode] = useState(false);
   const [bgAmbient, setBgAmbient] = useState(() => {
     const defaultColor = profile.colorTheme || '#6366f1';
     const match = BACKGROUND_AMBIENTS.find(b => b.color.toLowerCase() === defaultColor.toLowerCase());
@@ -122,11 +87,18 @@ export default function GamePage({ games, profile, dailyMissions, onScoreUpdate,
   useEffect(() => {
     if (activeGame) {
       telemetryService.recordGameStart(activeGame.id, inputManager.getActiveSource());
-      scoreService.startSession(activeGame.id, profile.name).then((res) => {
-        currentSessionIdRef.current = res.sessionId;
-      });
+      
+      if (isRankedMode) {
+        competitiveService.startRankedSession(activeGame.id).then((res) => {
+          currentSessionIdRef.current = res.sessionId;
+        });
+      } else {
+        scoreService.startSession(activeGame.id, profile.name).then((res) => {
+          currentSessionIdRef.current = res.sessionId;
+        });
+      }
     }
-  }, [activeGame, key, profile.name]);
+  }, [activeGame, key, profile.name, isRankedMode]);
 
   // Check save-state and tutorial status on gameId change
   useEffect(() => {
@@ -191,14 +163,31 @@ export default function GamePage({ games, profile, dailyMissions, onScoreUpdate,
     setShareResultData(null);
   }, []);
 
-  const handleWrappedGameOver = useCallback((score: number) => {
+  const handleWrappedGameOver = useCallback(async (score: number) => {
     if (!activeGame) return;
     audio.playGameOver();
     telemetryService.recordGameOver(activeGame.id, score, undefined, inputManager.getActiveSource());
-    onGameOver(activeGame.id, score, currentSessionIdRef.current);
+    
+    let competitiveRatingChange = 0;
+    let competitiveTier = undefined;
 
-    // Record competitive rating if supported
-    const competitiveResult = competitiveService.recordMatchScore(activeGame.id, score);
+    if (isRankedMode && currentSessionIdRef.current) {
+      const res = await competitiveService.submitRankedScore({
+        gameId: activeGame.id,
+        score,
+        sessionId: currentSessionIdRef.current,
+        playerName: profile.name,
+        playerAvatar: profile.avatar,
+        masteryLevel: profile.mastery?.[activeGame.id]?.level || 1
+      });
+
+      if (res) {
+        competitiveRatingChange = res.ratingChange;
+        competitiveTier = res.newTier;
+      }
+    } else {
+      onGameOver(activeGame.id, score, currentSessionIdRef.current);
+    }
 
     // Prepare share result modal data
     const isPb = score > (activeGame.highScore || 0);
@@ -212,10 +201,11 @@ export default function GamePage({ games, profile, dailyMissions, onScoreUpdate,
       isPersonalBest: isPb,
       masteryLevel: masteryData.level,
       masteryXpGained: Math.max(10, Math.floor(score * 0.1)),
-      competitiveTier: competitiveResult.tier,
+      competitiveRatingChange,
+      competitiveTier: (competitiveTier as any),
       timestamp: Date.now()
     });
-  }, [activeGame, onGameOver, profile.mastery]);
+  }, [activeGame, onGameOver, profile, isRankedMode]);
 
   const toggleFullscreen = useCallback(() => {
     if (!containerRef.current) return;
@@ -251,10 +241,10 @@ export default function GamePage({ games, profile, dailyMissions, onScoreUpdate,
   }
 
   const currentAmbient = BACKGROUND_AMBIENTS.find(b => b.id === bgAmbient) || BACKGROUND_AMBIENTS[0];
-  const controls = (gameId && GAME_CONTROLS_MAP[gameId]) || {
-    keys: ['⬆️', '⬇️', '⬅️', '➡️', 'SPASI'],
-    tips: 'Gunakan tombol arah panah dan spasi untuk mengontrol permainan.',
-    controlType: 'directional-action' as GameControlType
+  const controls = {
+    keys: registryItem?.controls.split(' ') || ['⬆️', '⬇️', '⬅️', '➡️', 'SPASI'],
+    tips: registryItem?.description || 'Gunakan tombol arah panah dan spasi untuk mengontrol permainan.',
+    controlType: registryItem?.controlType || ('directional-action' as any)
   };
 
   const gameLayoutConfig = (gameId && GAME_LAYOUTS[gameId]) || DEFAULT_GAME_LAYOUT;
@@ -429,6 +419,23 @@ export default function GamePage({ games, profile, dailyMissions, onScoreUpdate,
                   <Shield size={13} className="text-emerald-400" />
                   <span>Rating: {competitiveInfo.rating} ({competitiveInfo.tier})</span>
                 </div>
+              )}
+
+              {activeGame && RANKED_GAME_ALLOWLIST.includes(activeGame.id as any) && (
+                <button
+                  onClick={() => {
+                    setIsRankedMode(!isRankedMode);
+                    handleRestart();
+                  }}
+                  className={`flex items-center gap-1.5 px-3 py-1 border rounded-xl text-xs font-bold transition-all ${
+                    isRankedMode 
+                      ? 'bg-rose-500/20 border-rose-500/50 text-rose-400 animate-pulse' 
+                      : 'bg-zinc-500/10 border-zinc-500/20 text-zinc-400 hover:bg-zinc-500/20'
+                  }`}
+                >
+                  <Trophy size={14} className={isRankedMode ? 'text-rose-400' : 'text-zinc-500'} />
+                  <span>{isRankedMode ? 'MODE RANKED AKTIF' : 'AKTIFKAN RANKED'}</span>
+                </button>
               )}
 
               {controls.keys && controls.keys.length > 0 && (

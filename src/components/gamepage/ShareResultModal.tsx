@@ -14,7 +14,7 @@ export const ShareResultModal: React.FC<ShareResultModalProps> = ({ data, onClos
   const shareText = `🎮 ZiGame • ${data.gameTitle}
 🏆 Skor: ${data.score.toLocaleString()} PTS ${data.isPersonalBest ? '🔥 Rekor Baru!' : ''}
 ⚡ Level Mastery: Lv.${data.masteryLevel} (+${data.masteryXpGained} XP)
-${data.competitiveTier ? `🛡️ Rank: ${data.competitiveTier}` : ''}
+${data.competitiveTier ? `🛡️ Rank: ${data.competitiveTier}` : ''}${data.competitiveRatingChange ? ` (${data.competitiveRatingChange > 0 ? '+' : ''}${data.competitiveRatingChange} RP)` : ''}
 Mainkan di ZiGame Arcade Platform!`;
 
   const handleCopy = async () => {
@@ -110,8 +110,16 @@ Mainkan di ZiGame Arcade Platform!`;
               {data.competitiveTier ? (
                 <div className="p-2.5 rounded-lg bg-[#11151f] border border-white/[0.04]">
                   <div className="text-[10px] text-zinc-400">Skill Tier</div>
-                  <div className="text-xs font-semibold text-emerald-400 mt-0.5 flex items-center gap-1">
-                    <Shield size={12} /> {data.competitiveTier}
+                  <div className="text-xs font-semibold text-emerald-400 mt-0.5 flex items-center justify-between">
+                    <div className="flex items-center gap-1">
+                      <Shield size={12} /> {data.competitiveTier}
+                    </div>
+                    {data.competitiveRatingChange ? (
+                      <div className={`flex items-center text-[10px] ${data.competitiveRatingChange > 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                        {data.competitiveRatingChange > 0 ? <ArrowUpRight size={10} /> : null}
+                        {data.competitiveRatingChange > 0 ? '+' : ''}{data.competitiveRatingChange} RP
+                      </div>
+                    ) : null}
                   </div>
                 </div>
               ) : (

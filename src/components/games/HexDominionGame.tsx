@@ -660,7 +660,7 @@ export default function HexDominionGame({ onGameOver, onScoreUpdate, highScore }
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    let hasAnimations = floatingTextsRef.current.length > 0 || particlesRef.current.length > 0;
+    const hasAnimations = floatingTextsRef.current.length > 0 || particlesRef.current.length > 0;
 
     if (!needsRedrawRef.current && !hasAnimations) {
       return; // Skip rendering if idle

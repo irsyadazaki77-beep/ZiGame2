@@ -101,7 +101,7 @@ service cloud.firestore {
       allow delete: if isSignedIn() && existing().userId == request.auth.uid && isValidId(saveId);
     }
 
-    // Global Leaderboards (Read: Authenticated Users, Write: Server Authoritative ONLY)
+    // Leaderboards (Read: Authenticated Users, Write: Server Authoritative ONLY)
     match /leaderboards/{gameId} {
       allow read: if isSignedIn() && isValidId(gameId);
       
@@ -109,6 +109,33 @@ service cloud.firestore {
         allow read: if isSignedIn() && isValidId(entryId);
         allow write: if false;
       }
+    }
+
+    // Seasonal Leaderboards (Read: Authenticated Users, Write: Server Authoritative ONLY)
+    match /seasonalLeaderboards/{seasonId} {
+      allow read: if isSignedIn() && isValidId(seasonId);
+      
+      match /games/{gameId}/entries/{userId} {
+        allow read: if isSignedIn() && isValidId(gameId) && isValidId(userId);
+        allow write: if false;
+      }
+    }
+
+    // Competitive Profiles (Read: Owner, Write: Server Admin Only)
+    match /competitiveProfiles/{userId} {
+      allow read: if isSignedIn() && request.auth.uid == userId && isValidId(userId);
+      allow write: if false;
+    }
+
+    // Season Metadata (Read: Authenticated Users, Write: Server Admin Only)
+    match /seasons/{seasonId} {
+      allow read: if isSignedIn() && isValidId(seasonId);
+      allow write: if false;
+    }
+
+    // Ranked Sessions (Server Admin Only via Admin SDK)
+    match /rankedSessions/{sessionId} {
+      allow read, write: if false;
     }
 
     // Game Sessions for Anti-Cheat Nonce Validation (Server Admin Only via Admin SDK)

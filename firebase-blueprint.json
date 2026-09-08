@@ -50,7 +50,52 @@
         "score": { "type": "number" },
         "submittedAt": { "type": "string" },
         "gameId": { "type": "string" },
-        "masteryLevel": { "type": "number" }
+        "masteryLevel": { "type": "number" },
+        "tier": { "type": "string" },
+        "rating": { "type": "number" }
+      }
+    },
+    "CompetitiveProfile": {
+      "title": "CompetitiveProfile",
+      "description": "Server-authoritative competitive ratings and tiers.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "globalRating": { "type": "number" },
+        "globalTier": { "type": "string" },
+        "peakGlobalRating": { "type": "number" },
+        "gameRatings": { "type": "object" },
+        "seasonId": { "type": "string" },
+        "rankedGames": { "type": "number" },
+        "lastUpdated": { "type": "number" }
+      }
+    },
+    "RankedSession": {
+      "title": "RankedSession",
+      "description": "Short-lived session for verified ranked play.",
+      "type": "object",
+      "properties": {
+        "sessionId": { "type": "string" },
+        "userId": { "type": "string" },
+        "gameId": { "type": "string" },
+        "nonce": { "type": "string" },
+        "startTime": { "type": "number" },
+        "expiresAt": { "type": "number" },
+        "isRanked": { "type": "boolean" },
+        "status": { "type": "string" },
+        "seasonId": { "type": "string" }
+      }
+    },
+    "Season": {
+      "title": "Season",
+      "description": "Competitive season configuration.",
+      "type": "object",
+      "properties": {
+        "seasonId": { "type": "string" },
+        "name": { "type": "string" },
+        "startAt": { "type": "number" },
+        "endAt": { "type": "number" },
+        "status": { "type": "string" }
       }
     }
   },
@@ -63,9 +108,25 @@
       "schema": { "$ref": "#/entities/UserEconomy" },
       "description": "Server-authoritative user balances."
     },
+    "/competitiveProfiles/{userId}": {
+      "schema": { "$ref": "#/entities/CompetitiveProfile" },
+      "description": "Server-authoritative competitive ratings."
+    },
+    "/rankedSessions/{sessionId}": {
+      "schema": { "$ref": "#/entities/RankedSession" },
+      "description": "Active game sessions."
+    },
     "/leaderboards/{gameId}/entries/{userId}": {
       "schema": { "$ref": "#/entities/LeaderboardEntry" },
       "description": "Authoritative game leaderboards."
+    },
+    "/seasons/{seasonId}": {
+      "schema": { "$ref": "#/entities/Season" },
+      "description": "Competitive season metadata."
+    },
+    "/seasonalLeaderboards/{seasonId}/games/{gameId}/entries/{userId}": {
+      "schema": { "$ref": "#/entities/LeaderboardEntry" },
+      "description": "Historical seasonal leaderboards."
     }
   }
 }

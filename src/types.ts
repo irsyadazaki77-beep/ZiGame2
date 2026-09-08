@@ -158,6 +158,29 @@ export interface CompetitiveRating {
   lastUpdated: number;
 }
 
+export interface CompetitiveProfile {
+  userId: string;
+  globalRating: number;
+  globalTier: CompetitiveTier;
+  peakGlobalRating: number;
+  gameRatings: Record<string, CompetitiveRating>;
+  rankedGames: number;
+  lastUpdated: number;
+  seasonId: string;
+}
+
+export interface RankedSubmissionResult {
+  success: boolean;
+  gameId: string;
+  score: number;
+  coinsEarned: number;
+  xpEarned: number;
+  oldRating: number;
+  newRating: number;
+  ratingChange: number;
+  newTier: CompetitiveTier;
+}
+
 export interface FeatureFlags {
   gamepadSupport: boolean;
   ghostMode: boolean;
@@ -205,6 +228,7 @@ export interface GameStats {
   accentShadow: string;
   icon: string;
   coverImage?: string;
+  thumbnailUrl?: string;
   genre?: string;
   difficulty?: 'Easy' | 'Medium' | 'Hard';
   controls?: string;
@@ -336,7 +360,7 @@ export interface ActivityFeedItem {
 }
 
 // 8. Leaderboard 2.0 Types
-export type LeaderboardCategory = 'global' | 'friends' | 'weekly' | 'seasonal' | 'game_specific';
+export type LeaderboardCategory = 'global' | 'friends' | 'weekly' | 'seasonal' | 'game_specific' | 'ranked';
 
 export interface LeaderboardEntry {
   rank?: number;

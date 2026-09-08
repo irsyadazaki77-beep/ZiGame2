@@ -28,7 +28,14 @@ import {
   getLeaderboardEntries,
   getRealAdminStats,
   purgeSuspectScores,
-  isValidIdempotencyKey
+  isValidIdempotencyKey,
+  getCompetitiveProfile,
+  createRankedSession,
+  executeRankedSubmission,
+  getRankedLeaderboardEntries,
+  getRankedLeaderboardWithContext,
+  getSeasonalLeaderboardEntries,
+  getActiveSeason
 } from './persistence';
 
 export const apiRouter = Router();
@@ -370,6 +377,133 @@ const handleClaimReward = async (req: Request, res: Response) => {
 
 apiRouter.post('/economy/claim', requireAuth, rateLimit(30, 60000, 'reward_claim'), handleClaimReward);
 apiRouter.post('/economy/claim-reward', requireAuth, rateLimit(30, 60000, 'reward_claim'), handleClaimReward);
+
+// ----------------------------------------------------
+// COMPETITIVE SYSTEM & RANKED PLAY
+// ----------------------------------------------------
+
+/**
+ * GET /api/competitive/profile
+ * Returns authenticated user's authoritative competitive profile (rating, tier, matches)
+ */
+apiRouter.get('/competitive/profile', requireAuth, rateLimit(60, 60000, 'comp_profile'), async (req: Request, res: Response) => {
+  try {
+    const userId = req.user!.uid;
+    const profile = await getCompetitiveProfile(userId);
+    return res.json({ success: true, profile });
+  } catch (err: unknown) {
+    serverLogger.error('COMP_PROFILE_ERROR', 'Failed to fetch competitive profile', err, undefined, req.user?.uid, req.ip, req.id);
+    return handleServerException(err, req, res);
+  }
+});
+
+/**
+ * POST /api/competitive/session/start
+ * Authoritatively issues a ranked session ticket.
+ */
+apiRouter.post('/competitive/session/start', requireAuth, rateLimit(30, 60000, 'comp_session_start'), async (req: Request, res: Response) => {
+  try {
+    const userId = req.user!.uid;
+    const { gameId } = req.body;
+
+    if (!isValidGameId(gameId)) {
+      return sendApiError(res, 400, 'INVALID_GAME_ID', 'ID Game tidak valid.');
+    }
+
+    const session = await createRankedSession(userId, gameId);
+
+    serverLogger.info('RANKED_SESSION_STARTED', `Ranked session started for ${session.gameId}`, {
+      gameId: session.gameId,
+      sessionId: session.sessionId
+    }, userId, req.ip, req.id);
+
+    return res.json({
+      success: true,
+      sessionId: session.sessionId,
+      nonce: session.nonce,
+      startTime: session.startTime,
+      expiresAt: session.expiresAt
+    });
+  } catch (err: unknown) {
+    return handleServerException(err, req, res);
+  }
+});
+
+/**
+ * POST /api/competitive/submit
+ * Server-authoritative ranked score submission and rating update.
+ */
+apiRouter.post('/competitive/submit', requireAuth, rateLimit(10, 60000, 'comp_submit'), async (req: Request, res: Response) => {
+  try {
+    const userId = req.user!.uid;
+    const {
+      gameId,
+      score,
+      playerName,
+      playerAvatar,
+      sessionId,
+      masteryLevel
+    } = req.body;
+
+    if (!isValidGameId(gameId)) return sendApiError(res, 400, 'INVALID_GAME_ID', 'ID Game tidak valid.');
+    if (typeof score !== 'number' || score < 0) return sendApiError(res, 400, 'INVALID_SCORE', 'Skor tidak valid.');
+    if (!sessionId) return sendApiError(res, 422, 'SESSION_REQUIRED', 'ID Sesi ranked wajib disertakan.');
+
+    const result = await executeRankedSubmission({
+      sessionId,
+      userId,
+      gameId,
+      score: Math.floor(score),
+      playerName: playerName || 'Player',
+      playerAvatar: playerAvatar || '👾',
+      masteryLevel: masteryLevel || 1
+    });
+
+    serverLogger.info('RANKED_SCORE_ACCEPTED', `Ranked score ${score} accepted for ${result.gameId}. New Rating: ${result.newRating}`, {
+      gameId: result.gameId,
+      score,
+      ratingChange: result.ratingChange,
+      newRating: result.newRating,
+      newTier: result.newTier
+    }, userId, req.ip, req.id);
+
+    return res.json(result);
+  } catch (err: unknown) {
+    return handleServerException(err, req, res);
+  }
+});
+
+/**
+ * GET /api/competitive/leaderboard/:gameId
+ * Returns ranked leaderboard (ordered by rating)
+ */
+apiRouter.get('/competitive/leaderboard/:gameId', rateLimit(60, 60000, 'comp_leaderboard'), async (req: Request, res: Response) => {
+  try {
+    const gameId = req.params.gameId;
+    const userId = (req as any).user?.uid; // Optional user context for "around me"
+    
+    if (!isValidGameId(gameId)) return sendApiError(res, 400, 'INVALID_GAME_ID', 'ID Game tidak valid.');
+
+    const limit = Math.min(100, parseInt(req.query.limit as string) || 50);
+    const result = await getRankedLeaderboardWithContext(gameId, userId, limit);
+
+    return res.json({ success: true, gameId, ...result });
+  } catch (err: unknown) {
+    return handleServerException(err, req, res);
+  }
+});
+
+/**
+ * GET /api/competitive/seasons/active
+ */
+apiRouter.get('/competitive/seasons/active', async (_req: Request, res: Response) => {
+  try {
+    const season = await getActiveSeason();
+    return res.json({ success: true, season });
+  } catch (err: unknown) {
+    return res.status(500).json({ success: false });
+  }
+});
 
 // ----------------------------------------------------
 // LEADERBOARD

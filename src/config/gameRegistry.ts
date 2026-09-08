@@ -1,7 +1,8 @@
 import { lazy, type ComponentType } from 'react';
-import { GameComponentProps } from '../types';
+import { GameComponentProps, TouchControlsType, InputSource } from '../types';
 
 export type GameLayoutType = 'square' | 'portrait' | 'landscape';
+export type GameControlType = TouchControlsType;
 
 export interface GameRegistryItem {
   id: string;
@@ -9,13 +10,15 @@ export interface GameRegistryItem {
   description: string;
   genre: string;
   difficulty: 'Easy' | 'Medium' | 'Hard';
-  thumbnail: '',
+  thumbnail: string;
   layout: GameLayoutType;
   component: React.LazyExoticComponent<ComponentType<GameComponentProps>>;
   themeColor: string;
   accentShadow: string;
   icon: string;
   controls: string;
+  controlType?: GameControlType;
+  supportedInputs?: InputSource[];
   avgDuration: string;
 }
 
@@ -33,6 +36,8 @@ export const GAME_REGISTRY: Record<string, GameRegistryItem> = {
     accentShadow: 'shadow-[0_0_15px_rgba(34,197,94,0.15)]',
     icon: '🐍',
     controls: 'Arrows / WASD',
+    controlType: 'dpad',
+    supportedInputs: ['keyboard', 'touch', 'gamepad'],
     avgDuration: '2-5 mins'
   },
   brick: {
@@ -48,6 +53,8 @@ export const GAME_REGISTRY: Record<string, GameRegistryItem> = {
     accentShadow: 'shadow-[0_0_15px_rgba(236,72,153,0.15)]',
     icon: '🧱',
     controls: 'Mouse / Touch',
+    controlType: 'leftright',
+    supportedInputs: ['keyboard', 'touch', 'mouse'],
     avgDuration: '3-10 mins'
   },
   flappy: {
@@ -63,6 +70,8 @@ export const GAME_REGISTRY: Record<string, GameRegistryItem> = {
     accentShadow: 'shadow-[0_0_15px_rgba(234,179,8,0.15)]',
     icon: '🐦',
     controls: 'Space / Tap',
+    controlType: 'actiononly',
+    supportedInputs: ['keyboard', 'touch', 'mouse', 'gamepad'],
     avgDuration: '1-2 mins'
   },
   space: {
@@ -78,6 +87,8 @@ export const GAME_REGISTRY: Record<string, GameRegistryItem> = {
     accentShadow: 'shadow-[0_0_15px_rgba(99,102,241,0.15)]',
     icon: '🚀',
     controls: 'Arrows + Space',
+    controlType: 'dpad' as any, // directional-action
+    supportedInputs: ['keyboard', 'touch', 'gamepad'],
     avgDuration: '2-5 mins'
   },
   memory: {

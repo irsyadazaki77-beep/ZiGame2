@@ -15,6 +15,13 @@ import { requireCanonicalGameId, CanonicalGameId } from '../config/canonicalGame
 import { getAuthoritativeCatalogItem } from '../config/shopCatalog';
 import { getGameBalanceConfig } from '../config/balanceConfig';
 import { resolveAuthoritativeReward, RewardClaimType } from '../config/rewardCatalog';
+import { 
+  getTierForRating, 
+  INITIAL_RATING, 
+  PLACEMENT_MATCHES_COUNT, 
+  GAME_COMPETITIVE_CONFIGS,
+  RANKED_GAME_ALLOWLIST
+} from '../config/competitiveConfig';
 
 export const SESSION_MAX_LIFETIME_MS = 60 * 60 * 1000; // 1 hour max session lifetime
 
@@ -27,6 +34,34 @@ export interface StoredGameSession {
   expiresAt: number;
   consumed: boolean;
   consumedAt?: number;
+  isRanked?: boolean;
+  seasonId?: string;
+}
+
+export interface StoredCompetitiveProfile {
+  userId: string;
+  globalRating: number;
+  globalTier: string;
+  peakGlobalRating: number;
+  gameRatings: Record<string, {
+    rating: number;
+    tier: string;
+    matchesPlayed: number;
+    wins: number;
+    losses: number;
+    lastUpdated: number;
+  }>;
+  rankedGames: number;
+  lastUpdated: number;
+  seasonId: string;
+}
+
+export interface StoredSeason {
+  seasonId: string;
+  name: string;
+  startAt: number;
+  endAt: number;
+  status: 'active' | 'finished';
 }
 
 export interface StoredEconomy {
@@ -1429,6 +1464,301 @@ export async function executeScoreSubmission({
 }
 
 // ==========================================
+// 21. COMPETITIVE SYSTEM & RANKED PLAY
+// ==========================================
+
+export async function getActiveSeason(): Promise<StoredSeason> {
+  const now = Date.now();
+  if (isFirestoreAvailable()) {
+    const db = getDb();
+    const snap = await db.collection('seasons')
+      .where('status', '==', 'active')
+      .where('endAt', '>', now)
+      .limit(1)
+      .get();
+    
+    if (!snap.empty) {
+      return snap.docs[0].data() as StoredSeason;
+    }
+  }
+
+  // Fallback to default season if none active in DB
+  return {
+    seasonId: 'season_1',
+    name: 'Season 1: Cyber Genesis',
+    startAt: now - 86400000,
+    endAt: now + 86400000 * 30,
+    status: 'active'
+  };
+}
+
+export async function getCompetitiveProfile(userId: string): Promise<StoredCompetitiveProfile> {
+  assertPersistenceOperational();
+  const season = await getActiveSeason();
+
+  if (isFirestoreAvailable()) {
+    const db = getDb();
+    const doc = await db.collection('competitiveProfiles').doc(userId).get();
+    if (doc.exists) {
+      const data = doc.data() as StoredCompetitiveProfile;
+      // Handle season mismatch (soft reset logic would go here)
+      if (data.seasonId !== season.seasonId) {
+        // Soft reset: Pull rating towards initial 1000 baseline
+        const softResetRating = (r: number) => Math.floor((r + INITIAL_RATING) / 2);
+        
+        const newGameRatings: Record<string, any> = {};
+        Object.entries(data.gameRatings).forEach(([gid, stats]: [string, any]) => {
+          const newRating = softResetRating(stats.rating);
+          newGameRatings[gid] = {
+            ...stats,
+            rating: newRating,
+            tier: getTierForRating(newRating),
+            matchesPlayed: 0, // Reset match count for new season stats
+            lastUpdated: Date.now()
+          };
+        });
+
+        const newGlobalRating = softResetRating(data.globalRating);
+        
+        const resetProfile: StoredCompetitiveProfile = {
+          ...data,
+          globalRating: newGlobalRating,
+          globalTier: getTierForRating(newGlobalRating),
+          gameRatings: newGameRatings,
+          seasonId: season.seasonId,
+          rankedGames: 0,
+          lastUpdated: Date.now()
+        };
+
+        if (isFirestoreAvailable()) {
+          const db = getDb();
+          await db.collection('competitiveProfiles').doc(userId).set(resetProfile);
+        }
+        return resetProfile;
+      }
+      return data;
+    }
+  }
+
+  // Initial Profile
+  return {
+    userId,
+    globalRating: INITIAL_RATING,
+    globalTier: getTierForRating(INITIAL_RATING),
+    peakGlobalRating: INITIAL_RATING,
+    gameRatings: {},
+    rankedGames: 0,
+    lastUpdated: Date.now(),
+    seasonId: season.seasonId
+  };
+}
+
+export async function createRankedSession(userId: string, gameId: string): Promise<StoredGameSession> {
+  assertPersistenceOperational();
+  const canonicalId = requireCanonicalGameId(gameId);
+  
+  if (!RANKED_GAME_ALLOWLIST.includes(canonicalId)) {
+    throw ApiError.badRequest('Game ini belum mendukung mode ranked.', 'GAME_NOT_RANKED_ELIGIBLE');
+  }
+
+  const season = await getActiveSeason();
+  const sessionId = `rnk_${Date.now()}_${crypto.randomBytes(16).toString('hex')}`;
+  const nonce = crypto.randomBytes(16).toString('hex');
+  const now = Date.now();
+
+  const session: StoredGameSession = {
+    sessionId,
+    userId,
+    gameId: canonicalId,
+    nonce,
+    startTime: now,
+    expiresAt: now + (30 * 60 * 1000), // 30 min for ranked
+    consumed: false,
+    isRanked: true,
+    seasonId: season.seasonId
+  };
+
+  if (isFirestoreAvailable()) {
+    const db = getDb();
+    await db.collection('rankedSessions').doc(sessionId).set(session);
+  }
+
+  return session;
+}
+
+function calculateRatingDelta(
+  currentRating: number,
+  score: number,
+  baseScore: number,
+  matchesPlayed: number
+): number {
+  // Simple Normalized Performance Rating
+  // Ratio of achieved score relative to expected base score for 1000 rating
+  const performanceRatio = score / baseScore;
+  let delta = 0;
+
+  // Sensitivity (K-Factor equivalent)
+  // Higher volatility for placement matches
+  const K = matchesPlayed < PLACEMENT_MATCHES_COUNT ? 60 : 30;
+
+  if (performanceRatio >= 1.0) {
+    // Overperformed: Positive delta
+    // Max +50 per match
+    delta = Math.min(50, Math.floor(K * (performanceRatio - 0.5)));
+  } else if (performanceRatio >= 0.2) {
+    // Moderate performance
+    delta = Math.floor(K * (performanceRatio - 0.8));
+  } else {
+    // Very poor performance: Negative delta
+    delta = -Math.min(25, Math.floor(K * (0.8 - performanceRatio)));
+  }
+
+  // Placement match damping for losses
+  if (matchesPlayed < PLACEMENT_MATCHES_COUNT && delta < 0) {
+    delta = Math.floor(delta * 0.5);
+  }
+
+  return delta;
+}
+
+export interface RankedSubmissionResult extends ScoreSubmissionResult {
+  oldRating: number;
+  newRating: number;
+  ratingChange: number;
+  newTier: string;
+}
+
+export async function executeRankedSubmission(input: ScoreSubmissionInput): Promise<RankedSubmissionResult> {
+  assertPersistenceOperational();
+  const { sessionId, userId, gameId, score, playerName, playerAvatar, masteryLevel } = input;
+  const canonicalId = requireCanonicalGameId(gameId);
+  const gameConfig = GAME_COMPETITIVE_CONFIGS[canonicalId];
+
+  if (!gameConfig) {
+    throw ApiError.badRequest('Game ini tidak valid untuk mode ranked.', 'INVALID_RANKED_GAME');
+  }
+
+  // 1. Consume Ranked Session
+  const db = getDb();
+  const sessionRef = db.collection('rankedSessions').doc(sessionId);
+  const profileRef = db.collection('competitiveProfiles').doc(userId);
+  const leaderRef = db.collection('leaderboards').doc(canonicalId).collection('entries').doc(userId);
+  const season = await getActiveSeason();
+  const seasonalLeaderRef = db.collection('seasonalLeaderboards')
+    .doc(season.seasonId)
+    .collection('games')
+    .doc(canonicalId)
+    .collection('entries')
+    .doc(userId);
+
+  return await db.runTransaction(async (tx) => {
+    const sessDoc = await tx.get(sessionRef);
+    if (!sessDoc.exists) throw ApiError.unprocessable('Sesi ranked tidak ditemukan.', 'SESSION_NOT_FOUND');
+    const session = sessDoc.data() as StoredGameSession;
+
+    if (session.userId !== userId || session.consumed || Date.now() > session.expiresAt) {
+      throw ApiError.unprocessable('Sesi ranked tidak valid, kedaluwarsa, atau sudah digunakan.', 'INVALID_SESSION');
+    }
+
+    // 2. Fetch/Init Profile
+    const profDoc = await tx.get(profileRef);
+    const profile: StoredCompetitiveProfile = profDoc.exists 
+      ? (profDoc.data() as StoredCompetitiveProfile)
+      : {
+          userId,
+          globalRating: INITIAL_RATING,
+          globalTier: getTierForRating(INITIAL_RATING),
+          peakGlobalRating: INITIAL_RATING,
+          gameRatings: {},
+          rankedGames: 0,
+          lastUpdated: Date.now(),
+          seasonId: season.seasonId
+        };
+
+    const currentMatchStats = profile.gameRatings[canonicalId] || {
+      rating: INITIAL_RATING,
+      tier: getTierForRating(INITIAL_RATING),
+      matchesPlayed: 0,
+      wins: 0,
+      losses: 0,
+      lastUpdated: Date.now()
+    };
+
+    // 3. Calculate Rating
+    const delta = calculateRatingDelta(
+      currentMatchStats.rating,
+      score,
+      gameConfig.baseScore,
+      currentMatchStats.matchesPlayed
+    );
+
+    const oldRating = currentMatchStats.rating;
+    const newRating = Math.max(100, oldRating + delta);
+    const newTier = getTierForRating(newRating);
+
+    // 4. Update Profile
+    const updatedGameStats = {
+      rating: newRating,
+      tier: newTier,
+      matchesPlayed: currentMatchStats.matchesPlayed + 1,
+      wins: currentMatchStats.wins + (delta > 0 ? 1 : 0),
+      losses: currentMatchStats.losses + (delta < 0 ? 1 : 0),
+      lastUpdated: Date.now()
+    };
+
+    profile.gameRatings[canonicalId] = updatedGameStats;
+    profile.rankedGames += 1;
+    profile.lastUpdated = Date.now();
+    
+    // Global rating is average of all played ranked games (simple model)
+    const playedGames = Object.values(profile.gameRatings);
+    profile.globalRating = Math.floor(playedGames.reduce((acc, curr) => acc + curr.rating, 0) / playedGames.length);
+    profile.globalTier = getTierForRating(profile.globalRating);
+    profile.peakGlobalRating = Math.max(profile.peakGlobalRating, profile.globalRating);
+
+    // 5. Commit all changes
+    tx.update(sessionRef, { consumed: true, consumedAt: Date.now(), status: 'consumed' });
+    tx.set(profileRef, profile);
+
+    const nowIso = new Date().toISOString();
+    const entryData = {
+      userId,
+      playerName,
+      playerAvatar,
+      score,
+      submittedAt: nowIso,
+      gameId: canonicalId,
+      masteryLevel: masteryLevel || 1,
+      tier: newTier,
+      rating: newRating
+    };
+
+    tx.set(leaderRef, entryData);
+    tx.set(seasonalLeaderRef, entryData);
+
+    // economy reward (standard)
+    const config = getGameBalanceConfig(canonicalId);
+    const coinsEarned = Math.min(300, Math.floor(score * config.baseCoinMultiplier * 1.2)); // 20% bonus for ranked
+    const xpEarned = Math.min(600, Math.floor(score * config.baseXpMultiplier * 1.5)); // 50% bonus for ranked
+
+    return {
+      success: true,
+      gameId: canonicalId,
+      score,
+      coinsEarned,
+      xpEarned,
+      newCoinBalance: 0, // Will be filled or handled if needed
+      leaderboards: [],
+      transactionId: `rnk_tx_${Date.now()}`,
+      oldRating,
+      newRating,
+      ratingChange: delta,
+      newTier
+    };
+  });
+}
+
+// ==========================================
 // LEADERBOARD
 // ==========================================
 
@@ -1450,6 +1780,82 @@ export async function getLeaderboardEntries(gameId: string, limit = 50): Promise
     const list = memoryStore.leaderboards.get(canonicalId) || [];
     return list.slice(0, limit);
   }
+}
+
+export async function getRankedLeaderboardEntries(gameId: string, limit = 50): Promise<StoredLeaderboardEntry[]> {
+  assertPersistenceOperational();
+  const canonicalId = requireCanonicalGameId(gameId);
+
+  if (isFirestoreAvailable()) {
+    const db = getDb();
+    const snapshot = await db.collection('leaderboards')
+      .doc(canonicalId)
+      .collection('entries')
+      .orderBy('rating', 'desc')
+      .limit(limit)
+      .get();
+
+    return snapshot.docs.map(d => d.data() as StoredLeaderboardEntry);
+  }
+  return [];
+}
+
+export async function getRankedLeaderboardWithContext(gameId: string, userId?: string, limit = 50): Promise<{ entries: StoredLeaderboardEntry[], userRank?: number, userEntry?: StoredLeaderboardEntry }> {
+  assertPersistenceOperational();
+  const canonicalId = requireCanonicalGameId(gameId);
+  const result: { entries: StoredLeaderboardEntry[], userRank?: number, userEntry?: StoredLeaderboardEntry } = { entries: [] };
+
+  if (isFirestoreAvailable()) {
+    const db = getDb();
+    const leaderboardCol = db.collection('leaderboards').doc(canonicalId).collection('entries');
+    
+    // 1. Fetch Top Entries
+    const topSnapshot = await leaderboardCol
+      .orderBy('rating', 'desc')
+      .limit(limit)
+      .get();
+    
+    result.entries = topSnapshot.docs.map((d, i) => ({ ...d.data() as StoredLeaderboardEntry, rank: i + 1 }));
+
+    // 2. If userId provided, find their rank and entry
+    if (userId) {
+      const userDoc = await leaderboardCol.doc(userId).get();
+      if (userDoc.exists) {
+        const userData = userDoc.data() as StoredLeaderboardEntry;
+        result.userEntry = userData;
+        
+        // Count entries with higher rating to find rank
+        const rankSnapshot = await leaderboardCol
+          .where('rating', '>', userData.rating)
+          .count()
+          .get();
+        
+        result.userRank = rankSnapshot.data().count + 1;
+        result.userEntry.rank = result.userRank;
+      }
+    }
+  }
+  return result;
+}
+
+export async function getSeasonalLeaderboardEntries(seasonId: string, gameId: string, limit = 50): Promise<StoredLeaderboardEntry[]> {
+  assertPersistenceOperational();
+  const canonicalId = requireCanonicalGameId(gameId);
+
+  if (isFirestoreAvailable()) {
+    const db = getDb();
+    const snapshot = await db.collection('seasonalLeaderboards')
+      .doc(seasonId)
+      .collection('games')
+      .doc(canonicalId)
+      .collection('entries')
+      .orderBy('score', 'desc')
+      .limit(limit)
+      .get();
+
+    return snapshot.docs.map(d => d.data() as StoredLeaderboardEntry);
+  }
+  return [];
 }
 
 // ==========================================

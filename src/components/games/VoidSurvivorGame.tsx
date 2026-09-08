@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { audio } from '../../utils/audio';
 import { useGameEngine } from '../../hooks/useGameEngine';
 import { useUnifiedInput } from '../../hooks/useUnifiedInput';
+import { inputManager } from '../../services/inputService';
 import { GameOverlay } from '../gameplay/GameOverlay';
 import { Zap, Shield, Sparkles, Trophy, Flame, Crosshair, Award, Orbit, Radio, Compass } from 'lucide-react';
 
@@ -96,7 +97,6 @@ export default function VoidSurvivorGame({ onGameOver, onScoreUpdate, highScore 
 
   const [levelUpOptions, setLevelUpOptions] = useState<UpgradeOption[]>([]);
 
-  const keysRef = useRef<{ [key: string]: boolean }>({});
   const secTimerRef = useRef(0);
   const spawnTimerRef = useRef(0);
 
@@ -248,10 +248,6 @@ export default function VoidSurvivorGame({ onGameOver, onScoreUpdate, highScore 
         if (action === 'PAUSE' || action === 'PRIMARY') setGameState('playing');
       }
     },
-    onRawKey: (key, isDown) => {
-      keysRef.current[key.toLowerCase()] = isDown;
-      keysRef.current[key] = isDown;
-    },
   });
 
   const survivalTimeRef = useRef(0);
@@ -282,11 +278,10 @@ export default function VoidSurvivorGame({ onGameOver, onScoreUpdate, highScore 
         const currentSurvivalTime = survivalTimeRef.current;
 
         let dx = 0, dy = 0;
-        const keys = keysRef.current;
-        if (keys['w'] || keys['arrowup']) dy -= 1;
-        if (keys['s'] || keys['arrowdown']) dy += 1;
-        if (keys['a'] || keys['arrowleft']) dx -= 1;
-        if (keys['d'] || keys['arrowright']) dx += 1;
+        if (inputManager.isActionActive('UP')) dy -= 1;
+        if (inputManager.isActionActive('DOWN')) dy += 1;
+        if (inputManager.isActionActive('LEFT')) dx -= 1;
+        if (inputManager.isActionActive('RIGHT')) dx += 1;
 
         if (dx !== 0 && dy !== 0) {
           dx *= 0.7071; dy *= 0.7071;

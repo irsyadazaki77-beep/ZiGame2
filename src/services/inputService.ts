@@ -247,6 +247,20 @@ class InputManager {
     }
   }
 
+  public dispatchAction(action: InputAction, isDown: boolean, source: InputSource = 'touch') {
+    this.setActiveSource(source);
+    
+    // 1. Direct dispatch to subscribers (preferred)
+    this.activeSubscribers.forEach((sub) => {
+      if (isDown && sub.onActionDown) sub.onActionDown(action);
+      if (!isDown && sub.onActionUp) sub.onActionUp(action);
+    });
+
+    // 2. Compatibility bridge: Dispatch synthetic keyboard event for legacy games
+    // that still use window.addEventListener('keydown') instead of inputManager.subscribe
+    this.dispatchSyntheticKeyEvent(action, isDown);
+  }
+
   private dispatchSyntheticKeyEvent(action: InputAction, isDown: boolean) {
     if (typeof window === 'undefined') return;
     const actionKeyMap: Record<InputAction, { key: string; code: string }> = {
