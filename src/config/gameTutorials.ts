@@ -296,9 +296,15 @@ export const GAME_TUTORIALS: Record<string, GameTutorialConfig> = {
   }
 };
 
+import { toCanonicalGameId } from './canonicalGames';
+
 export const getTutorialForGame = (gameId: string, fallbackTitle: string, fallbackDesc: string): GameTutorialConfig => {
   if (GAME_TUTORIALS[gameId]) {
     return GAME_TUTORIALS[gameId];
+  }
+  const canonical = toCanonicalGameId(gameId);
+  if (GAME_TUTORIALS[canonical]) {
+    return GAME_TUTORIALS[canonical];
   }
 
   return {

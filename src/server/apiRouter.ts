@@ -16,9 +16,11 @@ import { isValidGameId, requireCanonicalGameId } from '../config/canonicalGames'
 import { GAME_BALANCE_CONFIG } from '../config/balanceConfig';
 import {
   getPersistenceHealthStatus,
+  isPersistenceReady,
   createGameSession,
   executeScoreSubmission,
   getUserEconomy,
+  getUserProgression,
   getSpinCooldown,
   executeDailySpin,
   executeShopPurchase,
@@ -35,7 +37,13 @@ import {
   getRankedLeaderboardEntries,
   getRankedLeaderboardWithContext,
   getSeasonalLeaderboardEntries,
-  getActiveSeason
+  getActiveSeason,
+  isKillSwitchActive,
+  setKillSwitch,
+  getKillSwitches,
+  KillSwitchFeature,
+  reconcileUserEconomy,
+  validateCompetitiveIntegrity
 } from './persistence';
 
 export const apiRouter = Router();
@@ -44,7 +52,7 @@ export const apiRouter = Router();
 apiRouter.use(authenticateToken);
 
 // ----------------------------------------------------
-// 19. MINIMAL HEALTH CHECK (No Leaks, Accurate Status)
+// 19. HEALTH & READINESS CHECKS (No Leaks, Accurate Status)
 // ----------------------------------------------------
 apiRouter.get('/health', (_req: Request, res: Response) => {
   const health = getPersistenceHealthStatus();
@@ -57,12 +65,38 @@ apiRouter.get('/health', (_req: Request, res: Response) => {
   });
 });
 
+apiRouter.get('/ready', (_req: Request, res: Response) => {
+  const ready = isPersistenceReady();
+  if (!ready) {
+    return res.status(503).json({
+      ready: false,
+      status: 'not_ready',
+      message: 'Layanan basis data belum siap menerima transaksi.',
+      timestamp: new Date().toISOString()
+    });
+  }
+  return res.json({
+    ready: true,
+    status: 'ready',
+    version: APP_VERSION,
+    timestamp: new Date().toISOString()
+  });
+});
+
+apiRouter.get('/liveness', (_req: Request, res: Response) => {
+  return res.json({
+    alive: true,
+    timestamp: new Date().toISOString()
+  });
+});
+
 // ----------------------------------------------------
 // BALANCE CONFIGURATION
 // ----------------------------------------------------
-apiRouter.get('/config/balance', (_req: Request, res: Response) => {
+const handleBalanceConfig = (_req: Request, res: Response) => {
   return res.json({
     success: true,
+    config: GAME_BALANCE_CONFIG,
     multipliers: Object.fromEntries(
       Object.entries(GAME_BALANCE_CONFIG).map(([k, v]) => [k, {
         coinMultiplier: v.baseCoinMultiplier,
@@ -72,7 +106,10 @@ apiRouter.get('/config/balance', (_req: Request, res: Response) => {
       }])
     )
   });
-});
+};
+
+apiRouter.get('/config/balance', handleBalanceConfig);
+apiRouter.get('/balance-config', handleBalanceConfig);
 
 // ----------------------------------------------------
 // 1 & 2. VERIFIED GAME SESSIONS (Anti-Cheat Lifecycle)
@@ -116,7 +153,7 @@ apiRouter.post('/session/start', requireAuth, rateLimit(30, 60000, 'session_star
  * Server-authoritative score verification, anti-cheat validation, and reward distribution.
  * MANDATORY: Verified sessionId is strictly required for competitive progression and rewards.
  */
-apiRouter.post('/submit-score', requireAuth, rateLimit(20, 60000, 'score_submit'), async (req: Request, res: Response) => {
+const handleSubmitScore = async (req: Request, res: Response) => {
   try {
     const userId = req.user!.uid;
     const {
@@ -177,7 +214,10 @@ apiRouter.post('/submit-score', requireAuth, rateLimit(20, 60000, 'score_submit'
     serverLogger.error('SCORE_SUBMIT_ERROR', 'Failed to submit score', err, undefined, req.user?.uid, req.ip, req.id);
     return handleServerException(err, req, res);
   }
-});
+};
+
+apiRouter.post('/submit-score', requireAuth, rateLimit(20, 60000, 'score_submit'), handleSubmitScore);
+apiRouter.post('/score/submit', requireAuth, rateLimit(20, 60000, 'score_submit'), handleSubmitScore);
 
 // ----------------------------------------------------
 // 3 & 4. SERVER-AUTHORITATIVE ECONOMY & PURCHASES
@@ -191,6 +231,7 @@ apiRouter.get('/economy', requireAuth, rateLimit(60, 60000, 'economy_fetch'), as
   try {
     const userId = req.user!.uid;
     const economy = await getUserEconomy(userId);
+    const progression = await getUserProgression(userId);
     const spinCooldown = await getSpinCooldown(userId);
 
     return res.json({
@@ -199,6 +240,8 @@ apiRouter.get('/economy', requireAuth, rateLimit(60, 60000, 'economy_fetch'), as
       coins: economy.coins,
       totalEarned: economy.totalEarned,
       totalSpent: economy.totalSpent,
+      totalXp: progression.totalXp,
+      level: progression.level,
       canSpin: spinCooldown.canSpin,
       lastSpinDate: spinCooldown.lastSpinDate,
       lastUpdated: economy.lastUpdated
@@ -231,6 +274,9 @@ apiRouter.get('/spin-status', requireAuth, rateLimit(60, 60000, 'spin_status'), 
  */
 apiRouter.post('/buy-item', requireAuth, rateLimit(20, 60000, 'shop_purchase'), async (req: Request, res: Response) => {
   try {
+    if (isKillSwitchActive('economy')) {
+      return sendApiError(res, 503, 'ECONOMY_MAINTENANCE', 'Sistem transaksi ekonomi sedang dalam pemeliharaan sementara.');
+    }
     const userId = req.user!.uid;
     const { itemId, idempotencyKey } = req.body;
 
@@ -263,6 +309,9 @@ apiRouter.post('/buy-item', requireAuth, rateLimit(20, 60000, 'shop_purchase'), 
  */
 apiRouter.post('/spin', requireAuth, rateLimit(10, 60000, 'daily_spin'), async (req: Request, res: Response) => {
   try {
+    if (isKillSwitchActive('economy')) {
+      return sendApiError(res, 503, 'ECONOMY_MAINTENANCE', 'Sistem transaksi ekonomi sedang dalam pemeliharaan sementara.');
+    }
     const userId = req.user!.uid;
     const result = await executeDailySpin(userId);
 
@@ -285,6 +334,9 @@ apiRouter.post('/spin', requireAuth, rateLimit(10, 60000, 'daily_spin'), async (
  */
 apiRouter.post('/economy/gamble', requireAuth, rateLimit(30, 60000, 'gamble'), async (req: Request, res: Response) => {
   try {
+    if (isKillSwitchActive('economy')) {
+      return sendApiError(res, 503, 'ECONOMY_MAINTENANCE', 'Sistem transaksi ekonomi sedang dalam pemeliharaan sementara.');
+    }
     const userId = req.user!.uid;
     const { bet, choice, idempotencyKey } = req.body;
 
@@ -294,6 +346,10 @@ apiRouter.post('/economy/gamble', requireAuth, rateLimit(30, 60000, 'gamble'), a
 
     if (choice !== 'heads' && choice !== 'tails') {
       return sendApiError(res, 400, 'INVALID_CHOICE', 'Pilihan harus "heads" atau "tails".');
+    }
+
+    if (!idempotencyKey || !isValidIdempotencyKey(idempotencyKey)) {
+      return sendApiError(res, 400, 'INVALID_IDEMPOTENCY_KEY', 'Kunci idempotency valid wajib disertakan untuk taruhan.');
     }
 
     const result = await executeGamble(userId, bet, choice, idempotencyKey);
@@ -319,8 +375,15 @@ apiRouter.post('/economy/gamble', requireAuth, rateLimit(30, 60000, 'gamble'), a
  */
 apiRouter.post('/economy/gacha', requireAuth, rateLimit(20, 60000, 'gacha'), async (req: Request, res: Response) => {
   try {
+    if (isKillSwitchActive('economy')) {
+      return sendApiError(res, 503, 'ECONOMY_MAINTENANCE', 'Sistem transaksi ekonomi sedang dalam pemeliharaan sementara.');
+    }
     const userId = req.user!.uid;
     const { idempotencyKey } = req.body;
+
+    if (!idempotencyKey || !isValidIdempotencyKey(idempotencyKey)) {
+      return sendApiError(res, 400, 'INVALID_IDEMPOTENCY_KEY', 'Kunci idempotency valid wajib disertakan untuk gacha.');
+    }
 
     const result = await executeGacha(userId, idempotencyKey);
 
@@ -344,6 +407,9 @@ apiRouter.post('/economy/gacha', requireAuth, rateLimit(20, 60000, 'gacha'), asy
  */
 const handleClaimReward = async (req: Request, res: Response) => {
   try {
+    if (isKillSwitchActive('economy')) {
+      return sendApiError(res, 503, 'ECONOMY_MAINTENANCE', 'Sistem transaksi ekonomi sedang dalam pemeliharaan sementara.');
+    }
     const userId = req.user!.uid;
     const { claimId, claimType, reason, idempotencyKey, details } = req.body;
 
@@ -353,7 +419,7 @@ const handleClaimReward = async (req: Request, res: Response) => {
       return sendApiError(res, 400, 'INVALID_REWARD_CLAIM', 'ID klaim reward (claimId) wajib disertakan.');
     }
 
-    if (!idempotencyKey || typeof idempotencyKey !== 'string') {
+    if (!idempotencyKey || !isValidIdempotencyKey(idempotencyKey)) {
       return sendApiError(res, 400, 'INVALID_IDEMPOTENCY_KEY', 'Kunci idempotency valid wajib disertakan untuk klaim reward.');
     }
 
@@ -403,6 +469,9 @@ apiRouter.get('/competitive/profile', requireAuth, rateLimit(60, 60000, 'comp_pr
  */
 apiRouter.post('/competitive/session/start', requireAuth, rateLimit(30, 60000, 'comp_session_start'), async (req: Request, res: Response) => {
   try {
+    if (isKillSwitchActive('ranked')) {
+      return sendApiError(res, 503, 'RANKED_MAINTENANCE', 'Mode Ranked sedang dalam pemeliharaan sementara.');
+    }
     const userId = req.user!.uid;
     const { gameId } = req.body;
 
@@ -435,6 +504,9 @@ apiRouter.post('/competitive/session/start', requireAuth, rateLimit(30, 60000, '
  */
 apiRouter.post('/competitive/submit', requireAuth, rateLimit(10, 60000, 'comp_submit'), async (req: Request, res: Response) => {
   try {
+    if (isKillSwitchActive('ranked')) {
+      return sendApiError(res, 503, 'RANKED_MAINTENANCE', 'Mode Ranked sedang dalam pemeliharaan sementara.');
+    }
     const userId = req.user!.uid;
     const {
       gameId,
@@ -582,6 +654,81 @@ apiRouter.post('/admin/force-sync', requireAdmin, (req: Request, res: Response) 
     success: true,
     message: 'State authoritative berhasil disinkronkan.'
   });
+});
+
+apiRouter.get('/admin/kill-switches', requireAdmin, (_req: Request, res: Response) => {
+  const switches = getKillSwitches();
+  return res.json({
+    success: true,
+    killSwitches: switches
+  });
+});
+
+apiRouter.post('/admin/kill-switches', requireAdmin, (req: Request, res: Response) => {
+  const { feature, active } = req.body;
+  if (feature !== 'ranked' && feature !== 'economy' && feature !== 'seasons') {
+    return sendApiError(res, 400, 'INVALID_FEATURE', 'Fitur kill switch harus ranked, economy, atau seasons.');
+  }
+  if (typeof active !== 'boolean') {
+    return sendApiError(res, 400, 'INVALID_VALUE', 'Nilai active harus berupa boolean.');
+  }
+
+  const result = setKillSwitch(feature as KillSwitchFeature, active, req.user!.uid);
+  return res.json(result);
+});
+
+apiRouter.post('/admin/reconcile-economy', requireAdmin, async (req: Request, res: Response) => {
+  try {
+    const { userId } = req.body;
+    if (!userId || typeof userId !== 'string') {
+      return sendApiError(res, 400, 'INVALID_USER_ID', 'User ID wajib disertakan.');
+    }
+
+    const report = await reconcileUserEconomy(userId);
+    serverLogger.security('ADMIN_ACTION', `Admin ran economy reconciliation for ${userId}`, {
+      targetUserId: userId,
+      isReconciled: report.isReconciled,
+      discrepancy: report.discrepancy
+    }, req.user!.uid, req.ip, req.id);
+
+    return res.json({ success: true, report });
+  } catch (err: any) {
+    serverLogger.error('ADMIN_RECONCILE_ERROR', 'Failed to reconcile user economy', err, undefined, req.user?.uid, req.ip, req.id);
+    return sendApiError(res, 500, 'INTERNAL_ERROR', 'Gagal merekonsiliasi data ekonomi user.');
+  }
+});
+
+apiRouter.post('/admin/reconcile-competitive', requireAdmin, async (req: Request, res: Response) => {
+  try {
+    const { userId } = req.body;
+    if (!userId || typeof userId !== 'string') {
+      return sendApiError(res, 400, 'INVALID_USER_ID', 'User ID wajib disertakan.');
+    }
+
+    const report = await validateCompetitiveIntegrity(userId);
+    serverLogger.security('ADMIN_ACTION', `Admin ran competitive integrity check for ${userId}`, {
+      targetUserId: userId,
+      isConsistent: report.isConsistent
+    }, req.user!.uid, req.ip, req.id);
+
+    return res.json({ success: true, report });
+  } catch (err: any) {
+    serverLogger.error('ADMIN_COMP_RECONCILE_ERROR', 'Failed to check competitive integrity', err, undefined, req.user?.uid, req.ip, req.id);
+    return sendApiError(res, 500, 'INTERNAL_ERROR', 'Gagal memeriksa integritas data kompetitif.');
+  }
+});
+
+// ----------------------------------------------------
+// USER SELF-RECONCILIATION
+// ----------------------------------------------------
+apiRouter.get('/user/reconcile-economy', requireAuth, rateLimit(10, 60000, 'user_reconcile'), async (req: Request, res: Response) => {
+  try {
+    const userId = req.user!.uid;
+    const report = await reconcileUserEconomy(userId);
+    return res.json({ success: true, report });
+  } catch (err: any) {
+    return handleServerException(err, req, res);
+  }
 });
 
 // ----------------------------------------------------

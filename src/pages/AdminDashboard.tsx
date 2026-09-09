@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
-import { ShieldAlert, Users, TrendingUp, DollarSign, Target, Settings, CheckCircle2, RefreshCw, AlertTriangle, Trash2 } from 'lucide-react';
+import { ShieldAlert, Users, TrendingUp, DollarSign, Settings, CheckCircle2, RefreshCw, AlertTriangle, Trash2, ToggleLeft, ToggleRight, Database } from 'lucide-react';
 import { Button } from '../components/UI';
 import { formatNumber } from '../utils/format';
 import { isFirebaseReady, auth } from '../services/firebase';
@@ -25,10 +25,19 @@ interface AdminStats {
   serverTime: string;
 }
 
+interface KillSwitches {
+  ranked: boolean;
+  economy: boolean;
+  seasons: boolean;
+}
+
 export default function AdminDashboard() {
   const [stats, setStats] = useState<AdminStats | null>(null);
+  const [killSwitches, setKillSwitches] = useState<KillSwitches>({ ranked: false, economy: false, seasons: false });
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
+  const [targetUserId, setTargetUserId] = useState('');
+  const [reconReport, setReconReport] = useState<any>(null);
   const { showToast } = useToast();
 
   const getAuthHeaders = async (): Promise<Record<string, string>> => {
@@ -48,12 +57,19 @@ export default function AdminDashboard() {
     try {
       setLoading(true);
       const headers = await getAuthHeaders();
-      const res = await fetch('/api/admin/stats', { headers });
-      if (res.ok) {
-        const data = await res.json();
+      const [resStats, resSwitches] = await Promise.all([
+        fetch('/api/admin/stats', { headers }),
+        fetch('/api/admin/kill-switches', { headers })
+      ]);
+      if (resStats.ok) {
+        const data = await resStats.json();
         setStats(data);
-      } else {
-        showToast('Gagal Memuat Stats', 'Gagal memuat telemetri server admin.', 'error');
+      }
+      if (resSwitches.ok) {
+        const swData = await resSwitches.json();
+        if (swData.killSwitches) {
+          setKillSwitches(swData.killSwitches);
+        }
       }
     } catch (e) {
       console.error('Failed to load admin stats:', e);
@@ -65,6 +81,56 @@ export default function AdminDashboard() {
   useEffect(() => {
     fetchStats();
   }, []);
+
+  const handleToggleKillSwitch = async (feature: keyof KillSwitches) => {
+    try {
+      setActionLoading(true);
+      const headers = await getAuthHeaders();
+      const newState = !killSwitches[feature];
+      const res = await fetch('/api/admin/kill-switches', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ feature, active: newState })
+      });
+      if (res.ok) {
+        setKillSwitches(prev => ({ ...prev, [feature]: newState }));
+        showToast('Kill Switch Diperbarui', `Fitur '${feature}' sekarang: ${newState ? 'DIMATIKAN (Maintenance)' : 'AKTIF'}`, 'success', '🛡️');
+      } else {
+        showToast('Gagal Toggle', 'Server menolak pembaruan kill switch.', 'error');
+      }
+    } catch (e) {
+      showToast('Error', 'Gagal menghubungi server.', 'error');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleReconcileUser = async () => {
+    if (!targetUserId.trim()) {
+      showToast('Input Kurang', 'Masukkan User ID yang valid.', 'warning');
+      return;
+    }
+    try {
+      setActionLoading(true);
+      const headers = await getAuthHeaders();
+      const res = await fetch('/api/admin/reconcile-economy', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ userId: targetUserId.trim() })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setReconReport(data.report);
+        showToast('Audit Selesai', `Status rekonsiliasi: ${data.report.isReconciled ? 'COCOK (Lolos Audit)' : 'DISCREPANCY (Anomali)'}`, data.report.isReconciled ? 'success' : 'warning', '📊');
+      } else {
+        showToast('Gagal Rekonsiliasi', 'Gagal memproses data audit user.', 'error');
+      }
+    } catch (e) {
+      showToast('Error', 'Gagal memproses audit ekonomi.', 'error');
+    } finally {
+      setActionLoading(false);
+    }
+  };
 
   const handleForceSync = async () => {
     try {
@@ -156,7 +222,39 @@ export default function AdminDashboard() {
         })}
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-6">
+      {/* Emergency Kill Switches */}
+      <section className="bg-[#0f1322] border border-white/[0.04] rounded-2xl p-6">
+        <h2 className="text-sm font-bold text-white mb-4 flex items-center gap-2 uppercase tracking-wide text-red-400">
+          <ShieldAlert className="w-4 h-4" /> Emergency Incident Kill Switches
+        </h2>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          {(['ranked', 'economy', 'seasons'] as const).map((feat) => {
+            const isBlocked = killSwitches[feat];
+            return (
+              <div key={feat} className="bg-white/[0.02] border border-white/[0.04] p-4 rounded-xl flex items-center justify-between">
+                <div>
+                  <div className="text-xs font-bold text-white uppercase tracking-wider">{feat}</div>
+                  <div className="text-[11px] font-mono text-zinc-400 mt-0.5">
+                    {isBlocked ? <span className="text-red-400 font-bold">DIMATIKAN</span> : <span className="text-emerald-400 font-bold">ONLINE</span>}
+                  </div>
+                </div>
+                <Button 
+                  variant={isBlocked ? "danger" : "outline"} 
+                  size="sm" 
+                  onClick={() => handleToggleKillSwitch(feat)} 
+                  disabled={actionLoading}
+                >
+                  {isBlocked ? <ToggleRight className="w-4 h-4 mr-1 text-red-300" /> : <ToggleLeft className="w-4 h-4 mr-1 text-zinc-400" />}
+                  {isBlocked ? 'Matikan Kill Switch' : 'Aktifkan'}
+                </Button>
+              </div>
+            );
+          })}
+        </div>
+      </section>
+
+      {/* Server Controls & Diagnostics */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <section className="bg-[#0f1322] border border-white/[0.04] rounded-2xl p-6">
           <h2 className="text-sm font-bold text-white mb-4 flex items-center gap-2 uppercase tracking-wide">
             <Settings className="w-4 h-4 text-zinc-400" /> Server Controls
@@ -171,6 +269,36 @@ export default function AdminDashboard() {
           </div>
         </section>
 
+        <section className="bg-[#0f1322] border border-white/[0.04] rounded-2xl p-6">
+          <h2 className="text-sm font-bold text-white mb-4 flex items-center gap-2 uppercase tracking-wide">
+            <Database className="w-4 h-4 text-indigo-400" /> User Ledger Reconciliation Audit
+          </h2>
+          <div className="space-y-3">
+            <div className="flex gap-2">
+              <input 
+                type="text" 
+                placeholder="Masukkan User ID..." 
+                value={targetUserId} 
+                onChange={(e) => setTargetUserId(e.target.value)}
+                className="flex-1 bg-black/40 border border-white/[0.06] rounded-xl px-3 py-2 text-xs font-mono text-white placeholder-zinc-500 focus:outline-none focus:border-indigo-500"
+              />
+              <Button size="sm" variant="primary" onClick={handleReconcileUser} disabled={actionLoading}>
+                Audit User
+              </Button>
+            </div>
+            {reconReport && (
+              <div className={`p-3 rounded-xl font-mono text-xs ${reconReport.isReconciled ? 'bg-emerald-950/40 border border-emerald-500/20 text-emerald-300' : 'bg-red-950/40 border border-red-500/20 text-red-300'} space-y-1`}>
+                <div className="font-bold">Status: {reconReport.isReconciled ? 'RECONCILED (Valid)' : 'DISCREPANCY DETECTED'}</div>
+                <div>Saldo Aktual: {reconReport.actualBalance} coins</div>
+                <div>Saldo Terhitung: {reconReport.calculatedBalance} coins</div>
+                <div>Total Transaksi: {reconReport.transactionCount} entries</div>
+              </div>
+            )}
+          </div>
+        </section>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <section className="bg-[#0f1322] border border-white/[0.04] rounded-2xl p-6">
           <h2 className="text-sm font-bold text-white mb-4 flex items-center gap-2 uppercase tracking-wide">
             <CheckCircle2 className="w-4 h-4 text-emerald-400" /> Server Security Status

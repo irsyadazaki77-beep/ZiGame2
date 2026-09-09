@@ -1,8 +1,9 @@
 import { GameStats } from '../types';
-import { GAME_REGISTRY } from '../config/gameRegistry';
+import { CANONICAL_GAME_IDS } from '../config/canonicalGames';
+import { CANONICAL_GAME_REGISTRY } from '../config/gameRegistry';
 
-export const INITIAL_GAMES: GameStats[] = Object.keys(GAME_REGISTRY).map((key) => {
-  const game = GAME_REGISTRY[key];
+export const INITIAL_GAMES: GameStats[] = CANONICAL_GAME_IDS.map((id) => {
+  const game = CANONICAL_GAME_REGISTRY[id];
   return {
     id: game.id,
     title: game.title,

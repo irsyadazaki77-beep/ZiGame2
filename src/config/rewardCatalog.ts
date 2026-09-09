@@ -55,70 +55,93 @@ export const AUTHORITATIVE_QUEST_TIER_REWARDS: Record<number, { rewardCoins: num
   10: { rewardCoins: 500, rewardXp: 500, title: 'Tier 10 Cyber Crown' }
 };
 
+export const CANONICAL_STARTER_PACK_ID = 'starter_pack_v1';
+
+export function getCanonicalClaimId(
+  claimId: string,
+  claimType: RewardClaimType,
+  targetNum?: number
+): string {
+  const sanitized = (claimId || '').trim();
+  if (claimType === 'starter_pack') {
+    return CANONICAL_STARTER_PACK_ID;
+  }
+  if (claimType === 'level_up') {
+    const num = targetNum || parseInt(sanitized.replace(/\D/g, ''), 10) || 2;
+    return `level_up_${num}`;
+  }
+  if (claimType === 'quest_tier') {
+    const num = targetNum || parseInt(sanitized.replace(/\D/g, ''), 10) || 1;
+    return `quest_tier_${num}`;
+  }
+  if (claimType === 'daily_mission' && sanitized === 'm_play_3') {
+    const todayStr = new Date().toISOString().split('T')[0];
+    return `m_${todayStr}_3`;
+  }
+  return sanitized;
+}
+
 export function resolveAuthoritativeReward(
   claimId: string,
   claimType: RewardClaimType,
-  details?: Record<string, unknown>
-): { rewardCoins: number; rewardXp: number; title: string } | null {
+  targetNum?: number
+): { rewardCoins: number; rewardXp: number; title: string; canonicalId: string } | null {
   const sanitizedId = (claimId || '').trim();
   if (!sanitizedId) return null;
 
   switch (claimType) {
     case 'achievement': {
       const ach = AUTHORITATIVE_ACHIEVEMENT_REWARDS[sanitizedId];
-      if (ach) return ach;
+      if (ach) return { ...ach, canonicalId: sanitizedId };
       return null;
     }
 
     case 'daily_mission': {
-      if (sanitizedId === 'm_play_3') {
-        return { rewardCoins: 50, rewardXp: 80, title: 'Daily Mission: Play 3 Games' };
+      const canonical = getCanonicalClaimId(sanitizedId, 'daily_mission');
+      if (sanitizedId === 'm_play_3' || canonical.endsWith('_3') || sanitizedId.includes('play_count')) {
+        return { rewardCoins: 50, rewardXp: 80, title: 'Daily Mission: Multigenre Exploration', canonicalId: canonical };
       }
-      if (sanitizedId.match(/^m_\d{4}-\d{2}-\d{2}_1$/) || sanitizedId.includes('score_target')) {
-        const target = typeof details?.target === 'number' ? Math.min(150, Math.max(50, details.target)) : 100;
-        return { rewardCoins: target, rewardXp: target + 20, title: 'Daily Mission: Score Target' };
+      if (canonical.endsWith('_1') || sanitizedId.includes('score_target')) {
+        return { rewardCoins: 80, rewardXp: 100, title: 'Daily Mission: Score Target', canonicalId: canonical };
       }
-      if (sanitizedId.match(/^m_\d{4}-\d{2}-\d{2}_2$/) || sanitizedId.includes('unique_games')) {
-        return { rewardCoins: 100, rewardXp: 120, title: 'Daily Mission: High Score Breakthrough' };
-      }
-      if (sanitizedId.match(/^m_\d{4}-\d{2}-\d{2}_3$/) || sanitizedId.includes('play_count')) {
-        return { rewardCoins: 50, rewardXp: 80, title: 'Daily Mission: Multigenre Exploration' };
+      if (canonical.endsWith('_2') || sanitizedId.includes('unique_games')) {
+        return { rewardCoins: 100, rewardXp: 120, title: 'Daily Mission: High Score Breakthrough', canonicalId: canonical };
       }
       return null;
     }
 
     case 'challenge': {
       if (sanitizedId.startsWith('daily_')) {
-        return { rewardCoins: 75, rewardXp: 100, title: 'Daily Challenge Complete' };
+        return { rewardCoins: 75, rewardXp: 100, title: 'Daily Challenge Complete', canonicalId: sanitizedId };
       }
       if (sanitizedId.startsWith('weekly_')) {
-        return { rewardCoins: 150, rewardXp: 250, title: 'Weekly Challenge Complete' };
+        return { rewardCoins: 150, rewardXp: 250, title: 'Weekly Challenge Complete', canonicalId: sanitizedId };
       }
       if (sanitizedId.startsWith('special_') || sanitizedId.startsWith('season_')) {
-        return { rewardCoins: 250, rewardXp: 400, title: 'Special Challenge Complete' };
+        return { rewardCoins: 250, rewardXp: 400, title: 'Special Challenge Complete', canonicalId: sanitizedId };
       }
       return null;
     }
 
     case 'quest_tier': {
-      const tierNum = typeof details?.tier === 'number' ? details.tier : parseInt(sanitizedId.replace(/\D/g, ''), 10);
-      if (!tierNum || isNaN(tierNum)) return null;
+      const tierNum = targetNum || parseInt(sanitizedId.replace(/\D/g, ''), 10);
+      if (!tierNum || isNaN(tierNum) || tierNum < 1 || tierNum > 10) return null;
       const tierReward = AUTHORITATIVE_QUEST_TIER_REWARDS[tierNum];
-      if (tierReward) return tierReward;
+      if (tierReward) return { ...tierReward, canonicalId: `quest_tier_${tierNum}` };
       return null;
     }
 
     case 'starter_pack': {
-      if (sanitizedId === 'starter_pack' || sanitizedId === 'starter_pack_claim') {
-        return { rewardCoins: 100, rewardXp: 150, title: 'Starter Recruit Bonus' };
+      if (sanitizedId === 'starter_pack' || sanitizedId === 'starter_pack_claim' || sanitizedId === CANONICAL_STARTER_PACK_ID) {
+        return { rewardCoins: 100, rewardXp: 150, title: 'Starter Recruit Bonus', canonicalId: CANONICAL_STARTER_PACK_ID };
       }
       return null;
     }
 
     case 'level_up': {
-      const level = typeof details?.level === 'number' ? details.level : parseInt(sanitizedId.replace(/\D/g, ''), 10);
+      const level = targetNum || parseInt(sanitizedId.replace(/\D/g, ''), 10);
       if (!level || isNaN(level) || level < 2 || level > 100) return null;
-      return { rewardCoins: 50, rewardXp: 0, title: `Player Level ${level} Reached` };
+      return { rewardCoins: 50, rewardXp: 0, title: `Player Level ${level} Reached`, canonicalId: `level_up_${level}` };
     }
 
     default:

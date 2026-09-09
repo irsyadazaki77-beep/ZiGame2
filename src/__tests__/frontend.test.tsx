@@ -1,10 +1,15 @@
 // @vitest-environment jsdom
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { APP_VERSION } from '../config/version';
-import { toCanonicalGameId, isValidGameId } from '../config/canonicalGames';
+import { toCanonicalGameId, isValidGameId, CANONICAL_GAME_IDS } from '../config/canonicalGames';
 import { formatNumber } from '../utils/format';
 import { GAME_BALANCE_CONFIG } from '../config/balanceConfig';
+import { CANONICAL_GAME_REGISTRY, GAME_REGISTRY, getGameRegistryItem } from '../config/gameRegistry';
+import { CANONICAL_GAME_LAYOUTS, getGameLayout } from '../config/gameLayouts';
+import { getTutorialForGame } from '../config/gameTutorials';
+import { INITIAL_GAMES } from '../data/games';
 import { storageService } from '../services/storageService';
+import { inputManager } from '../services/inputService';
 
 describe('Frontend Utilities & Configuration Tests', () => {
   beforeEach(() => {
@@ -46,32 +51,49 @@ describe('Frontend Utilities & Configuration Tests', () => {
     });
   });
 
-    describe('Canonical Game Registry & 37 Games Integrity', () => {
-    it('should have valid canonical ID and balance config for all 37 games', () => {
-      const all37Games = [
-        'snake', 'brick-breaker', 'flappy-pixel', 'space-defender', 'memory-grid',
-        'cyber-runner', 'neon-pong', 'neon-stacker', 'vaporwave-racer', 'lock-breaker',
-        'sine-rider', 'cosmic-dodge', 'laser-grid', 'cyber-simon', 'plinko-neo',
-        'cosmic-asteroid', 'cyber-slasher', 'cyber-clicker', 'block-match', 'cyber-typer',
-        'maze-runner', 'memory-path', 'rhythm-tap', 'pixel-golf', 'pixel-dino',
-        'cyber-tetris', 'archery-neo', 'cyber-mines', 'neon-2048', 'whack-a-drone',
-        'jump-rope', 'neon-drift',
-        'neon-heist', 'void-survivor', 'orbital-defense', 'gravity-shift', 'hex-dominion'
-      ];
+  describe('Canonical Game Registry & 37 Games Integrity', () => {
+    it('should have exactly 37 canonical games declared', () => {
+      expect(CANONICAL_GAME_IDS.length).toBe(37);
+      expect(INITIAL_GAMES.length).toBe(37);
+    });
 
-      expect(all37Games.length).toBe(37);
-
-      for (const id of all37Games) {
+    it('should validate all 37 games for canonical ID, registry, component, layout, and balance', () => {
+      for (const id of CANONICAL_GAME_IDS) {
         expect(isValidGameId(id)).toBe(true);
         expect(toCanonicalGameId(id)).toBe(id);
-        const config = GAME_BALANCE_CONFIG[id as keyof typeof GAME_BALANCE_CONFIG];
-        expect(config).toBeDefined();
+
+        // Registry check
+        const registryItem = CANONICAL_GAME_REGISTRY[id];
+        expect(registryItem, `Missing registry item for ${id}`).toBeDefined();
+        expect(registryItem.id).toBe(id);
+        expect(registryItem.title).toBeTruthy();
+        expect(registryItem.component).toBeDefined();
+        expect(typeof registryItem.component).toBe('object');
+
+        // Lookup helper check
+        const retrieved = getGameRegistryItem(id);
+        expect(retrieved).toBeDefined();
+        expect(retrieved?.id).toBe(id);
+
+        // Balance check
+        const config = GAME_BALANCE_CONFIG[id];
+        expect(config, `Missing balance config for ${id}`).toBeDefined();
         expect(config.baseCoinMultiplier).toBeGreaterThan(0);
         expect(config.maxScoreCeiling).toBeGreaterThan(0);
+
+        // Layout check
+        const layout = CANONICAL_GAME_LAYOUTS[id] || getGameLayout(id);
+        expect(layout, `Missing layout for ${id}`).toBeDefined();
+        expect(layout.aspectRatio).toBeDefined();
+
+        // Tutorial check
+        const tutorial = getTutorialForGame(id, registryItem.title, registryItem.description);
+        expect(tutorial, `Missing tutorial for ${id}`).toBeDefined();
+        expect(tutorial.title).toBeTruthy();
       }
     });
 
-    it('should resolve legacy aliases cleanly to their canonical counterparts', () => {
+    it('should resolve legacy aliases cleanly to their canonical counterparts in registry and helpers', () => {
       expect(toCanonicalGameId('brick')).toBe('brick-breaker');
       expect(toCanonicalGameId('flappy')).toBe('flappy-pixel');
       expect(toCanonicalGameId('2048')).toBe('neon-2048');
@@ -83,6 +105,38 @@ describe('Frontend Utilities & Configuration Tests', () => {
       expect(toCanonicalGameId('typer')).toBe('cyber-typer');
       expect(toCanonicalGameId('heist')).toBe('neon-heist');
       expect(toCanonicalGameId('survivor')).toBe('void-survivor');
+
+      // Check aliased lookup in GAME_REGISTRY
+      expect(GAME_REGISTRY['brick'].id).toBe('brick-breaker');
+      expect(GAME_REGISTRY['flappy'].id).toBe('flappy-pixel');
+      expect(getGameRegistryItem('brick')?.id).toBe('brick-breaker');
+    });
+  });
+
+  describe('Input Service & Double-Dispatch Prevention', () => {
+    it('should filter synthetic untrusted events from driving gameplay input', () => {
+      const subscriber = {
+        onActionDown: vi.fn(),
+        onActionUp: vi.fn(),
+        onRawKey: vi.fn()
+      };
+
+      const unsubscribe = inputManager.subscribe(subscriber);
+
+      // Untrusted event (e.isTrusted is false in synthetic JS dispatch)
+      const fakeEvent = new KeyboardEvent('keydown', {
+        key: 'ArrowUp',
+        code: 'ArrowUp',
+        bubbles: true,
+        cancelable: true
+      });
+
+      window.dispatchEvent(fakeEvent);
+
+      // Should not trigger subscriber for untrusted synthetic events
+      expect(subscriber.onActionDown).not.toHaveBeenCalled();
+
+      unsubscribe();
     });
   });
 });

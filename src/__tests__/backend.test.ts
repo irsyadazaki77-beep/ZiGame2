@@ -346,7 +346,11 @@ describe('ZiGame 2.0 Backend Authority & Security Tests', () => {
       const res = await request(app)
         .post('/api/economy/gamble')
         .set('x-test-uid', testUid)
-        .send({ bet: 20, choice: 'heads' });
+        .send({
+          bet: 20,
+          choice: 'heads',
+          idempotencyKey: `gamble_key_${Date.now()}`
+        });
 
       expect(res.status).toBe(200);
       expect(res.body.success).toBe(true);
@@ -361,7 +365,11 @@ describe('ZiGame 2.0 Backend Authority & Security Tests', () => {
       const res = await request(app)
         .post('/api/economy/gamble')
         .set('x-test-uid', testUid)
-        .send({ bet: 500, choice: 'heads' }); // Default balance is 100
+        .send({
+          bet: 500,
+          choice: 'heads',
+          idempotencyKey: `gamble_key_poor_${Date.now()}`
+        }); // Default balance is 100
 
       expect(res.status).toBe(400);
       expect(res.body.code).toBe('INSUFFICIENT_FUNDS');
@@ -372,7 +380,9 @@ describe('ZiGame 2.0 Backend Authority & Security Tests', () => {
       const res = await request(app)
         .post('/api/economy/gacha')
         .set('x-test-uid', testUid)
-        .send({});
+        .send({
+          idempotencyKey: `gacha_key_${Date.now()}`
+        });
 
       expect(res.status).toBe(200);
       expect(res.body.success).toBe(true);
@@ -380,8 +390,8 @@ describe('ZiGame 2.0 Backend Authority & Security Tests', () => {
       expect(res.body.remainingCoins).toBe(50); // 100 - 50 = 50
     });
 
-    it('should process reward claim atomically on server with authoritative reward lookup', async () => {
-      const testUid = `claimer-${Date.now()}`;
+    it('should reject unearned reward claims (anti-exploit test)', async () => {
+      const testUid = `unearned-user-${Date.now()}`;
       const res = await request(app)
         .post('/api/economy/claim')
         .set('x-test-uid', testUid)
@@ -391,36 +401,110 @@ describe('ZiGame 2.0 Backend Authority & Security Tests', () => {
           idempotencyKey: `claim_first_${Date.now()}`
         });
 
-      expect(res.status).toBe(200);
-      expect(res.body.success).toBe(true);
-      expect(res.body.amount).toBe(50);
-      expect(res.body.newBalance).toBe(150); // 100 + 50 = 150
-      expect(res.body.transactionId).toBeDefined();
+      expect(res.status).toBe(400);
+      expect(res.body.code).toBe('REWARD_REQUIREMENTS_NOT_MET');
     });
 
-    it('should prevent duplicate claiming of the same reward (exploit test)', async () => {
-      const testUid = `duplicate-claimer-${Date.now()}`;
-      const firstRes = await request(app)
+    it('should reject substring/test UID bypass attempts (zero-bypass enforcement)', async () => {
+      const testUid = `claimer_gambler_test_${Date.now()}`;
+      const res = await request(app)
         .post('/api/economy/claim')
         .set('x-test-uid', testUid)
         .send({
           claimId: 'snake_turbo',
           claimType: 'achievement',
-          idempotencyKey: `claim_500_1_${Date.now()}`
+          idempotencyKey: `claim_exploit_${Date.now()}`
+        });
+
+      expect(res.status).toBe(400);
+      expect(res.body.code).toBe('REWARD_REQUIREMENTS_NOT_MET');
+    });
+
+    it('should process legitimate reward claim atomically on server with authoritative reward lookup', async () => {
+      const testUid = `legit-claimer-${Date.now()}`;
+      
+      // 1. Play snake legitimately and submit score
+      const sessionRes = await request(app)
+        .post('/api/session/start')
+        .set('x-test-uid', testUid)
+        .send({ gameId: 'snake' });
+      expect(sessionRes.status).toBe(200);
+
+      const sessionId = sessionRes.body.sessionId;
+      const sessionObj = memoryStore.sessions.get(sessionId);
+      if (sessionObj) sessionObj.startTime = Date.now() - 5000;
+
+      const submitRes = await request(app)
+        .post('/api/score/submit')
+        .set('x-test-uid', testUid)
+        .send({
+          gameId: 'snake',
+          sessionId,
+          score: 25,
+          durationMs: 5000,
+          playerName: 'LegitPlayer'
+        });
+      expect(submitRes.status).toBe(200);
+
+      // 2. Now claim ach_first_win (verified based on actual score > 0)
+      const res = await request(app)
+        .post('/api/economy/claim')
+        .set('x-test-uid', testUid)
+        .send({
+          claimId: 'ach_first_win',
+          claimType: 'achievement',
+          idempotencyKey: `claim_first_legit_${Date.now()}`
+        });
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.amount).toBe(50);
+      expect(res.body.xp).toBe(75);
+      expect(res.body.newBalance).toBeGreaterThanOrEqual(150);
+      expect(res.body.transactionId).toBeDefined();
+    });
+
+    it('should reject level_up reward when server level is insufficient', async () => {
+      const testUid = `level-exploit-${Date.now()}`;
+      const res = await request(app)
+        .post('/api/economy/claim')
+        .set('x-test-uid', testUid)
+        .send({
+          claimId: 'level_5',
+          claimType: 'level_up',
+          details: { level: 5 },
+          idempotencyKey: `claim_lvl5_${Date.now()}`
+        });
+
+      expect(res.status).toBe(400);
+      expect(res.body.code).toBe('REWARD_REQUIREMENTS_NOT_MET');
+    });
+
+    it('should prevent duplicate claiming of the same reward (exploit test)', async () => {
+      const testUid = `duplicate-claimer-${Date.now()}`;
+      
+      // Starter pack is available to all users once
+      const firstRes = await request(app)
+        .post('/api/economy/claim')
+        .set('x-test-uid', testUid)
+        .send({
+          claimId: 'starter_pack',
+          claimType: 'starter_pack',
+          idempotencyKey: `claim_starter_1_${Date.now()}`
         });
 
       expect(firstRes.status).toBe(200);
       expect(firstRes.body.success).toBe(true);
       expect(firstRes.body.amount).toBe(100);
 
-      // Second attempt to claim the same achievement with a new idempotency key
+      // Second attempt to claim the same starter pack with a new idempotency key
       const secondRes = await request(app)
         .post('/api/economy/claim')
         .set('x-test-uid', testUid)
         .send({
-          claimId: 'snake_turbo',
-          claimType: 'achievement',
-          idempotencyKey: `claim_500_2_${Date.now()}`
+          claimId: 'starter_pack',
+          claimType: 'starter_pack',
+          idempotencyKey: `claim_starter_2_${Date.now()}`
         });
 
       expect(secondRes.status).toBe(400);
@@ -435,8 +519,8 @@ describe('ZiGame 2.0 Backend Authority & Security Tests', () => {
         .post('/api/economy/claim')
         .set('x-test-uid', testUid)
         .send({
-          claimId: 'm_play_3',
-          claimType: 'daily_mission',
+          claimId: 'starter_pack',
+          claimType: 'starter_pack',
           idempotencyKey: idKey
         });
 
@@ -447,8 +531,8 @@ describe('ZiGame 2.0 Backend Authority & Security Tests', () => {
         .post('/api/economy/claim')
         .set('x-test-uid', testUid)
         .send({
-          claimId: 'm_play_3',
-          claimType: 'daily_mission',
+          claimId: 'starter_pack',
+          claimType: 'starter_pack',
           idempotencyKey: idKey
         });
 
@@ -470,6 +554,253 @@ describe('ZiGame 2.0 Backend Authority & Security Tests', () => {
       expect(res.body.code).toBe('INVALID_GAME_ID');
       expect(res.body.message).toBeDefined();
       expect(res.body.requestId).toBeDefined();
+    });
+  });
+
+  describe('Readiness, Kill Switches & Data Reconciliation', () => {
+    it('should respond to /api/ready and /api/liveness', async () => {
+      const readyRes = await request(app).get('/api/ready');
+      expect(readyRes.status).toBe(200);
+      expect(readyRes.body.ready).toBe(true);
+
+      const livenessRes = await request(app).get('/api/liveness');
+      expect(livenessRes.status).toBe(200);
+      expect(livenessRes.body.alive).toBe(true);
+    });
+
+    it('should allow admin to inspect and toggle kill switches', async () => {
+      const getRes = await request(app)
+        .get('/api/admin/kill-switches')
+        .set('x-test-uid', 'admin-user')
+        .set('x-test-admin', 'true');
+
+      expect(getRes.status).toBe(200);
+      expect(getRes.body.killSwitches).toBeDefined();
+
+      // Toggle ranked kill switch ON
+      const postRes = await request(app)
+        .post('/api/admin/kill-switches')
+        .set('x-test-uid', 'admin-user')
+        .set('x-test-admin', 'true')
+        .send({ feature: 'ranked', active: true });
+
+      expect(postRes.status).toBe(200);
+      expect(postRes.body.active).toBe(true);
+
+      // Attempting to start ranked session should return 503
+      const rankedRes = await request(app)
+        .post('/api/competitive/session/start')
+        .set('x-test-uid', 'player-1')
+        .send({ gameId: 'snake' });
+
+      expect(rankedRes.status).toBe(503);
+      expect(rankedRes.body.code).toBe('RANKED_MAINTENANCE');
+
+      // Toggle ranked kill switch OFF
+      await request(app)
+        .post('/api/admin/kill-switches')
+        .set('x-test-uid', 'admin-user')
+        .set('x-test-admin', 'true')
+        .send({ feature: 'ranked', active: false });
+    });
+
+    it('should reconcile user economy and compute balance accurately from ledger', async () => {
+      const uid = `recon-user-${Date.now()}`;
+      // Initial user start (100 coins)
+      await request(app).get('/api/economy').set('x-test-uid', uid);
+
+      // Claim a reward (100 coins credit from starter_pack)
+      await request(app)
+        .post('/api/economy/claim')
+        .set('x-test-uid', uid)
+        .send({
+          claimId: 'starter_pack',
+          claimType: 'starter_pack',
+          idempotencyKey: `recon_claim_${Date.now()}`
+        });
+
+      // User self-reconciliation check
+      const selfRecon = await request(app)
+        .get('/api/user/reconcile-economy')
+        .set('x-test-uid', uid);
+
+      expect(selfRecon.status).toBe(200);
+      expect(selfRecon.body.report.isReconciled).toBe(true);
+      expect(selfRecon.body.report.actualBalance).toBe(200);
+      expect(selfRecon.body.report.calculatedBalance).toBe(200);
+      expect(selfRecon.body.report.discrepancy).toBe(0);
+
+      // Admin reconciliation endpoint
+      const adminRecon = await request(app)
+        .post('/api/admin/reconcile-economy')
+        .set('x-test-uid', 'admin-user')
+        .set('x-test-admin', 'true')
+        .send({ userId: uid });
+
+      expect(adminRecon.status).toBe(200);
+      expect(adminRecon.body.report.isReconciled).toBe(true);
+    });
+
+    it('should check competitive data integrity for player', async () => {
+      const uid = `comp-check-${Date.now()}`;
+      const adminCheck = await request(app)
+        .post('/api/admin/reconcile-competitive')
+        .set('x-test-uid', 'admin-user')
+        .set('x-test-admin', 'true')
+        .send({ userId: uid });
+
+      expect(adminCheck.status).toBe(200);
+      expect(adminCheck.body.report.isConsistent).toBe(true);
+      expect(adminCheck.body.report.profileRating).toBe(1000);
+    });
+  });
+
+  describe('Stabilization Regression Tests Suite', () => {
+    it('Regression: Canonical ranked IDs must be strictly validated against allowlist', async () => {
+      const uid = `ranked-regress-${Date.now()}`;
+
+      // Snake is valid ranked game
+      const validRanked = await request(app)
+        .post('/api/competitive/session/start')
+        .set('x-test-uid', uid)
+        .send({ gameId: 'snake' });
+      expect(validRanked.status).toBe(200);
+      expect(validRanked.body.sessionId).toBeDefined();
+
+      // Canonical brick-breaker is valid ranked game
+      const brickRanked = await request(app)
+        .post('/api/competitive/session/start')
+        .set('x-test-uid', uid)
+        .send({ gameId: 'brick-breaker' });
+      expect(brickRanked.status).toBe(200);
+      expect(brickRanked.body.sessionId).toBeDefined();
+
+      // Unranked-eligible game must be rejected
+      const unrankedGame = await request(app)
+        .post('/api/competitive/session/start')
+        .set('x-test-uid', uid)
+        .send({ gameId: 'cyber-clicker' });
+      expect(unrankedGame.status).toBe(400);
+      expect(unrankedGame.body.code).toBe('GAME_NOT_RANKED_ELIGIBLE');
+    });
+
+    it('Regression: Session lifecycle & anti-replay verification', async () => {
+      const uid = `session-regress-${Date.now()}`;
+
+      // Start authoritative session
+      const startRes = await request(app)
+        .post('/api/session/start')
+        .set('x-test-uid', uid)
+        .send({ gameId: 'snake' });
+
+      expect(startRes.status).toBe(200);
+      const { sessionId, nonce } = startRes.body;
+      expect(sessionId).toBeDefined();
+      expect(nonce).toBeDefined();
+
+      const sessionObj = memoryStore.sessions.get(sessionId);
+      if (sessionObj) sessionObj.startTime = Date.now() - 5000;
+
+      // Submit score with valid duration and session
+      const submitRes = await request(app)
+        .post('/api/score/submit')
+        .set('x-test-uid', uid)
+        .send({
+          sessionId,
+          gameId: 'snake',
+          score: 150,
+          playerName: 'Tester',
+          playerAvatar: '🤖'
+        });
+
+      expect(submitRes.status).toBe(200);
+      expect(submitRes.body.success).toBe(true);
+      expect(submitRes.body.coinsEarned).toBeGreaterThan(0);
+
+      // Replaying the exact same session must be authoritatively rejected
+      const replayRes = await request(app)
+        .post('/api/score/submit')
+        .set('x-test-uid', uid)
+        .send({
+          sessionId,
+          gameId: 'snake',
+          score: 150,
+          playerName: 'Tester',
+          playerAvatar: '🤖'
+        });
+
+      expect(replayRes.status).toBe(422);
+      expect(replayRes.body.code).toBe('SESSION_ALREADY_CONSUMED');
+    });
+
+    it('Regression: Score validation enforces bounds and duration constraints', async () => {
+      const uid = `score-bounds-${Date.now()}`;
+
+      // 1. Negative score
+      const negRes = await request(app)
+        .post('/api/score/submit')
+        .set('x-test-uid', uid)
+        .send({
+          gameId: 'snake',
+          score: -50,
+          sessionId: 'some-session',
+          playerName: 'Tester',
+          playerAvatar: '🤖'
+        });
+      expect(negRes.status).toBe(400);
+      expect(negRes.body.code).toBe('INVALID_SCORE');
+
+      // 2. Score ceiling exceedance
+      const startRes = await request(app)
+        .post('/api/session/start')
+        .set('x-test-uid', uid)
+        .send({ gameId: 'snake' });
+
+      const ceilingSessionId = startRes.body.sessionId;
+      const sessionObj = memoryStore.sessions.get(ceilingSessionId);
+      if (sessionObj) sessionObj.startTime = Date.now() - 5000;
+
+      const ceilingRes = await request(app)
+        .post('/api/score/submit')
+        .set('x-test-uid', uid)
+        .send({
+          sessionId: ceilingSessionId,
+          gameId: 'snake',
+          score: 9999999, // Exceeds 50,000 ceiling
+          playerName: 'Tester',
+          playerAvatar: '🤖'
+        });
+      expect(ceilingRes.status).toBe(422);
+      expect(ceilingRes.body.code).toBe('SCORE_CEILING_EXCEEDED');
+    });
+
+    it('Regression: Economy idempotency prevents duplicate item purchases and reward claims', async () => {
+      const uid = `idempotency-user-${Date.now()}`;
+      const idempotencyKey = `idem_key_${Date.now()}`;
+
+      // Buy item with idempotency key
+      const buy1 = await request(app)
+        .post('/api/buy-item')
+        .set('x-test-uid', uid)
+        .send({
+          itemId: 'av_dino',
+          idempotencyKey
+        });
+      expect(buy1.status).toBe(200);
+      expect(buy1.body.success).toBe(true);
+
+      // Re-send same purchase with same idempotency key
+      const buy2 = await request(app)
+        .post('/api/buy-item')
+        .set('x-test-uid', uid)
+        .send({
+          itemId: 'av_dino',
+          idempotencyKey
+        });
+      // Should return identical cached success response without double-deduction
+      expect(buy2.status).toBe(200);
+      expect(buy2.body.success).toBe(true);
+      expect(buy2.body.newBalance).toBe(buy1.body.newBalance);
     });
   });
 });

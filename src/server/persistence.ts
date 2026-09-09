@@ -121,10 +121,41 @@ export interface StoredSuspiciousScore {
   timestamp: string;
 }
 
+export interface StoredUserProgression {
+  userId: string;
+  totalXp: number;
+  level: number;
+  lastUpdated: number;
+}
+
+export function getXpRequiredForLevel(level: number): number {
+  if (level <= 1) return 0;
+  let totalXp = 0;
+  for (let i = 1; i < level; i++) {
+    if (i < 10) totalXp += i * 150;
+    else if (i < 30) totalXp += 1350 + (i - 9) * 300;
+    else totalXp += 7350 + (i - 29) * 600;
+  }
+  return totalXp;
+}
+
+export function calculateLevelFromXp(totalXp: number): number {
+  let level = 1;
+  while (true) {
+    const nextLevelXp = getXpRequiredForLevel(level + 1);
+    if (totalXp >= nextLevelXp) {
+      level++;
+    } else {
+      return level;
+    }
+  }
+}
+
 // In-Memory store for testing and standalone local execution
 class InMemoryStore {
   sessions = new Map<string, StoredGameSession>();
   economies = new Map<string, StoredEconomy>();
+  userProgression = new Map<string, StoredUserProgression>();
   inventory = new Map<string, Set<string>>(); // userId -> set of owned itemIds
   spins = new Map<string, { lastSpinDate: string; count: number; updatedAt: number }>();
   leaderboards = new Map<string, StoredLeaderboardEntry[]>();
@@ -139,6 +170,7 @@ class InMemoryStore {
   clear() {
     this.sessions.clear();
     this.economies.clear();
+    this.userProgression.clear();
     this.inventory.clear();
     this.spins.clear();
     this.leaderboards.clear();
@@ -297,6 +329,37 @@ export async function consumeGameSession(
 // ==========================================
 // 3 & 4. USER ECONOMY & ATOMIC PURCHASES
 // ==========================================
+
+export async function getUserProgression(userId: string): Promise<StoredUserProgression> {
+  assertPersistenceOperational();
+  if (isFirestoreAvailable()) {
+    const db = getDb();
+    const doc = await db.collection('userProgression').doc(userId).get();
+    if (doc.exists) {
+      return doc.data() as StoredUserProgression;
+    }
+    const initial: StoredUserProgression = {
+      userId,
+      totalXp: 0,
+      level: 1,
+      lastUpdated: Date.now()
+    };
+    await db.collection('userProgression').doc(userId).set(initial);
+    return initial;
+  } else {
+    let prog = memoryStore.userProgression.get(userId);
+    if (!prog) {
+      prog = {
+        userId,
+        totalXp: 0,
+        level: 1,
+        lastUpdated: Date.now()
+      };
+      memoryStore.userProgression.set(userId, prog);
+    }
+    return prog;
+  }
+}
 
 export async function getUserEconomy(userId: string): Promise<StoredEconomy> {
   assertPersistenceOperational();
@@ -665,14 +728,12 @@ export async function executeGamble(
 }> {
   assertPersistenceOperational();
 
-  if (idempotencyKey && !isValidIdempotencyKey(idempotencyKey)) {
-    throw ApiError.badRequest('Kunci idempotency tidak valid.', 'INVALID_IDEMPOTENCY_KEY');
+  if (!idempotencyKey || typeof idempotencyKey !== 'string' || !isValidIdempotencyKey(idempotencyKey)) {
+    throw ApiError.badRequest('Kunci idempotency valid wajib disertakan untuk taruhan.', 'INVALID_IDEMPOTENCY_KEY');
   }
 
-  if (idempotencyKey) {
-    const existing = await getProcessedAction(`gamble_${userId}_${idempotencyKey}`);
-    if (existing) return existing;
-  }
+  const existing = await getProcessedAction(`gamble_${userId}_${idempotencyKey}`);
+  if (existing) return existing;
 
   const validBets = [10, 20, 50, 100];
   if (!validBets.includes(bet) && (typeof bet !== 'number' || bet <= 0 || bet > 500)) {
@@ -806,14 +867,12 @@ export async function executeGacha(
   assertPersistenceOperational();
   const GACHA_COST = 50;
 
-  if (idempotencyKey && !isValidIdempotencyKey(idempotencyKey)) {
-    throw ApiError.badRequest('Kunci idempotency tidak valid.', 'INVALID_IDEMPOTENCY_KEY');
+  if (!idempotencyKey || typeof idempotencyKey !== 'string' || !isValidIdempotencyKey(idempotencyKey)) {
+    throw ApiError.badRequest('Kunci idempotency valid wajib disertakan untuk gacha.', 'INVALID_IDEMPOTENCY_KEY');
   }
 
-  if (idempotencyKey) {
-    const existing = await getProcessedAction(`gacha_${userId}_${idempotencyKey}`);
-    if (existing) return existing;
-  }
+  const existing = await getProcessedAction(`gacha_${userId}_${idempotencyKey}`);
+  if (existing) return existing;
 
   // Secure random item selection
   const randIdx = crypto.randomInt(0, GACHA_CATALOG_ITEMS.length);
@@ -918,6 +977,44 @@ export async function executeGacha(
   return result;
 }
 
+export const CANONICAL_ACHIEVEMENT_TARGETS: Record<string, { gameId: string; target: number }> = {
+  snake_glutton: { gameId: 'snake', target: 20 },
+  snake_turbo: { gameId: 'snake', target: 40 },
+  brick_demolisher: { gameId: 'brick-breaker', target: 150 },
+  flappy_pilot: { gameId: 'flappy-pixel', target: 10 },
+  flappy_god: { gameId: 'flappy-pixel', target: 25 },
+  space_champion: { gameId: 'space-defender', target: 150 },
+  space_god: { gameId: 'space-defender', target: 500 },
+  memory_master: { gameId: 'memory-grid', target: 100 },
+  memory_god: { gameId: 'memory-grid', target: 300 },
+  runner_speed: { gameId: 'cyber-runner', target: 80 },
+  racer_apex: { gameId: 'vaporwave-racer', target: 100 },
+  tetris_grandmaster: { gameId: 'cyber-tetris', target: 150 },
+  mines_sweeper: { gameId: 'cyber-mines', target: 90 },
+  neon_2048_master: { gameId: 'neon-2048', target: 200 }
+};
+
+export async function getUserVerifiedAchievementsCount(userId: string): Promise<number> {
+  let count = 0;
+  for (const [_, req] of Object.entries(CANONICAL_ACHIEVEMENT_TARGETS)) {
+    const score = await getUserHighScore(userId, req.gameId);
+    if (score >= req.target) {
+      count++;
+    }
+  }
+  return count;
+}
+
+export async function getUserCumulativeScore(userId: string): Promise<number> {
+  const games = ['snake', 'brick-breaker', 'flappy-pixel', 'space-defender', 'memory-grid', 'cyber-runner', 'vaporwave-racer', 'cyber-tetris', 'cyber-mines', 'neon-2048'];
+  let total = 0;
+  for (const g of games) {
+    const score = await getUserHighScore(userId, g);
+    total += score;
+  }
+  return total;
+}
+
 export async function getUserHighScore(userId: string, gameId: string): Promise<number> {
   const canonicalId = requireCanonicalGameId(gameId);
   if (isFirestoreAvailable()) {
@@ -939,7 +1036,7 @@ export async function getUserHighScore(userId: string, gameId: string): Promise<
 }
 
 export async function hasAnyHighScore(userId: string): Promise<boolean> {
-  const games = ['snake', 'brick', 'flappy', 'space', 'memory', 'runner', 'racer', 'tetris', 'mines', 'neon_2048'];
+  const games = ['snake', 'brick-breaker', 'flappy-pixel', 'space-defender', 'memory-grid', 'cyber-runner', 'vaporwave-racer', 'cyber-tetris', 'cyber-mines', 'neon-2048'];
   for (const g of games) {
     const score = await getUserHighScore(userId, g);
     if (score > 0) return true;
@@ -948,7 +1045,7 @@ export async function hasAnyHighScore(userId: string): Promise<boolean> {
 }
 
 export async function hasHighScoreOfAtLeast(userId: string, threshold: number): Promise<boolean> {
-  const games = ['snake', 'brick', 'flappy', 'space', 'memory', 'runner', 'racer', 'tetris', 'mines', 'neon_2048'];
+  const games = ['snake', 'brick-breaker', 'flappy-pixel', 'space-defender', 'memory-grid', 'cyber-runner', 'vaporwave-racer', 'cyber-tetris', 'cyber-mines', 'neon-2048'];
   for (const g of games) {
     const score = await getUserHighScore(userId, g);
     if (score >= threshold) return true;
@@ -958,13 +1055,14 @@ export async function hasHighScoreOfAtLeast(userId: string, threshold: number): 
 
 export async function getCountOfGamesPlayedToday(userId: string): Promise<number> {
   const todayPrefix = new Date().toISOString().split('T')[0];
-  const games = ['snake', 'brick', 'flappy', 'space', 'memory', 'runner', 'racer', 'tetris', 'mines', 'neon_2048'];
+  const games = ['snake', 'brick-breaker', 'flappy-pixel', 'space-defender', 'memory-grid', 'cyber-runner', 'vaporwave-racer', 'cyber-tetris', 'cyber-mines', 'neon-2048'];
   let count = 0;
   for (const g of games) {
+    const canonical = requireCanonicalGameId(g);
     if (isFirestoreAvailable()) {
       const db = getDb();
       const doc = await db.collection('leaderboards')
-        .doc(g)
+        .doc(canonical)
         .collection('entries')
         .doc(userId)
         .get();
@@ -975,7 +1073,7 @@ export async function getCountOfGamesPlayedToday(userId: string): Promise<number
         }
       }
     } else {
-      const list = memoryStore.leaderboards.get(g) || [];
+      const list = memoryStore.leaderboards.get(canonical) || [];
       const entry = list.find(e => e.userId === userId);
       if (entry && entry.submittedAt && entry.submittedAt.startsWith(todayPrefix)) {
         count++;
@@ -1010,137 +1108,127 @@ export async function executeClaimReward(
     throw ApiError.badRequest('Jenis reward claim tidak valid.', 'INVALID_CLAIM_SOURCE');
   }
 
-  if (idempotencyKey && !isValidIdempotencyKey(idempotencyKey)) {
-    throw ApiError.badRequest('Kunci idempotency tidak valid.', 'INVALID_IDEMPOTENCY_KEY');
+  if (!idempotencyKey || typeof idempotencyKey !== 'string' || !isValidIdempotencyKey(idempotencyKey)) {
+    throw ApiError.badRequest('Kunci idempotency valid wajib disertakan untuk klaim reward.', 'INVALID_IDEMPOTENCY_KEY');
   }
 
-  if (idempotencyKey) {
-    const existing = await getProcessedAction(`claim_${userId}_${idempotencyKey}`);
-    if (existing) return existing;
+  // Check idempotency cache first
+  const existing = await getProcessedAction(`claim_${userId}_${idempotencyKey}`);
+  if (existing) return existing;
+
+  // Resolve target number (for level_up or quest_tier)
+  let targetNum: number | undefined;
+  if (claimType === 'level_up') {
+    targetNum = typeof details?.level === 'number' ? details.level : parseInt(claimId.replace(/\D/g, ''), 10);
+    if (!targetNum || isNaN(targetNum) || targetNum < 2 || targetNum > 100) {
+      throw ApiError.badRequest('Level klaim tidak valid (harus antara level 2 - 100).', 'INVALID_LEVEL');
+    }
+  } else if (claimType === 'quest_tier') {
+    targetNum = typeof details?.tier === 'number' ? details.tier : parseInt(claimId.replace(/\D/g, ''), 10);
+    if (!targetNum || isNaN(targetNum) || targetNum < 1 || targetNum > 10) {
+      throw ApiError.badRequest('Quest tier tidak valid (harus antara tier 1 - 10).', 'INVALID_QUEST_TIER');
+    }
   }
 
   // Lookup authoritative reward definition on the server
-  const definition = resolveAuthoritativeReward(claimId, claimType, details);
+  const definition = resolveAuthoritativeReward(claimId, claimType, targetNum);
   if (!definition) {
     throw ApiError.badRequest('Definisi reward tidak ditemukan atau tidak valid.', 'INVALID_REWARD_CLAIM');
   }
 
-  // Server-side verification of completed requirements
-  const isTestUser = userId.includes('claimer') || userId.includes('gambler') || userId.includes('gacha') || userId.includes('test');
-  let verified = isTestUser;
+  const canonicalClaimId = definition.canonicalId;
 
-  if (!verified) {
-    if (claimType === 'achievement') {
-      const achievementTargets: Record<string, { gameId: string, target: number }> = {
-        snake_glutton: { gameId: 'snake', target: 20 },
-        snake_turbo: { gameId: 'snake', target: 40 },
-        brick_demolisher: { gameId: 'brick', target: 150 },
-        flappy_pilot: { gameId: 'flappy', target: 10 },
-        flappy_god: { gameId: 'flappy', target: 25 },
-        space_champion: { gameId: 'space', target: 150 },
-        space_god: { gameId: 'space', target: 500 },
-        memory_master: { gameId: 'memory', target: 100 },
-        memory_god: { gameId: 'memory', target: 300 },
-        runner_speed: { gameId: 'runner', target: 80 },
-        racer_apex: { gameId: 'racer', target: 100 },
-        tetris_grandmaster: { gameId: 'tetris', target: 150 },
-        mines_sweeper: { gameId: 'mines', target: 90 },
-        neon_2048_master: { gameId: 'neon_2048', target: 200 }
-      };
+  // Server-side authoritative verification of completed requirements
+  // NO test/substring bypasses! Every check verifies authoritative server records.
+  let verified = false;
 
-      if (claimId in achievementTargets) {
-        const req = achievementTargets[claimId];
-        const highScore = await getUserHighScore(userId, req.gameId);
-        if (highScore >= req.target) {
-          verified = true;
-        }
-      } else if (claimId === 'ach_first_win') {
-        const anyScore = await hasAnyHighScore(userId);
-        if (anyScore) verified = true;
-      } else if (claimId === 'ach_score_500') {
-        const highEnough = await hasHighScoreOfAtLeast(userId, 500);
-        if (highEnough) verified = true;
-      }
-    } else if (claimType === 'daily_mission') {
-      if (claimId === 'm_play_3') {
+  if (claimType === 'starter_pack') {
+    // Starter pack is available to all users once
+    verified = true;
+  } else if (claimType === 'achievement') {
+    if (claimId in CANONICAL_ACHIEVEMENT_TARGETS) {
+      const req = CANONICAL_ACHIEVEMENT_TARGETS[claimId];
+      const highScore = await getUserHighScore(userId, req.gameId);
+      if (highScore >= req.target) {
         verified = true;
-      } else {
-        const parts = claimId.split('_');
-        if (parts.length >= 3) {
-          const dateStr = parts[1];
-          const missionNum = parts[2];
-          const todayStr = new Date().toISOString().split('T')[0];
-
-          if (dateStr === todayStr) {
-            if (missionNum === '1') {
-              const dateObj = new Date(dateStr);
-              const seed = dateObj.getDate();
-              const games = ['snake', 'brick', 'flappy', 'space', 'memory', 'runner', 'racer', 'tetris', 'mines', 'neon_2048'];
-              const gameIdx = seed % games.length;
-              const selectedGame = games[gameIdx];
-              const target = 50 + (seed % 3) * 50;
-
-              const highScore = await getUserHighScore(userId, selectedGame);
-              if (highScore >= target) {
-                verified = true;
-              }
-            } else if (missionNum === '2') {
-              const countPlayed = await getCountOfGamesPlayedToday(userId);
-              if (countPlayed >= 1) {
-                verified = true;
-              }
-            } else if (missionNum === '3') {
-              const countPlayed = await getCountOfGamesPlayedToday(userId);
-              if (countPlayed >= 2 || claimId.includes('play')) {
-                verified = true;
-              }
-            }
-          }
-        }
       }
-    } else if (claimType === 'challenge') {
+    } else if (claimId === 'ach_first_win') {
+      const anyScore = await hasAnyHighScore(userId);
+      if (anyScore) verified = true;
+    } else if (claimId === 'ach_score_500') {
+      const highEnough = await hasHighScoreOfAtLeast(userId, 500);
+      if (highEnough) verified = true;
+    }
+  } else if (claimType === 'level_up') {
+    const targetLevel = targetNum || 2;
+    const prog = await getUserProgression(userId);
+    if (prog.level >= targetLevel) {
+      verified = true;
+    }
+  } else if (claimType === 'quest_tier') {
+    const targetTier = targetNum || 1;
+    const verifiedAchCount = await getUserVerifiedAchievementsCount(userId);
+    const anyScore = await hasAnyHighScore(userId);
+    if (targetTier === 1 && anyScore) {
+      verified = true;
+    } else if (targetTier > 1 && verifiedAchCount >= targetTier - 1) {
+      verified = true;
+    }
+  } else if (claimType === 'daily_mission') {
+    const todayStr = new Date().toISOString().split('T')[0];
+    const canonical = canonicalClaimId;
+
+    if (canonical.endsWith('_1') || claimId.includes('score_target')) {
+      const dateObj = new Date(todayStr);
+      const seed = dateObj.getDate();
+      const games = ['snake', 'brick-breaker', 'flappy-pixel', 'space-defender', 'memory-grid', 'cyber-runner', 'vaporwave-racer', 'cyber-tetris', 'cyber-mines', 'neon-2048'];
+      const gameIdx = seed % games.length;
+      const selectedGame = games[gameIdx];
+      const target = 50 + (seed % 3) * 50;
+
+      const highScore = await getUserHighScore(userId, selectedGame);
+      if (highScore >= target) {
+        verified = true;
+      }
+    } else if (canonical.endsWith('_2') || claimId.includes('unique_games')) {
       const countPlayed = await getCountOfGamesPlayedToday(userId);
-      if (claimId.startsWith('daily_')) {
-        if (countPlayed >= 1) verified = true;
-      } else if (claimId.startsWith('weekly_') || claimId.startsWith('special_') || claimId.startsWith('season_')) {
+      if (countPlayed >= 2) {
         verified = true;
       }
-    } else if (claimType === 'quest_tier') {
-      const tierNum = typeof details?.tier === 'number' ? details.tier : parseInt(claimId.replace(/\D/g, ''), 10) || 1;
-      const achievementTargets = {
-        snake_glutton: 20,
-        snake_turbo: 40,
-        brick_demolisher: 150,
-        flappy_pilot: 10,
-        flappy_god: 25,
-        space_champion: 150,
-        space_god: 500,
-        memory_master: 100,
-        memory_god: 300
-      };
-      let count = 0;
-      for (const [id, target] of Object.entries(achievementTargets)) {
-        const gameId = id.split('_')[0];
-        const highScore = await getUserHighScore(userId, gameId);
-        if (highScore >= target) count++;
-      }
-      if (count >= Math.min(tierNum, 5)) {
+    } else if (canonical.endsWith('_3') || claimId === 'm_play_3' || claimId.includes('play_count')) {
+      const countPlayed = await getCountOfGamesPlayedToday(userId);
+      if (countPlayed >= 3) {
         verified = true;
       }
-    } else if (claimType === 'starter_pack') {
-      if (claimId === 'starter_pack' || claimId === 'starter_pack_claim') {
-        verified = true;
+    }
+  } else if (claimType === 'challenge') {
+    if (claimId.startsWith('daily_')) {
+      const countPlayed = await getCountOfGamesPlayedToday(userId);
+      if (countPlayed >= 1) verified = true;
+    } else if (claimId.startsWith('weekly_')) {
+      if (claimId.endsWith('_1')) {
+        const achCount = await getUserVerifiedAchievementsCount(userId);
+        if (achCount >= 2) verified = true;
+      } else if (claimId.endsWith('_2')) {
+        const countPlayed = await getCountOfGamesPlayedToday(userId);
+        if (countPlayed >= 3) verified = true;
+      } else if (claimId.endsWith('_3')) {
+        const cumScore = await getUserCumulativeScore(userId);
+        if (cumScore >= 1000) verified = true;
+      } else {
+        const cumScore = await getUserCumulativeScore(userId);
+        if (cumScore >= 500) verified = true;
       }
-    } else if (claimType === 'level_up') {
-      const level = typeof details?.level === 'number' ? details.level : parseInt(claimId.replace(/\D/g, ''), 10) || 2;
-      if (level >= 2 && level <= 100) {
+    } else if (claimId.startsWith('special_') || claimId.startsWith('season_')) {
+      const comp = await getCompetitiveProfile(userId);
+      if (comp.rankedGames >= 3 || comp.globalRating >= 1100) {
         verified = true;
       }
     }
   }
 
   if (!verified) {
-    throw ApiError.badRequest('Persyaratan klaim reward belum terpenuhi atau tidak valid.', 'INVALID_REWARD_CLAIM');
+    throw ApiError.badRequest('Persyaratan klaim reward belum terpenuhi berdasarkan verifikasi server.', 'REWARD_REQUIREMENTS_NOT_MET');
   }
 
   const amount = definition.rewardCoins;
@@ -1152,7 +1240,8 @@ export async function executeClaimReward(
   if (isFirestoreAvailable()) {
     const db = getDb();
     const ecoRef = db.collection('userEconomy').doc(userId);
-    const claimRef = db.collection('userClaimedRewards').doc(`${userId}_${claimId}`);
+    const progRef = db.collection('userProgression').doc(userId);
+    const claimRef = db.collection('userClaimedRewards').doc(`${userId}_${canonicalClaimId}`);
     const ledgerRef = db.collection('economyTransactions').doc(transactionId);
 
     await db.runTransaction(async (tx) => {
@@ -1176,9 +1265,26 @@ export async function executeClaimReward(
 
       tx.set(ecoRef, updatedEco);
 
+      if (xp > 0) {
+        const progDoc = await tx.get(progRef);
+        const currentProg: StoredUserProgression = progDoc.exists
+          ? (progDoc.data() as StoredUserProgression)
+          : { userId, totalXp: 0, level: 1, lastUpdated: Date.now() };
+
+        const newTotalXp = currentProg.totalXp + xp;
+        const updatedProg: StoredUserProgression = {
+          userId,
+          totalXp: newTotalXp,
+          level: calculateLevelFromXp(newTotalXp),
+          lastUpdated: Date.now()
+        };
+        tx.set(progRef, updatedProg);
+      }
+
       tx.set(claimRef, {
         userId,
-        claimId,
+        claimId: canonicalClaimId,
+        originalClaimId: claimId,
         claimType,
         amount,
         xp,
@@ -1192,7 +1298,8 @@ export async function executeClaimReward(
         amount,
         balanceBefore: current.coins,
         balanceAfter: updatedEco.coins,
-        reason: `REWARD_${claimType.toUpperCase()}_${claimId}`,
+        reason: `REWARD_${claimType.toUpperCase()}_${canonicalClaimId}`,
+        referenceId: canonicalClaimId,
         createdAt: nowIso
       };
       tx.set(ledgerRef, ledgerEntry);
@@ -1201,7 +1308,7 @@ export async function executeClaimReward(
     });
   } else {
     const userClaims = memoryStore.claimedRewards.get(userId) || new Set<string>();
-    if (userClaims.has(claimId)) {
+    if (userClaims.has(canonicalClaimId)) {
       throw new ApiError(400, 'REWARD_ALREADY_CLAIMED', 'Reward ini sudah pernah Anda klaim sebelumnya.');
     }
 
@@ -1212,7 +1319,19 @@ export async function executeClaimReward(
     current.lastUpdated = Date.now();
     memoryStore.economies.set(userId, current);
 
-    userClaims.add(claimId);
+    if (xp > 0) {
+      let prog = memoryStore.userProgression.get(userId) || { userId, totalXp: 0, level: 1, lastUpdated: Date.now() };
+      const newTotalXp = prog.totalXp + xp;
+      prog = {
+        userId,
+        totalXp: newTotalXp,
+        level: calculateLevelFromXp(newTotalXp),
+        lastUpdated: Date.now()
+      };
+      memoryStore.userProgression.set(userId, prog);
+    }
+
+    userClaims.add(canonicalClaimId);
     memoryStore.claimedRewards.set(userId, userClaims);
 
     const ledgerEntry: StoredEconomyTransaction = {
@@ -1222,7 +1341,8 @@ export async function executeClaimReward(
       amount,
       balanceBefore,
       balanceAfter: current.coins,
-      reason: `REWARD_${claimType.toUpperCase()}_${claimId}`,
+      reason: `REWARD_${claimType.toUpperCase()}_${canonicalClaimId}`,
+      referenceId: canonicalClaimId,
       createdAt: nowIso
     };
     memoryStore.ledger.push(ledgerEntry);
@@ -1231,17 +1351,14 @@ export async function executeClaimReward(
 
   const result = {
     success: true,
-    claimId,
+    claimId: canonicalClaimId,
     amount,
     xp,
     newBalance,
     transactionId
   };
 
-  if (idempotencyKey) {
-    await setProcessedAction(`claim_${userId}_${idempotencyKey}`, result);
-  }
-
+  await setProcessedAction(`claim_${userId}_${idempotencyKey}`, result);
   return result;
 }
 
@@ -1404,6 +1521,23 @@ export async function executeScoreSubmission({
         tx.set(ledgerRef, ledgerEntry);
       }
 
+      if (xpEarned > 0) {
+        const progRef = db.collection('userProgression').doc(userId);
+        const progDoc = await tx.get(progRef);
+        const currentProg: StoredUserProgression = progDoc.exists
+          ? (progDoc.data() as StoredUserProgression)
+          : { userId, totalXp: 0, level: 1, lastUpdated: Date.now() };
+
+        const newTotalXp = currentProg.totalXp + xpEarned;
+        const updatedProg: StoredUserProgression = {
+          userId,
+          totalXp: newTotalXp,
+          level: calculateLevelFromXp(newTotalXp),
+          lastUpdated: Date.now()
+        };
+        tx.set(progRef, updatedProg);
+      }
+
       // Save leaderboard high score
       const leaderDoc = await tx.get(leaderRef);
       if (!leaderDoc.exists || score > (leaderDoc.data()?.score || 0)) {
@@ -1440,6 +1574,18 @@ export async function executeScoreSubmission({
         createdAt: nowIso
       };
       memoryStore.ledger.push(ledgerEntry);
+    }
+
+    if (xpEarned > 0) {
+      let prog = memoryStore.userProgression.get(userId) || { userId, totalXp: 0, level: 1, lastUpdated: Date.now() };
+      const newTotalXp = prog.totalXp + xpEarned;
+      prog = {
+        userId,
+        totalXp: newTotalXp,
+        level: calculateLevelFromXp(newTotalXp),
+        lastUpdated: Date.now()
+      };
+      memoryStore.userProgression.set(userId, prog);
     }
 
     // Save leaderboard entry in memory
@@ -2302,6 +2448,172 @@ export async function getRealAdminStats(): Promise<{
 }
 
 // ==========================================
+// KILL SWITCHES (INCIDENT RESILIENCE)
+// ==========================================
+
+export type KillSwitchFeature = 'ranked' | 'economy' | 'seasons';
+
+const runtimeKillSwitches: Record<KillSwitchFeature, boolean> = {
+  ranked: process.env.KILL_SWITCH_RANKED === 'true',
+  economy: process.env.KILL_SWITCH_ECONOMY === 'true',
+  seasons: process.env.KILL_SWITCH_SEASONS === 'true'
+};
+
+export function isKillSwitchActive(feature: KillSwitchFeature): boolean {
+  return runtimeKillSwitches[feature] || false;
+}
+
+export function setKillSwitch(feature: KillSwitchFeature, active: boolean, adminUid?: string): { success: boolean; feature: KillSwitchFeature; active: boolean } {
+  runtimeKillSwitches[feature] = active;
+  serverLogger.security('KILL_SWITCH_TOGGLE', `Kill switch '${feature}' set to ${active}`, {
+    feature,
+    active,
+    adminUid: adminUid || 'system'
+  });
+  return { success: true, feature, active };
+}
+
+export function getKillSwitches(): Record<KillSwitchFeature, boolean> {
+  return { ...runtimeKillSwitches };
+}
+
+export function isPersistenceReady(): boolean {
+  if (process.env.NODE_ENV === 'production') {
+    return isFirestoreAvailable();
+  }
+  return true;
+}
+
+// ==========================================
+// ECONOMY RECONCILIATION & INTEGRITY
+// ==========================================
+
+export interface EconomyReconciliationReport {
+  userId: string;
+  initialBalance: number;
+  totalCredits: number;
+  totalDebits: number;
+  calculatedBalance: number;
+  actualBalance: number;
+  discrepancy: number;
+  isReconciled: boolean;
+  transactionCount: number;
+  timestamp: string;
+}
+
+export async function reconcileUserEconomy(userId: string): Promise<EconomyReconciliationReport> {
+  assertPersistenceOperational();
+  const INITIAL_BALANCE = 100;
+  let currentBalance = INITIAL_BALANCE;
+  let userTransactions: StoredEconomyTransaction[] = [];
+
+  if (isFirestoreAvailable()) {
+    const db = getDb();
+    const econDoc = await db.collection('userEconomy').doc(userId).get();
+    if (econDoc.exists) {
+      currentBalance = econDoc.data()?.coins ?? INITIAL_BALANCE;
+    }
+    const txSnap = await db.collection('economyTransactions')
+      .where('userId', '==', userId)
+      .orderBy('createdAt', 'asc')
+      .get();
+    userTransactions = txSnap.docs.map(d => d.data() as StoredEconomyTransaction);
+  } else {
+    const econ = await getUserEconomy(userId);
+    currentBalance = econ.coins;
+    userTransactions = memoryStore.ledger.filter(tx => tx.userId === userId);
+  }
+
+  let totalCredits = 0;
+  let totalDebits = 0;
+
+  for (const tx of userTransactions) {
+    if (tx.amount > 0) {
+      totalCredits += tx.amount;
+    } else {
+      totalDebits += Math.abs(tx.amount);
+    }
+  }
+
+  const calculatedBalance = INITIAL_BALANCE + totalCredits - totalDebits;
+  const discrepancy = currentBalance - calculatedBalance;
+  const isReconciled = discrepancy === 0;
+
+  if (!isReconciled) {
+    serverLogger.security('ECONOMY_DISCREPANCY_FLAGGED', `User ${userId} economy mismatch: actual=${currentBalance}, calculated=${calculatedBalance}`, {
+      userId,
+      actualBalance: currentBalance,
+      calculatedBalance,
+      discrepancy,
+      transactionCount: userTransactions.length
+    });
+  }
+
+  return {
+    userId,
+    initialBalance: INITIAL_BALANCE,
+    totalCredits,
+    totalDebits,
+    calculatedBalance,
+    actualBalance: currentBalance,
+    discrepancy,
+    isReconciled,
+    transactionCount: userTransactions.length,
+    timestamp: new Date().toISOString()
+  };
+}
+
+// ==========================================
+// COMPETITIVE INTEGRITY CHECKER
+// ==========================================
+
+export interface CompetitiveIntegrityReport {
+  userId: string;
+  profileRating: number;
+  profileTier: string;
+  gamesTracked: number;
+  totalRankedMatches: number;
+  isConsistent: boolean;
+  notes: string[];
+}
+
+export async function validateCompetitiveIntegrity(userId: string): Promise<CompetitiveIntegrityReport> {
+  const profile = await getCompetitiveProfile(userId);
+  const notes: string[] = [];
+  let isConsistent = true;
+
+  if (profile.globalRating < 100 || !Number.isFinite(profile.globalRating)) {
+    isConsistent = false;
+    notes.push(`Invalid global rating: ${profile.globalRating}`);
+  }
+
+  let calculatedMatches = 0;
+  for (const [gameId, stats] of Object.entries(profile.gameRatings || {})) {
+    if (stats.matchesPlayed < 0) {
+      isConsistent = false;
+      notes.push(`Negative matches for game ${gameId}`);
+    }
+    calculatedMatches += stats.matchesPlayed || 0;
+  }
+
+  const totalMatches = profile.rankedGames ?? 0;
+  if (totalMatches < calculatedMatches) {
+    isConsistent = false;
+    notes.push(`Total matches ${totalMatches} is less than sum of game matches ${calculatedMatches}`);
+  }
+
+  return {
+    userId,
+    profileRating: profile.globalRating,
+    profileTier: profile.globalTier,
+    gamesTracked: Object.keys(profile.gameRatings || {}).length,
+    totalRankedMatches: totalMatches,
+    isConsistent,
+    notes
+  };
+}
+
+// ==========================================
 // IDEMPOTENCY
 // ==========================================
 
@@ -2327,3 +2639,4 @@ export async function setProcessedAction(key: string, result: any): Promise<void
     memoryStore.processedActions.set(key, { result, timestamp: Date.now() });
   }
 }
+

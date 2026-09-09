@@ -13,7 +13,9 @@ export type SecurityEventCategory =
   | 'REWARD'
   | 'ADMIN_ACTION'
   | 'FIREBASE_FAILURE'
-  | 'SERVER_ERROR';
+  | 'SERVER_ERROR'
+  | 'KILL_SWITCH_TOGGLE'
+  | 'ECONOMY_DISCREPANCY_FLAGGED';
 
 export interface StructuredLogEntry {
   level: ServerLogLevel;
