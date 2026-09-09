@@ -101,6 +101,8 @@ export const GameArtwork: React.FC<GameArtworkProps> = ({ game, className = '' }
           <img
             src={imageUrl}
             alt={game.title}
+            loading="lazy"
+            decoding="async"
             referrerPolicy="no-referrer"
             onLoad={() => setIsLoading(false)}
             onError={() => setHasError(true)}

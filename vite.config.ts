@@ -21,6 +21,28 @@ const logErrorPlugin = () => ({
 
 export default defineConfig(() => {
   return {
+    build: {
+      target: 'esnext',
+      chunkSizeWarningLimit: 1000,
+      rollupOptions: {
+        output: {
+          manualChunks(id) {
+            if (id.includes('node_modules/firebase')) {
+              return 'vendor-firebase';
+            }
+            if (id.includes('node_modules/motion')) {
+              return 'vendor-motion';
+            }
+            if (id.includes('node_modules/lucide-react')) {
+              return 'vendor-lucide';
+            }
+            if (id.includes('node_modules/react') || id.includes('node_modules/react-dom') || id.includes('node_modules/react-router')) {
+              return 'vendor-framework';
+            }
+          }
+        }
+      }
+    },
     plugins: [
       react(), 
       tailwindcss(), 
@@ -49,6 +71,20 @@ export default defineConfig(() => {
             {
               urlPattern: /^\/api\//,
               handler: 'NetworkOnly',
+            },
+            {
+              urlPattern: /^https:\/\/images\.unsplash\.com\/.*/i,
+              handler: 'CacheFirst',
+              options: {
+                cacheName: 'unsplash-artwork-cache',
+                expiration: {
+                  maxEntries: 50,
+                  maxAgeSeconds: 7 * 24 * 60 * 60, // 1 week
+                },
+                cacheableResponse: {
+                  statuses: [0, 200],
+                },
+              },
             }
           ]
         }

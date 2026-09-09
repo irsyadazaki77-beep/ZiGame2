@@ -81,9 +81,14 @@ export function useGameEngine({
   const startLoop = useCallback((callback: (timestamp: number, deltaTime: number) => void) => {
     stopLoop();
     lastTimestampRef.current = performance.now();
+    let frameCounter = 0;
+    let fpsTimer = performance.now();
+
+    performanceService.registerRafStart();
 
     const loop = (timestamp: number) => {
       if (gameStateRef.current !== 'playing') {
+        performanceService.registerRafEnd();
         stopLoop();
         return;
       }
@@ -91,13 +96,23 @@ export function useGameEngine({
       const rawDelta = timestamp - lastTimestampRef.current;
       lastTimestampRef.current = timestamp;
       
-      // Cap delta time to prevent physics explosions after background tab sleep
-      const safeDelta = Math.min(rawDelta, 100);
+      // Cap delta time to prevent physics explosions after background tab sleep (50ms cap)
+      const safeDelta = Math.min(Math.max(rawDelta, 1), 50);
+
+      // Track FPS for performanceService
+      frameCounter++;
+      if (timestamp - fpsTimer >= 1000) {
+        performanceService.recordFramePerformance(frameCounter);
+        frameCounter = 0;
+        fpsTimer = timestamp;
+      }
 
       callback(timestamp, safeDelta);
 
       if (gameStateRef.current === 'playing') {
         animFrameRef.current = requestAnimationFrame(loop);
+      } else {
+        performanceService.registerRafEnd();
       }
     };
 
@@ -230,6 +245,7 @@ export function useGameEngine({
     const dpr = Math.min(window.devicePixelRatio || 1, targetCap);
     canvas.width = Math.floor(width * dpr);
     canvas.height = Math.floor(height * dpr);
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.scale(dpr, dpr);
 
     return ctx;

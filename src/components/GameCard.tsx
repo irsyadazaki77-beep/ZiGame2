@@ -11,7 +11,7 @@ interface GameCardProps {
   onClick: () => void;
 }
 
-export const GameCard: React.FC<GameCardProps> = ({
+export const GameCard: React.FC<GameCardProps> = React.memo(({
   game,
   isFavorite,
   onToggleFavorite,
@@ -91,6 +91,6 @@ export const GameCard: React.FC<GameCardProps> = ({
       </div>
     </div>
   );
-};
+});
 
 export default GameCard;

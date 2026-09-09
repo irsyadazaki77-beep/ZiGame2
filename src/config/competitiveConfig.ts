@@ -1,4 +1,4 @@
-import { CanonicalGameId } from './canonicalGames';
+import { CanonicalGameId, requireCanonicalGameId } from './canonicalGames';
 
 export type CompetitiveTier = 
   | 'Bronze' 
@@ -24,14 +24,14 @@ export const COMPETITIVE_TIERS: TierBoundary[] = [
 
 export const RANKED_GAME_ALLOWLIST: CanonicalGameId[] = [
   'snake',
-  'brick',
-  'space',
-  'runner',
-  'pong',
-  'tetris',
-  'gravity_shift',
-  'void_survivor',
-  'orbital_defense'
+  'brick-breaker',
+  'space-defender',
+  'cyber-runner',
+  'neon-pong',
+  'cyber-tetris',
+  'gravity-shift',
+  'void-survivor',
+  'orbital-defense'
 ];
 
 export interface GameCompetitiveConfig {
@@ -39,20 +39,29 @@ export interface GameCompetitiveConfig {
   volatility: number; // K-factor or sensitivity
 }
 
-export const GAME_COMPETITIVE_CONFIGS: Record<string, GameCompetitiveConfig> = {
-  snake: { baseScore: 150, volatility: 40 },
-  brick: { baseScore: 2000, volatility: 40 },
-  space: { baseScore: 500, volatility: 40 },
-  runner: { baseScore: 1000, volatility: 40 },
-  pong: { baseScore: 7, volatility: 40 },
-  tetris: { baseScore: 10000, volatility: 40 },
-  gravity_shift: { baseScore: 800, volatility: 40 },
-  void_survivor: { baseScore: 1200, volatility: 40 },
-  orbital_defense: { baseScore: 1500, volatility: 40 }
+export const GAME_COMPETITIVE_CONFIGS: Partial<Record<CanonicalGameId, GameCompetitiveConfig>> = {
+  'snake': { baseScore: 150, volatility: 40 },
+  'brick-breaker': { baseScore: 2000, volatility: 40 },
+  'space-defender': { baseScore: 500, volatility: 40 },
+  'cyber-runner': { baseScore: 1000, volatility: 40 },
+  'neon-pong': { baseScore: 7, volatility: 40 },
+  'cyber-tetris': { baseScore: 10000, volatility: 40 },
+  'gravity-shift': { baseScore: 800, volatility: 40 },
+  'void-survivor': { baseScore: 1200, volatility: 40 },
+  'orbital-defense': { baseScore: 1500, volatility: 40 }
 };
 
 export const INITIAL_RATING = 1000;
 export const PLACEMENT_MATCHES_COUNT = 5;
+
+export function isRankedEligibleGame(gameId: string): boolean {
+  try {
+    const canonical = requireCanonicalGameId(gameId);
+    return RANKED_GAME_ALLOWLIST.includes(canonical);
+  } catch {
+    return false;
+  }
+}
 
 export function getTierForRating(rating: number): CompetitiveTier {
   for (let i = COMPETITIVE_TIERS.length - 1; i >= 0; i--) {

@@ -35,6 +35,10 @@ class CompetitiveService {
     return this.profile?.gameRatings[gameId] || null;
   }
 
+  public getAllRatings(): Record<string, CompetitiveRating> {
+    return this.profile?.gameRatings || {};
+  }
+
   public getGlobalStats() {
     return {
       rating: this.profile?.globalRating || 1000,

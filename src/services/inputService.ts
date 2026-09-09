@@ -83,6 +83,10 @@ class InputManager {
     this.activeKeys.add(e.code);
     this.activeKeys.add(e.key);
 
+    // If the event is synthetic (untrusted), do not update active source to keyboard
+    // and do not double-dispatch to subscribers.
+    if (!e.isTrusted) return;
+
     this.setActiveSource('keyboard');
 
     const action = this.mapKeyToAction(e.code, e.key);
@@ -95,6 +99,8 @@ class InputManager {
   private handleKeyUp = (e: KeyboardEvent) => {
     this.activeKeys.delete(e.code);
     this.activeKeys.delete(e.key);
+
+    if (!e.isTrusted) return;
 
     const action = this.mapKeyToAction(e.code, e.key);
     this.activeSubscribers.forEach((sub) => {
@@ -343,6 +349,52 @@ class InputManager {
 
   public isGamepadConnected(): boolean {
     return this.gamepadState.connected;
+  }
+
+  public isActionActive(action: InputAction): boolean {
+    // 1. Keyboard check using mapped keys
+    const mapping = DEFAULT_MAPPING.keys;
+    const actionKeys = (() => {
+      switch (action) {
+        case 'UP': return mapping.up;
+        case 'DOWN': return mapping.down;
+        case 'LEFT': return mapping.left;
+        case 'RIGHT': return mapping.right;
+        case 'PRIMARY': return mapping.primary;
+        case 'SECONDARY': return mapping.secondary;
+        case 'PAUSE': return mapping.pause;
+        case 'RESTART': return mapping.restart;
+        default: return [];
+      }
+    })();
+    const isKeyActive = actionKeys?.some(k => this.activeKeys.has(k)) ?? false;
+    if (isKeyActive) return true;
+
+    // 2. Gamepad check
+    if (this.gamepadState.connected) {
+      const buttonActions: Record<number, InputAction> = {
+        12: 'UP',
+        13: 'DOWN',
+        14: 'LEFT',
+        15: 'RIGHT',
+        0: 'PRIMARY',
+        1: 'SECONDARY',
+        9: 'PAUSE',
+        8: 'RESTART'
+      };
+      const isButtonActive = Object.entries(buttonActions).some(([btnIdx, act]) => {
+        return act === action && this.prevGamepadButtons[Number(btnIdx)];
+      });
+      if (isButtonActive) return true;
+
+      const DEADZONE = 0.35;
+      if (action === 'LEFT' && this.prevGamepadAxes.x < -DEADZONE) return true;
+      if (action === 'RIGHT' && this.prevGamepadAxes.x > DEADZONE) return true;
+      if (action === 'UP' && this.prevGamepadAxes.y < -DEADZONE) return true;
+      if (action === 'DOWN' && this.prevGamepadAxes.y > DEADZONE) return true;
+    }
+
+    return false;
   }
 
   public getActionHint(action: InputAction): { keyboard: string; gamepad: string; touch: string } {
