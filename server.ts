@@ -32,13 +32,12 @@ try {
       serverLogger.info('FIREBASE_INIT', 'Firebase Admin initialized with service account.');
     } else if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
       initializeApp();
-      serverLogger.info('FIREBASE_INIT', 'Firebase Admin initialized with application default credentials.');
+      serverLogger.info('FIREBASE_INIT', 'Firebase Admin initialized with explicit application default credentials.');
+    } else if (process.env.NODE_ENV === 'production') {
+      initializeApp();
+      serverLogger.info('FIREBASE_INIT', 'Firebase Admin initialized with implicit application default credentials (Cloud Run).');
     } else {
-      if (process.env.NODE_ENV === 'production') {
-        serverLogger.warn('FIREBASE_INIT', 'Running without Firebase credentials in production environment.');
-      } else {
-        serverLogger.warn('FIREBASE_DEV', 'Running in non-production mode without Firebase credentials. Utilizing memory adapter.');
-      }
+      serverLogger.warn('FIREBASE_DEV', 'Running in non-production mode without Firebase credentials. Utilizing memory adapter.');
     }
   }
 } catch (error) {

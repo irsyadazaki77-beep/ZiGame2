@@ -180,8 +180,8 @@ const handleSubmitScore = async (req: Request, res: Response) => {
       return sendApiError(res, 422, 'VERIFIED_SESSION_REQUIRED', 'ID Sesi permainan (sessionId) wajib disertakan untuk submission skor.');
     }
 
-    if (idempotencyKey && !isValidIdempotencyKey(idempotencyKey)) {
-      return sendApiError(res, 400, 'INVALID_IDEMPOTENCY_KEY', 'Format kunci idempotency tidak valid.');
+    if (!idempotencyKey || !isValidIdempotencyKey(idempotencyKey)) {
+      return sendApiError(res, 400, 'INVALID_IDEMPOTENCY_KEY', 'Kunci idempotency wajib disertakan dan harus valid.');
     }
 
     const name = typeof playerName === 'string' && playerName.trim()
@@ -514,12 +514,16 @@ apiRouter.post('/competitive/submit', requireAuth, rateLimit(10, 60000, 'comp_su
       playerName,
       playerAvatar,
       sessionId,
-      masteryLevel
+      masteryLevel,
+      idempotencyKey
     } = req.body;
 
     if (!isValidGameId(gameId)) return sendApiError(res, 400, 'INVALID_GAME_ID', 'ID Game tidak valid.');
     if (typeof score !== 'number' || score < 0) return sendApiError(res, 400, 'INVALID_SCORE', 'Skor tidak valid.');
     if (!sessionId) return sendApiError(res, 422, 'SESSION_REQUIRED', 'ID Sesi ranked wajib disertakan.');
+    if (!idempotencyKey || !isValidIdempotencyKey(idempotencyKey)) {
+      return sendApiError(res, 400, 'INVALID_IDEMPOTENCY_KEY', 'Kunci idempotency wajib disertakan dan harus valid.');
+    }
 
     const result = await executeRankedSubmission({
       sessionId,
@@ -528,7 +532,8 @@ apiRouter.post('/competitive/submit', requireAuth, rateLimit(10, 60000, 'comp_su
       score: Math.floor(score),
       playerName: playerName || 'Player',
       playerAvatar: playerAvatar || '👾',
-      masteryLevel: masteryLevel || 1
+      masteryLevel: masteryLevel || 1,
+      idempotencyKey
     });
 
     serverLogger.info('RANKED_SCORE_ACCEPTED', `Ranked score ${score} accepted for ${result.gameId}. New Rating: ${result.newRating}`, {

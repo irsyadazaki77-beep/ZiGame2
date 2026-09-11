@@ -60,8 +60,9 @@ export const GamePageHeader: React.FC<GamePageHeaderProps> = ({
 }) => {
   return (
     <div 
-      className="flex-none h-14 md:h-16 z-40 flex items-center justify-between px-4 md:px-6 bg-[#0d1017]/90 backdrop-blur-md border-b border-white/[0.06] shadow-sm select-none"
+      className="absolute top-0 left-0 w-full sm:relative sm:flex-none h-14 md:h-16 z-40 flex items-center justify-between px-2 md:px-6 bg-black/40 sm:bg-[#0d1017]/90 backdrop-blur-sm sm:backdrop-blur-md border-b border-white/[0.06] shadow-sm select-none pt-safe-top"
       id="arcade-top-navbar"
+      style={{ paddingTop: 'env(safe-area-inset-top)' }}
     >
       {/* Left: Back & Game Info */}
       <div className="flex items-center gap-3">

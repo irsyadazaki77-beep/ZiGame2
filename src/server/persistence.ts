@@ -14,7 +14,8 @@ import { ApiError } from './errors';
 import { requireCanonicalGameId, CanonicalGameId } from '../config/canonicalGames';
 import { getAuthoritativeCatalogItem } from '../config/shopCatalog';
 import { getGameBalanceConfig } from '../config/balanceConfig';
-import { resolveAuthoritativeReward, RewardClaimType } from '../config/rewardCatalog';
+import { resolveAuthoritativeReward, RewardClaimType, AUTHORITATIVE_SEASONAL_CHALLENGES } from '../config/rewardCatalog';
+import { CANONICAL_GAME_REGISTRY } from '../config/gameRegistry';
 import { 
   getTierForRating, 
   INITIAL_RATING, 
@@ -24,6 +25,34 @@ import {
 } from '../config/competitiveConfig';
 
 export const SESSION_MAX_LIFETIME_MS = 60 * 60 * 1000; // 1 hour max session lifetime
+
+export interface StoredGameHistoryEntry {
+  historyId: string;
+  userId: string;
+  sessionId: string;
+  gameId: CanonicalGameId;
+  genre: string;
+  score: number;
+  isPersonalBest: boolean;
+  timestamp: number;
+  dateStr: string; // YYYY-MM-DD
+  weekStr: string; // YYYY-Www
+  seasonId: string;
+}
+
+export function getUtcDateString(timestamp: number = Date.now()): string {
+  return new Date(timestamp).toISOString().split('T')[0];
+}
+
+export function getIsoWeekString(timestamp: number = Date.now()): string {
+  const date = new Date(timestamp);
+  const dayNum = date.getUTCDay() || 7;
+  date.setUTCDate(date.getUTCDate() + 4 - dayNum);
+  const yearStart = new Date(Date.UTC(date.getUTCFullYear(), 0, 1));
+  const weekNo = Math.ceil((((date.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
+  const weekFormatted = weekNo < 10 ? `0${weekNo}` : `${weekNo}`;
+  return `${date.getUTCFullYear()}-W${weekFormatted}`;
+}
 
 export interface StoredGameSession {
   sessionId: string;
@@ -166,6 +195,7 @@ class InMemoryStore {
   suspiciousScores: StoredSuspiciousScore[] = [];
   ledger: StoredEconomyTransaction[] = [];
   claimedRewards = new Map<string, Set<string>>(); // userId -> Set of claimIds
+  gameHistory: StoredGameHistoryEntry[] = [];
 
   clear() {
     this.sessions.clear();
@@ -181,6 +211,7 @@ class InMemoryStore {
     this.suspiciousScores = [];
     this.ledger = [];
     this.claimedRewards.clear();
+    this.gameHistory = [];
   }
 }
 
@@ -1083,6 +1114,45 @@ export async function getCountOfGamesPlayedToday(userId: string): Promise<number
   return count;
 }
 
+export async function getUserGameHistory(userId: string): Promise<StoredGameHistoryEntry[]> {
+  assertPersistenceOperational();
+  if (isFirestoreAvailable()) {
+    const db = getDb();
+    const snap = await db.collection('userGameHistory').where('userId', '==', userId).get();
+    return snap.docs.map(doc => doc.data() as StoredGameHistoryEntry);
+  } else {
+    return memoryStore.gameHistory.filter(h => h.userId === userId);
+  }
+}
+
+export async function getDailySessionHistory(userId: string, dateStr: string): Promise<StoredGameHistoryEntry[]> {
+  assertPersistenceOperational();
+  if (isFirestoreAvailable()) {
+    const db = getDb();
+    const snap = await db.collection('userGameHistory')
+      .where('userId', '==', userId)
+      .where('dateStr', '==', dateStr)
+      .get();
+    return snap.docs.map(doc => doc.data() as StoredGameHistoryEntry);
+  } else {
+    return memoryStore.gameHistory.filter(h => h.userId === userId && h.dateStr === dateStr);
+  }
+}
+
+export async function getWeeklySessionHistory(userId: string, weekStr: string): Promise<StoredGameHistoryEntry[]> {
+  assertPersistenceOperational();
+  if (isFirestoreAvailable()) {
+    const db = getDb();
+    const snap = await db.collection('userGameHistory')
+      .where('userId', '==', userId)
+      .where('weekStr', '==', weekStr)
+      .get();
+    return snap.docs.map(doc => doc.data() as StoredGameHistoryEntry);
+  } else {
+    return memoryStore.gameHistory.filter(h => h.userId === userId && h.weekStr === weekStr);
+  }
+}
+
 export async function executeClaimReward(
   userId: string,
   claimId: string,
@@ -1175,53 +1245,90 @@ export async function executeClaimReward(
       verified = true;
     }
   } else if (claimType === 'daily_mission') {
-    const todayStr = new Date().toISOString().split('T')[0];
-    const canonical = canonicalClaimId;
+    const match = canonicalClaimId.match(/^m_(\d{4}-\d{2}-\d{2})_([123])$/);
+    if (match) {
+      const dateStr = match[1];
+      const index = match[2];
+      const dailySessions = await getDailySessionHistory(userId, dateStr);
+      const countPlayedToday = await getCountOfGamesPlayedToday(userId);
 
-    if (canonical.endsWith('_1') || claimId.includes('score_target')) {
-      const dateObj = new Date(todayStr);
-      const seed = dateObj.getDate();
-      const games = ['snake', 'brick-breaker', 'flappy-pixel', 'space-defender', 'memory-grid', 'cyber-runner', 'vaporwave-racer', 'cyber-tetris', 'cyber-mines', 'neon-2048'];
-      const gameIdx = seed % games.length;
-      const selectedGame = games[gameIdx];
-      const target = 50 + (seed % 3) * 50;
+      if (index === '1') {
+        const dateObj = new Date(dateStr);
+        const seed = isNaN(dateObj.getDate()) ? 1 : dateObj.getDate();
+        const games = ['snake', 'brick-breaker', 'flappy-pixel', 'space-defender', 'memory-grid', 'cyber-runner', 'vaporwave-racer', 'cyber-tetris', 'cyber-mines', 'neon-2048'];
+        const gameIdx = seed % games.length;
+        const selectedGame = games[gameIdx];
+        const target = 50 + (seed % 3) * 50;
 
-      const highScore = await getUserHighScore(userId, selectedGame);
-      if (highScore >= target) {
-        verified = true;
-      }
-    } else if (canonical.endsWith('_2') || claimId.includes('unique_games')) {
-      const countPlayed = await getCountOfGamesPlayedToday(userId);
-      if (countPlayed >= 2) {
-        verified = true;
-      }
-    } else if (canonical.endsWith('_3') || claimId === 'm_play_3' || claimId.includes('play_count')) {
-      const countPlayed = await getCountOfGamesPlayedToday(userId);
-      if (countPlayed >= 3) {
-        verified = true;
+        const highScore = await getUserHighScore(userId, selectedGame);
+        const sessionHigh = dailySessions.some(s => s.gameId === selectedGame && s.score >= target);
+        if (sessionHigh || highScore >= target) {
+          verified = true;
+        }
+      } else if (index === '2') {
+        const hasPb = dailySessions.some(s => s.isPersonalBest);
+        const distinctGenres = new Set(dailySessions.map(s => s.genre)).size;
+        if (hasPb || distinctGenres >= 2 || countPlayedToday >= 2) {
+          verified = true;
+        }
+      } else if (index === '3') {
+        if (dailySessions.length >= 3 || countPlayedToday >= 3) {
+          verified = true;
+        }
       }
     }
   } else if (claimType === 'challenge') {
-    if (claimId.startsWith('daily_')) {
-      const countPlayed = await getCountOfGamesPlayedToday(userId);
-      if (countPlayed >= 1) verified = true;
-    } else if (claimId.startsWith('weekly_')) {
-      if (claimId.endsWith('_1')) {
-        const achCount = await getUserVerifiedAchievementsCount(userId);
-        if (achCount >= 2) verified = true;
-      } else if (claimId.endsWith('_2')) {
-        const countPlayed = await getCountOfGamesPlayedToday(userId);
-        if (countPlayed >= 3) verified = true;
-      } else if (claimId.endsWith('_3')) {
-        const cumScore = await getUserCumulativeScore(userId);
-        if (cumScore >= 1000) verified = true;
-      } else {
-        const cumScore = await getUserCumulativeScore(userId);
-        if (cumScore >= 500) verified = true;
+    const dailyMatch = canonicalClaimId.match(/^daily_(\d{4}-\d{2}-\d{2})_([123])$/);
+    const weeklyMatch = canonicalClaimId.match(/^weekly_(\d{4}-W\d{2})_([123])$/);
+
+    if (dailyMatch) {
+      const dateStr = dailyMatch[1];
+      const index = dailyMatch[2];
+      const dailySessions = await getDailySessionHistory(userId, dateStr);
+      const countPlayedToday = await getCountOfGamesPlayedToday(userId);
+
+      if (index === '1') {
+        if (dailySessions.some(s => s.score >= 50) || countPlayedToday >= 1) {
+          verified = true;
+        }
+      } else if (index === '2') {
+        const distinctGenres = new Set(dailySessions.map(s => s.genre)).size;
+        if (distinctGenres >= 2 || dailySessions.length >= 2 || countPlayedToday >= 2) {
+          verified = true;
+        }
+      } else if (index === '3') {
+        if (dailySessions.length >= 3 || countPlayedToday >= 3) {
+          verified = true;
+        }
       }
-    } else if (claimId.startsWith('special_') || claimId.startsWith('season_')) {
+    } else if (weeklyMatch) {
+      const weekStr = weeklyMatch[1];
+      const index = weeklyMatch[2];
+      const weeklySessions = await getWeeklySessionHistory(userId, weekStr);
+      const achCount = await getUserVerifiedAchievementsCount(userId);
+      const countPlayedToday = await getCountOfGamesPlayedToday(userId);
+      const cumScore = await getUserCumulativeScore(userId);
+
+      if (index === '1') {
+        const pbCount = weeklySessions.filter(s => s.isPersonalBest).length;
+        if (pbCount >= 2 || achCount >= 2) {
+          verified = true;
+        }
+      } else if (index === '2') {
+        if (weeklySessions.length >= 5 || countPlayedToday >= 3) {
+          verified = true;
+        }
+      } else if (index === '3') {
+        const weeklySum = weeklySessions.reduce((acc, s) => acc + s.score, 0);
+        if (weeklySum >= 500 || cumScore >= 1000) {
+          verified = true;
+        }
+      }
+    } else if (canonicalClaimId in AUTHORITATIVE_SEASONAL_CHALLENGES) {
+      const history = await getUserGameHistory(userId);
       const comp = await getCompetitiveProfile(userId);
-      if (comp.rankedGames >= 3 || comp.globalRating >= 1100) {
+      const hasScore = await hasAnyHighScore(userId);
+      if (history.length >= 3 || comp.rankedGames >= 1 || hasScore) {
         verified = true;
       }
     }
@@ -1400,226 +1507,228 @@ export async function executeScoreSubmission({
 }: ScoreSubmissionInput): Promise<ScoreSubmissionResult> {
   assertPersistenceOperational();
 
-  if (idempotencyKey && !isValidIdempotencyKey(idempotencyKey)) {
-    throw ApiError.badRequest('Format idempotency key tidak valid.', 'INVALID_IDEMPOTENCY_KEY');
+  if (!idempotencyKey || !isValidIdempotencyKey(idempotencyKey)) {
+    throw ApiError.badRequest('Idempotency key wajib disertakan.', 'INVALID_IDEMPOTENCY_KEY');
   }
 
-  // Check idempotency cache
-  if (idempotencyKey) {
-    const cached = await getProcessedAction(`score_${userId}_${idempotencyKey}`);
-    if (cached) return cached;
-  }
-
-  // 1. Validate Game ID
   const canonicalId = requireCanonicalGameId(gameId);
   const config = getGameBalanceConfig(canonicalId);
-
-  // 2. Score ceiling check
-  if (score > config.maxScoreCeiling) {
-    await recordSuspiciousScore({
-      sessionId: sessionId || 'none',
-      userId,
-      gameId: canonicalId,
-      score,
-      durationMs: 0,
-      velocity: 0,
-      reason: `Score ${score} exceeded hard ceiling ${config.maxScoreCeiling}`
-    });
-
-    throw ApiError.unprocessable('Skor melebihi batas maksimum wajar yang diizinkan.', 'SCORE_CEILING_EXCEEDED');
-  }
-
-  // 3. MANDATORY verified session consumption
-  if (!sessionId || typeof sessionId !== 'string') {
-    throw ApiError.unprocessable('ID Sesi permainan (sessionId) wajib disertakan untuk submission skor.', 'VERIFIED_SESSION_REQUIRED');
-  }
-
-  const consumption = await consumeGameSession(sessionId, userId, canonicalId);
-  if (!consumption.valid || !consumption.session) {
-    const errorCode = (consumption.reason as any) || 'SESSION_NOT_FOUND';
-    throw ApiError.unprocessable('Sesi game tidak valid atau sudah pernah digunakan.', errorCode);
-  }
-
-  // Calculate authoritative duration from server session startTime
-  const verifiedDurationMs = Date.now() - consumption.session.startTime;
-  const durationSeconds = Math.max(verifiedDurationMs / 1000, 0.5);
-  const scoreVelocity = score / durationSeconds;
-
-  if (score > 0 && verifiedDurationMs < config.minDurationMs) {
-    await recordSuspiciousScore({
-      sessionId,
-      userId,
-      gameId: canonicalId,
-      score,
-      durationMs: verifiedDurationMs,
-      velocity: scoreVelocity,
-      reason: `Duration ${verifiedDurationMs}ms below min ${config.minDurationMs}ms for score ${score}`
-    });
-
-    throw ApiError.unprocessable('Durasi permainan terlalu singkat untuk perolehan skor ini.', 'INSUFFICIENT_DURATION');
-  }
-
-  if (score > 50 && scoreVelocity > config.maxScorePerSec) {
-    await recordSuspiciousScore({
-      sessionId,
-      userId,
-      gameId: canonicalId,
-      score,
-      durationMs: verifiedDurationMs,
-      velocity: scoreVelocity,
-      reason: `Velocity ${scoreVelocity.toFixed(1)}/s exceeded limit ${config.maxScorePerSec}/s`
-    });
-
-    throw ApiError.unprocessable('Laju perolehan skor melebihi batas wajar.', 'SCORE_CEILING_EXCEEDED');
-  }
-
-  // Authoritative reward calculation: strictly NO rewards for zero score or ineligible runs
-  const isEligibleForReward = score > 0 && verifiedDurationMs >= config.minDurationMs;
-  const coinsEarned = isEligibleForReward ? Math.min(250, Math.floor(score * config.baseCoinMultiplier)) : 0;
-  const xpEarned = isEligibleForReward ? Math.min(500, Math.floor(score * config.baseXpMultiplier)) : 0;
+  const idempotencyId = `score_${userId}_${idempotencyKey}`;
   const transactionId = `tx_${Date.now()}_${crypto.randomBytes(8).toString('hex')}`;
-  const nowIso = new Date().toISOString();
-
-  let newCoinBalance = 0;
+  const nowMs = Date.now();
+  const nowIso = new Date(nowMs).toISOString();
+  const genre = CANONICAL_GAME_REGISTRY[canonicalId]?.genre || 'Arcade';
 
   if (isFirestoreAvailable()) {
     const db = getDb();
+    const idemRef = db.collection('processedActions').doc(idempotencyId);
+    const sessionRef = db.collection('gameSessions').doc(sessionId);
     const ecoRef = db.collection('userEconomy').doc(userId);
     const ledgerRef = db.collection('economyTransactions').doc(transactionId);
     const leaderRef = db.collection('leaderboards').doc(canonicalId).collection('entries').doc(userId);
+    const historyId = `hist_${nowMs}_${crypto.randomBytes(6).toString('hex')}`;
+    const historyRef = db.collection('userGameHistory').doc(historyId);
+    const progRef = db.collection('userProgression').doc(userId);
 
-    await db.runTransaction(async (tx) => {
-      const ecoDoc = await tx.get(ecoRef);
-      const current: StoredEconomy = ecoDoc.exists
-        ? (ecoDoc.data() as StoredEconomy)
-        : { userId, coins: 100, totalEarned: 100, totalSpent: 0, lastUpdated: Date.now() };
+    let antiCheatError: { reason: string; duration: number; velocity: number } | null = null;
+    let finalResult: ScoreSubmissionResult | null = null;
 
-      const updatedEco: StoredEconomy = {
-        userId,
-        coins: current.coins + coinsEarned,
-        totalEarned: current.totalEarned + coinsEarned,
-        totalSpent: current.totalSpent,
-        lastUpdated: Date.now()
-      };
-      newCoinBalance = updatedEco.coins;
+    try {
+      await db.runTransaction(async (tx) => {
+        // 1. Idempotency Check
+        const idemDoc = await tx.get(idemRef);
+        if (idemDoc.exists) {
+          finalResult = (idemDoc.data() as any).result as ScoreSubmissionResult;
+          return; // Already processed
+        }
 
-      if (coinsEarned > 0) {
-        tx.set(ecoRef, updatedEco);
+        // 2. Verified Session Required
+        if (!sessionId) {
+          throw ApiError.unprocessable('ID Sesi wajib disertakan.', 'VERIFIED_SESSION_REQUIRED');
+        }
 
-        // Record transaction ledger
-        const ledgerEntry: StoredEconomyTransaction = {
-          transactionId,
+        const sessionDoc = await tx.get(sessionRef);
+        if (!sessionDoc.exists) throw ApiError.unprocessable('Sesi tidak ditemukan.', 'SESSION_NOT_FOUND');
+        const session = sessionDoc.data() as StoredGameSession;
+
+        if (session.userId !== userId) throw ApiError.unprocessable('Sesi bukan milik Anda.', 'SESSION_USER_MISMATCH');
+        if (session.gameId !== canonicalId) throw ApiError.unprocessable('Sesi game tidak cocok.', 'SESSION_GAME_MISMATCH');
+        if (session.consumed) throw ApiError.unprocessable('Sesi sudah digunakan.', 'SESSION_ALREADY_CONSUMED');
+        if (nowMs > session.expiresAt) throw ApiError.unprocessable('Sesi kedaluwarsa.', 'SESSION_EXPIRED');
+
+        // 3. Anti-Cheat & Duration Validation
+        const verifiedDurationMs = nowMs - session.startTime;
+        const durationSeconds = Math.max(verifiedDurationMs / 1000, 0.5);
+        const scoreVelocity = score / durationSeconds;
+
+        if (score > config.maxScoreCeiling) {
+          antiCheatError = { reason: `Score ${score} exceeded hard ceiling ${config.maxScoreCeiling}`, duration: 0, velocity: 0 };
+          throw ApiError.unprocessable('Skor melebihi batas maksimum.', 'SCORE_CEILING_EXCEEDED');
+        }
+        if (score > 0 && verifiedDurationMs < config.minDurationMs) {
+          antiCheatError = { reason: `Duration ${verifiedDurationMs}ms below min ${config.minDurationMs}ms`, duration: verifiedDurationMs, velocity: scoreVelocity };
+          throw ApiError.unprocessable('Durasi permainan terlalu singkat.', 'INSUFFICIENT_DURATION');
+        }
+        if (score > 50 && scoreVelocity > config.maxScorePerSec) {
+          antiCheatError = { reason: `Velocity ${scoreVelocity.toFixed(1)}/s exceeded limit ${config.maxScorePerSec}/s`, duration: verifiedDurationMs, velocity: scoreVelocity };
+          throw ApiError.unprocessable('Laju perolehan skor melebihi batas wajar.', 'SCORE_CEILING_EXCEEDED');
+        }
+
+        // 4. Rewards Calculation
+        const isEligibleForReward = score > 0 && verifiedDurationMs >= config.minDurationMs;
+        const coinsEarned = isEligibleForReward ? Math.min(250, Math.floor(score * config.baseCoinMultiplier)) : 0;
+        const xpEarned = isEligibleForReward ? Math.min(500, Math.floor(score * config.baseXpMultiplier)) : 0;
+
+        // 5. Leaderboard Update
+        const leaderDoc = await tx.get(leaderRef);
+        const prevPb = leaderDoc.exists ? (leaderDoc.data()?.score || 0) : 0;
+        const isPersonalBest = score > prevPb;
+
+        if (isPersonalBest || !leaderDoc.exists) {
+          tx.set(leaderRef, {
+            userId,
+            playerName: playerName.slice(0, 32),
+            playerAvatar: playerAvatar.slice(0, 16),
+            score,
+            submittedAt: nowIso,
+            gameId: canonicalId,
+            masteryLevel: masteryLevel || 1
+          });
+        }
+
+        // 6. Session Consumption
+        tx.update(sessionRef, { consumed: true, consumedAt: nowMs });
+
+        // 7. Insert History
+        tx.set(historyRef, {
+          historyId, userId, sessionId, gameId: canonicalId, genre, score, isPersonalBest, timestamp: nowMs, dateStr: getUtcDateString(nowMs), weekStr: getIsoWeekString(nowMs), seasonId: 'season_1'
+        });
+
+        // 8. Economy
+        const ecoDoc = await tx.get(ecoRef);
+        const currentEco = ecoDoc.exists ? (ecoDoc.data() as StoredEconomy) : { userId, coins: 100, totalEarned: 100, totalSpent: 0, lastUpdated: nowMs };
+        
+        let newCoinBalance = currentEco.coins;
+        if (coinsEarned > 0) {
+          const updatedEco = { ...currentEco, coins: currentEco.coins + coinsEarned, totalEarned: currentEco.totalEarned + coinsEarned, lastUpdated: nowMs };
+          newCoinBalance = updatedEco.coins;
+          tx.set(ecoRef, updatedEco);
+          tx.set(ledgerRef, {
+            transactionId, userId, type: 'GAME_REWARD', amount: coinsEarned, balanceBefore: currentEco.coins, balanceAfter: updatedEco.coins, reason: `GAME_REWARD_${canonicalId.toUpperCase()}`, referenceId: sessionId, createdAt: nowIso
+          });
+        }
+
+        // 9. Progression
+        if (xpEarned > 0) {
+          const progDoc = await tx.get(progRef);
+          const currentProg = progDoc.exists ? (progDoc.data() as StoredUserProgression) : { userId, totalXp: 0, level: 1, lastUpdated: nowMs };
+          const newTotalXp = currentProg.totalXp + xpEarned;
+          tx.set(progRef, { userId, totalXp: newTotalXp, level: calculateLevelFromXp(newTotalXp), lastUpdated: nowMs });
+        }
+
+        // 10. Save result & Idempotency
+        const result: ScoreSubmissionResult = { success: true, gameId: canonicalId, score, coinsEarned, xpEarned, newCoinBalance, leaderboards: [], transactionId };
+        tx.set(idemRef, { actionId: idempotencyId, userId, result, processedAt: nowIso });
+        
+        finalResult = result;
+      });
+    } catch (err) {
+      if (antiCheatError) {
+        await recordSuspiciousScore({
+          sessionId: sessionId || 'none',
           userId,
-          type: 'GAME_REWARD',
-          amount: coinsEarned,
-          balanceBefore: current.coins,
-          balanceAfter: updatedEco.coins,
-          reason: `GAME_REWARD_${canonicalId.toUpperCase()}`,
-          referenceId: sessionId,
-          createdAt: nowIso
-        };
-        tx.set(ledgerRef, ledgerEntry);
-      }
-
-      if (xpEarned > 0) {
-        const progRef = db.collection('userProgression').doc(userId);
-        const progDoc = await tx.get(progRef);
-        const currentProg: StoredUserProgression = progDoc.exists
-          ? (progDoc.data() as StoredUserProgression)
-          : { userId, totalXp: 0, level: 1, lastUpdated: Date.now() };
-
-        const newTotalXp = currentProg.totalXp + xpEarned;
-        const updatedProg: StoredUserProgression = {
-          userId,
-          totalXp: newTotalXp,
-          level: calculateLevelFromXp(newTotalXp),
-          lastUpdated: Date.now()
-        };
-        tx.set(progRef, updatedProg);
-      }
-
-      // Save leaderboard high score
-      const leaderDoc = await tx.get(leaderRef);
-      if (!leaderDoc.exists || score > (leaderDoc.data()?.score || 0)) {
-        tx.set(leaderRef, {
-          userId,
-          playerName,
-          playerAvatar,
-          score,
-          submittedAt: nowIso,
           gameId: canonicalId,
-          masteryLevel: masteryLevel || 1
+          score,
+          durationMs: antiCheatError.duration,
+          velocity: antiCheatError.velocity,
+          reason: antiCheatError.reason
         });
       }
-    });
+      throw err;
+    }
+
+    if (finalResult) {
+       finalResult.leaderboards = await getLeaderboardEntries(canonicalId);
+    }
+    return finalResult!;
   } else {
-    const eco = await getUserEconomy(userId);
-    const balanceBefore = eco.coins;
-    eco.coins += coinsEarned;
-    eco.totalEarned += coinsEarned;
-    eco.lastUpdated = Date.now();
-    memoryStore.economies.set(userId, eco);
-    newCoinBalance = eco.coins;
+    // Memory Fallback
+    const cached = await getProcessedAction(idempotencyId);
+    if (cached) return cached.result as ScoreSubmissionResult;
 
-    if (coinsEarned > 0) {
-      const ledgerEntry: StoredEconomyTransaction = {
-        transactionId,
-        userId,
-        type: 'GAME_REWARD',
-        amount: coinsEarned,
-        balanceBefore,
-        balanceAfter: eco.coins,
-        reason: `GAME_REWARD_${canonicalId.toUpperCase()}`,
-        referenceId: sessionId,
-        createdAt: nowIso
-      };
-      memoryStore.ledger.push(ledgerEntry);
+    if (!sessionId) throw ApiError.unprocessable('ID Sesi wajib disertakan.', 'VERIFIED_SESSION_REQUIRED');
+    const session = memoryStore.sessions.get(sessionId);
+    if (!session) throw ApiError.unprocessable('Sesi tidak ditemukan.', 'SESSION_NOT_FOUND');
+    if (session.userId !== userId) throw ApiError.unprocessable('Sesi bukan milik Anda.', 'SESSION_USER_MISMATCH');
+    if (session.gameId !== canonicalId) throw ApiError.unprocessable('Sesi game tidak cocok.', 'SESSION_GAME_MISMATCH');
+    if (session.consumed) throw ApiError.unprocessable('Sesi sudah digunakan.', 'SESSION_ALREADY_CONSUMED');
+    if (nowMs > session.expiresAt) throw ApiError.unprocessable('Sesi kedaluwarsa.', 'SESSION_EXPIRED');
+
+    const verifiedDurationMs = nowMs - session.startTime;
+    const durationSeconds = Math.max(verifiedDurationMs / 1000, 0.5);
+    const scoreVelocity = score / durationSeconds;
+
+    if (score > config.maxScoreCeiling) {
+      await recordSuspiciousScore({ sessionId, userId, gameId: canonicalId, score, durationMs: 0, velocity: 0, reason: `Score exceeded ceiling` });
+      throw ApiError.unprocessable('Skor melebihi batas maksimum.', 'SCORE_CEILING_EXCEEDED');
+    }
+    if (score > 0 && verifiedDurationMs < config.minDurationMs) {
+      await recordSuspiciousScore({ sessionId, userId, gameId: canonicalId, score, durationMs: verifiedDurationMs, velocity: scoreVelocity, reason: `Duration too short` });
+      throw ApiError.unprocessable('Durasi permainan terlalu singkat.', 'INSUFFICIENT_DURATION');
+    }
+    if (score > 50 && scoreVelocity > config.maxScorePerSec) {
+      await recordSuspiciousScore({ sessionId, userId, gameId: canonicalId, score, durationMs: verifiedDurationMs, velocity: scoreVelocity, reason: `Velocity too high` });
+      throw ApiError.unprocessable('Laju perolehan skor melebihi batas wajar.', 'SCORE_CEILING_EXCEEDED');
     }
 
-    if (xpEarned > 0) {
-      let prog = memoryStore.userProgression.get(userId) || { userId, totalXp: 0, level: 1, lastUpdated: Date.now() };
-      const newTotalXp = prog.totalXp + xpEarned;
-      prog = {
-        userId,
-        totalXp: newTotalXp,
-        level: calculateLevelFromXp(newTotalXp),
-        lastUpdated: Date.now()
-      };
-      memoryStore.userProgression.set(userId, prog);
-    }
+    const isEligibleForReward = score > 0 && verifiedDurationMs >= config.minDurationMs;
+    const coinsEarned = isEligibleForReward ? Math.min(250, Math.floor(score * config.baseCoinMultiplier)) : 0;
+    const xpEarned = isEligibleForReward ? Math.min(500, Math.floor(score * config.baseXpMultiplier)) : 0;
 
-    // Save leaderboard entry in memory
+    session.consumed = true;
+    session.consumedAt = nowMs;
+
     const list = memoryStore.leaderboards.get(canonicalId) || [];
     const idx = list.findIndex(e => e.userId === userId);
+    let isPersonalBest = true;
     if (idx >= 0) {
-      if (score > list[idx].score) {
-        list[idx] = { userId, playerName, playerAvatar, score, submittedAt: nowIso, gameId: canonicalId, masteryLevel };
-      }
+      isPersonalBest = score > list[idx].score;
+      if (isPersonalBest) list[idx] = { userId, playerName: playerName.slice(0, 32), playerAvatar: playerAvatar.slice(0, 16), score, submittedAt: nowIso, gameId: canonicalId, masteryLevel };
     } else {
-      list.push({ userId, playerName, playerAvatar, score, submittedAt: nowIso, gameId: canonicalId, masteryLevel });
+      list.push({ userId, playerName: playerName.slice(0, 32), playerAvatar: playerAvatar.slice(0, 16), score, submittedAt: nowIso, gameId: canonicalId, masteryLevel });
     }
     list.sort((a, b) => b.score - a.score);
     memoryStore.leaderboards.set(canonicalId, list);
+
+    const historyEntry: StoredGameHistoryEntry = {
+      historyId: `hist_${nowMs}_${crypto.randomBytes(6).toString('hex')}`, userId, sessionId, gameId: canonicalId, genre, score, isPersonalBest, timestamp: nowMs, dateStr: getUtcDateString(nowMs), weekStr: getIsoWeekString(nowMs), seasonId: 'season_1'
+    };
+    memoryStore.gameHistory.push(historyEntry);
+
+    const eco = await getUserEconomy(userId);
+    eco.coins += coinsEarned;
+    eco.totalEarned += coinsEarned;
+    eco.lastUpdated = nowMs;
+    memoryStore.economies.set(userId, eco);
+
+    if (coinsEarned > 0) {
+      memoryStore.ledger.push({ transactionId, userId, type: 'GAME_REWARD', amount: coinsEarned, balanceBefore: eco.coins - coinsEarned, balanceAfter: eco.coins, reason: `GAME_REWARD_${canonicalId.toUpperCase()}`, referenceId: sessionId, createdAt: nowIso });
+    }
+
+    if (xpEarned > 0) {
+      const prog = memoryStore.userProgression.get(userId) || { userId, totalXp: 0, level: 1, lastUpdated: nowMs };
+      prog.totalXp += xpEarned;
+      prog.level = calculateLevelFromXp(prog.totalXp);
+      prog.lastUpdated = nowMs;
+      memoryStore.userProgression.set(userId, prog);
+    }
+
+    const leaderboards = await getLeaderboardEntries(canonicalId);
+    const result: ScoreSubmissionResult = { success: true, gameId: canonicalId, score, coinsEarned, xpEarned, newCoinBalance: eco.coins, leaderboards, transactionId };
+    
+    await setProcessedAction(idempotencyId, result);
+    return result;
   }
-
-  const leaderboards = await getLeaderboardEntries(canonicalId);
-
-  const result: ScoreSubmissionResult = {
-    success: true,
-    gameId: canonicalId,
-    score,
-    coinsEarned,
-    xpEarned,
-    newCoinBalance,
-    leaderboards,
-    transactionId
-  };
-
-  if (idempotencyKey) {
-    await setProcessedAction(`score_${userId}_${idempotencyKey}`, result);
-  }
-
-  return result;
 }
 
 // ==========================================
@@ -1851,21 +1960,19 @@ export async function executeRankedSubmission(input: ScoreSubmissionInput): Prom
     throw ApiError.badRequest('Game ini tidak valid untuk mode ranked.', 'INVALID_RANKED_GAME');
   }
 
-  if (idempotencyKey && !isValidIdempotencyKey(idempotencyKey)) {
-    throw ApiError.badRequest('Format idempotency key tidak valid.', 'INVALID_IDEMPOTENCY_KEY');
+  if (!idempotencyKey || !isValidIdempotencyKey(idempotencyKey)) {
+    throw ApiError.badRequest('Idempotency key wajib disertakan.', 'INVALID_IDEMPOTENCY_KEY');
   }
-
-  // Check idempotency cache
-  if (idempotencyKey) {
-    const cached = await getProcessedAction(`ranked_${userId}_${idempotencyKey}`);
-    if (cached) return cached as RankedSubmissionResult;
-  }
+  const idempotencyId = `ranked_${userId}_${idempotencyKey}`;
 
   const season = await getActiveSeason();
   const balanceConfig = getGameBalanceConfig(canonicalId);
+  const nowMs = Date.now();
+  const nowIso = new Date(nowMs).toISOString();
 
   if (isFirestoreAvailable()) {
     const db = getDb();
+    const idemRef = db.collection('processedActions').doc(idempotencyId);
     const sessionRef = db.collection('rankedSessions').doc(sessionId);
     const profileRef = db.collection('competitiveProfiles').doc(userId);
     const leaderRef = db.collection('rankedLeaderboards').doc(canonicalId).collection('entries').doc(userId);
@@ -1876,339 +1983,219 @@ export async function executeRankedSubmission(input: ScoreSubmissionInput): Prom
       .collection('entries')
       .doc(userId);
 
-    const result = await db.runTransaction(async (tx) => {
-      const sessDoc = await tx.get(sessionRef);
-      if (!sessDoc.exists) throw ApiError.unprocessable('Sesi ranked tidak ditemukan.', 'SESSION_NOT_FOUND');
-      const session = sessDoc.data() as StoredGameSession;
+    let antiCheatError: { reason: string; duration: number; velocity: number } | null = null;
+    let finalResult: RankedSubmissionResult | null = null;
 
-      // 1. Hardened Validation
-      validateSessionHard(session, userId, canonicalId, season);
+    try {
+      await db.runTransaction(async (tx) => {
+        const idemDoc = await tx.get(idemRef);
+        if (idemDoc.exists) {
+          finalResult = (idemDoc.data() as any).result as RankedSubmissionResult;
+          return;
+        }
 
-      // 2. Anti-cheat score validation
-      if (score > balanceConfig.maxScoreCeiling) {
-        await recordSuspiciousScore({
-          sessionId,
+        const sessDoc = await tx.get(sessionRef);
+        if (!sessDoc.exists) throw ApiError.unprocessable('Sesi ranked tidak ditemukan.', 'SESSION_NOT_FOUND');
+        const session = sessDoc.data() as StoredGameSession;
+
+        if (session.userId !== userId) throw ApiError.unprocessable('User mismatch', 'SESSION_USER_MISMATCH');
+        if (session.gameId !== canonicalId) throw ApiError.unprocessable('Game mismatch', 'SESSION_GAME_MISMATCH');
+        if (session.consumed) throw ApiError.unprocessable('Session used', 'SESSION_ALREADY_CONSUMED');
+        if (nowMs > session.expiresAt) throw ApiError.unprocessable('Session expired', 'SESSION_EXPIRED');
+
+        const verifiedDurationMs = nowMs - session.startTime;
+        const durationSeconds = Math.max(verifiedDurationMs / 1000, 0.5);
+        const scoreVelocity = score / durationSeconds;
+
+        if (score > balanceConfig.maxScoreCeiling) {
+          antiCheatError = { reason: `Score exceeded ceiling`, duration: 0, velocity: 0 };
+          throw ApiError.unprocessable('Skor melebihi batas maksimum.', 'SCORE_CEILING_EXCEEDED');
+        }
+        if (score > 0 && verifiedDurationMs < balanceConfig.minDurationMs) {
+          antiCheatError = { reason: `Duration too short`, duration: verifiedDurationMs, velocity: scoreVelocity };
+          throw ApiError.unprocessable('Durasi tidak valid.', 'INSUFFICIENT_DURATION');
+        }
+        if (score > 50 && scoreVelocity > balanceConfig.maxScorePerSec) {
+          antiCheatError = { reason: `Velocity too high`, duration: verifiedDurationMs, velocity: scoreVelocity };
+          throw ApiError.unprocessable('Laju skor tidak valid.', 'SCORE_CEILING_EXCEEDED');
+        }
+
+        tx.update(sessionRef, { consumed: true, consumedAt: nowMs });
+
+        const profileDoc = await tx.get(profileRef);
+        const currentProfile: StoredCompetitiveProfile = profileDoc.exists ? (profileDoc.data() as StoredCompetitiveProfile) : {
           userId,
-          gameId: canonicalId,
+          globalRating: 1000,
+          globalTier: getTierForRating(1000),
+          peakGlobalRating: 1000,
+          gameRatings: {},
+          rankedGames: 0,
+          lastUpdated: nowMs,
+          seasonId: season.seasonId
+        };
+
+        const currentMatchStats = currentProfile.gameRatings[canonicalId] || {
+          rating: 1000,
+          tier: getTierForRating(1000),
+          matchesPlayed: 0,
+          wins: 0,
+          losses: 0,
+          lastUpdated: nowMs
+        };
+
+        const delta = calculateRatingDelta(currentMatchStats.rating, score, gameConfig.baseScore, currentMatchStats.matchesPlayed);
+        const oldRating = currentMatchStats.rating;
+        const newRating = Math.max(100, oldRating + delta);
+        const newTier = getTierForRating(newRating);
+
+        const updatedGameStats = {
+          rating: newRating,
+          tier: newTier,
+          matchesPlayed: currentMatchStats.matchesPlayed + 1,
+          wins: currentMatchStats.wins + (delta > 0 ? 1 : 0),
+          losses: currentMatchStats.losses + (delta < 0 ? 1 : 0),
+          lastUpdated: nowMs
+        };
+
+        currentProfile.gameRatings[canonicalId] = updatedGameStats;
+        currentProfile.rankedGames += 1;
+        currentProfile.lastUpdated = nowMs;
+
+        const playedGames = Object.values(currentProfile.gameRatings);
+        currentProfile.globalRating = Math.floor(playedGames.reduce((acc, curr) => acc + curr.rating, 0) / playedGames.length);
+        currentProfile.globalTier = getTierForRating(currentProfile.globalRating);
+        currentProfile.peakGlobalRating = Math.max(currentProfile.peakGlobalRating || 1000, currentProfile.globalRating);
+
+        tx.set(profileRef, currentProfile);
+
+        const entryData = {
+          userId,
+          playerName: playerName || 'Player',
+          playerAvatar: playerAvatar || '👾',
           score,
-          durationMs: 0,
-          velocity: 0,
-          reason: `Ranked score ${score} exceeded ceiling ${balanceConfig.maxScoreCeiling}`
-        });
-        throw ApiError.unprocessable('Skor melebihi batas maksimum wajar yang diizinkan.', 'SCORE_CEILING_EXCEEDED');
-      }
-
-      const verifiedDurationMs = Date.now() - session.startTime;
-      const durationSeconds = Math.max(verifiedDurationMs / 1000, 0.5);
-      const scoreVelocity = score / durationSeconds;
-
-      if (score > 0 && verifiedDurationMs < balanceConfig.minDurationMs) {
-        await recordSuspiciousScore({
-          sessionId,
-          userId,
+          submittedAt: nowIso,
           gameId: canonicalId,
-          score,
-          durationMs: verifiedDurationMs,
-          velocity: scoreVelocity,
-          reason: `Ranked duration ${verifiedDurationMs}ms below min ${balanceConfig.minDurationMs}ms for score ${score}`
-        });
-        throw ApiError.unprocessable('Durasi permainan terlalu singkat untuk perolehan skor ini.', 'INSUFFICIENT_DURATION');
-      }
+          masteryLevel: masteryLevel || 1,
+          tier: newTier,
+          rating: newRating
+        };
+        tx.set(leaderRef, entryData);
+        tx.set(seasonalLeaderRef, entryData);
 
-      if (score > 50 && scoreVelocity > balanceConfig.maxScorePerSec) {
+        const coinsEarned = Math.min(300, Math.floor(score * balanceConfig.baseCoinMultiplier * 1.2)); 
+        const xpEarned = Math.min(600, Math.floor(score * balanceConfig.baseXpMultiplier * 1.5)); 
+        const txId = `rnk_tx_${nowMs}_${crypto.randomBytes(8).toString('hex')}`;
+        
+        const ecoRef = db.collection('userEconomy').doc(userId);
+        const ecoDoc = await tx.get(ecoRef);
+        const currentEco: StoredEconomy = ecoDoc.exists
+          ? (ecoDoc.data() as StoredEconomy)
+          : { userId, coins: 100, totalEarned: 100, totalSpent: 0, lastUpdated: nowMs };
+
+        const updatedEco: StoredEconomy = {
+          userId,
+          coins: currentEco.coins + coinsEarned,
+          totalEarned: currentEco.totalEarned + coinsEarned,
+          totalSpent: currentEco.totalSpent,
+          lastUpdated: nowMs
+        };
+        tx.set(ecoRef, updatedEco);
+
+        if (coinsEarned > 0) {
+          const ledgerRef = db.collection('economyTransactions').doc(txId);
+          tx.set(ledgerRef, {
+            transactionId: txId, userId, type: 'GAME_REWARD', amount: coinsEarned, balanceBefore: currentEco.coins, balanceAfter: updatedEco.coins, reason: `RANKED_REWARD_${canonicalId.toUpperCase()}`, referenceId: sessionId, createdAt: nowIso
+          });
+        }
+
+        const result: RankedSubmissionResult = {
+          success: true, gameId: canonicalId, score, coinsEarned, xpEarned, newCoinBalance: updatedEco.coins, leaderboards: [], transactionId: txId, oldRating, newRating, ratingChange: delta, newTier
+        };
+
+        tx.set(idemRef, { actionId: idempotencyId, userId, result, processedAt: nowIso });
+        finalResult = result;
+      });
+    } catch (err) {
+      if (antiCheatError) {
         await recordSuspiciousScore({
-          sessionId,
-          userId,
-          gameId: canonicalId,
-          score,
-          durationMs: verifiedDurationMs,
-          velocity: scoreVelocity,
-          reason: `Ranked velocity ${scoreVelocity.toFixed(1)}/s exceeded limit ${balanceConfig.maxScorePerSec}/s`
-        });
-        throw ApiError.unprocessable('Laju perolehan skor melebihi batas wajar.', 'SCORE_CEILING_EXCEEDED');
-      }
-
-      // 3. Fetch/Init Profile
-      const profDoc = await tx.get(profileRef);
-      const profile: StoredCompetitiveProfile = profDoc.exists 
-        ? (profDoc.data() as StoredCompetitiveProfile)
-        : {
-            userId,
-            globalRating: INITIAL_RATING,
-            globalTier: getTierForRating(INITIAL_RATING),
-            peakGlobalRating: INITIAL_RATING,
-            gameRatings: {},
-            rankedGames: 0,
-            lastUpdated: Date.now(),
-            seasonId: season.seasonId
-          };
-
-      const currentMatchStats = profile.gameRatings[canonicalId] || {
-        rating: INITIAL_RATING,
-        tier: getTierForRating(INITIAL_RATING),
-        matchesPlayed: 0,
-        wins: 0,
-        losses: 0,
-        lastUpdated: Date.now()
-      };
-
-      // 4. Calculate Rating
-      const delta = calculateRatingDelta(
-        currentMatchStats.rating,
-        score,
-        gameConfig.baseScore,
-        currentMatchStats.matchesPlayed
-      );
-
-      const oldRating = currentMatchStats.rating;
-      const newRating = Math.max(100, oldRating + delta);
-      const newTier = getTierForRating(newRating);
-
-      // 5. Update Profile
-      const updatedGameStats = {
-        rating: newRating,
-        tier: newTier,
-        matchesPlayed: currentMatchStats.matchesPlayed + 1,
-        wins: currentMatchStats.wins + (delta > 0 ? 1 : 0),
-        losses: currentMatchStats.losses + (delta < 0 ? 1 : 0),
-        lastUpdated: Date.now()
-      };
-
-      profile.gameRatings[canonicalId] = updatedGameStats;
-      profile.rankedGames += 1;
-      profile.lastUpdated = Date.now();
-      
-      const playedGames = Object.values(profile.gameRatings);
-      profile.globalRating = Math.floor(playedGames.reduce((acc, curr) => acc + curr.rating, 0) / playedGames.length);
-      profile.globalTier = getTierForRating(profile.globalRating);
-      profile.peakGlobalRating = Math.max(profile.peakGlobalRating, profile.globalRating);
-
-      // 6. Commit all changes atomically
-      tx.update(sessionRef, { consumed: true, consumedAt: Date.now() });
-      tx.set(profileRef, profile);
-
-      const nowIso = new Date().toISOString();
-      const entryData = {
-        userId,
-        playerName,
-        playerAvatar,
-        score,
-        submittedAt: nowIso,
-        gameId: canonicalId,
-        masteryLevel: masteryLevel || 1,
-        tier: newTier,
-        rating: newRating
-      };
-
-      tx.set(leaderRef, entryData);
-      tx.set(seasonalLeaderRef, entryData);
-
-      // economy reward
-      const coinsEarned = Math.min(300, Math.floor(score * balanceConfig.baseCoinMultiplier * 1.2)); // 20% bonus for ranked
-      const xpEarned = Math.min(600, Math.floor(score * balanceConfig.baseXpMultiplier * 1.5)); // 50% bonus for ranked
-
-      const txId = `rnk_tx_${Date.now()}_${crypto.randomBytes(8).toString('hex')}`;
-      const ecoRef = db.collection('userEconomy').doc(userId);
-      const ecoDoc = await tx.get(ecoRef);
-      const currentEco: StoredEconomy = ecoDoc.exists
-        ? (ecoDoc.data() as StoredEconomy)
-        : { userId, coins: 100, totalEarned: 100, totalSpent: 0, lastUpdated: Date.now() };
-
-      const updatedEco: StoredEconomy = {
-        userId,
-        coins: currentEco.coins + coinsEarned,
-        totalEarned: currentEco.totalEarned + coinsEarned,
-        totalSpent: currentEco.totalSpent,
-        lastUpdated: Date.now()
-      };
-      tx.set(ecoRef, updatedEco);
-
-      if (coinsEarned > 0) {
-        const ledgerRef = db.collection('economyTransactions').doc(txId);
-        tx.set(ledgerRef, {
-          transactionId: txId,
-          userId,
-          type: 'GAME_REWARD',
-          amount: coinsEarned,
-          balanceBefore: currentEco.coins,
-          balanceAfter: updatedEco.coins,
-          reason: `RANKED_REWARD_${canonicalId.toUpperCase()}`,
-          referenceId: sessionId,
-          createdAt: nowIso
+          sessionId, userId, gameId: canonicalId, score,
+          durationMs: antiCheatError.duration, velocity: antiCheatError.velocity, reason: antiCheatError.reason
         });
       }
-
-      return {
-        success: true,
-        gameId: canonicalId,
-        score,
-        coinsEarned,
-        xpEarned,
-        newCoinBalance: updatedEco.coins,
-        leaderboards: [],
-        transactionId: txId,
-        oldRating,
-        newRating,
-        ratingChange: delta,
-        newTier
-      };
-    });
-
-    if (idempotencyKey) {
-      await setProcessedAction(`ranked_${userId}_${idempotencyKey}`, result);
+      throw err;
     }
-    return result;
+    return finalResult!;
   } else {
-    // InMemory Path
+    const cached = await getProcessedAction(idempotencyId);
+    if (cached) return cached.result as RankedSubmissionResult;
+
     const session = memoryStore.sessions.get(sessionId);
-    if (!session) throw ApiError.unprocessable('Sesi ranked tidak ditemukan.', 'SESSION_NOT_FOUND');
+    if (!session) throw ApiError.unprocessable('Session not found', 'SESSION_NOT_FOUND');
+    if (session.userId !== userId) throw ApiError.unprocessable('User mismatch', 'SESSION_USER_MISMATCH');
+    if (session.gameId !== canonicalId) throw ApiError.unprocessable('Game mismatch', 'SESSION_GAME_MISMATCH');
+    if (session.consumed) throw ApiError.unprocessable('Session used', 'SESSION_ALREADY_CONSUMED');
+    if (nowMs > session.expiresAt) throw ApiError.unprocessable('Session expired', 'SESSION_EXPIRED');
 
-    // 1. Hardened Validation
-    validateSessionHard(session, userId, canonicalId, season);
-
-    // 2. Anti-cheat score validation
-    if (score > balanceConfig.maxScoreCeiling) {
-      throw ApiError.unprocessable('Skor melebihi batas maksimum wajar yang diizinkan.', 'SCORE_CEILING_EXCEEDED');
-    }
-
-    const verifiedDurationMs = Date.now() - session.startTime;
+    const verifiedDurationMs = nowMs - session.startTime;
     const durationSeconds = Math.max(verifiedDurationMs / 1000, 0.5);
     const scoreVelocity = score / durationSeconds;
 
+    if (score > balanceConfig.maxScoreCeiling) {
+      await recordSuspiciousScore({ sessionId, userId, gameId: canonicalId, score, durationMs: 0, velocity: 0, reason: `Score exceeded ceiling` });
+      throw ApiError.unprocessable('Skor melebihi batas', 'SCORE_CEILING_EXCEEDED');
+    }
     if (score > 0 && verifiedDurationMs < balanceConfig.minDurationMs) {
-      throw ApiError.unprocessable('Durasi permainan terlalu singkat untuk perolehan skor ini.', 'INSUFFICIENT_DURATION');
+      await recordSuspiciousScore({ sessionId, userId, gameId: canonicalId, score, durationMs: verifiedDurationMs, velocity: scoreVelocity, reason: `Duration too short` });
+      throw ApiError.unprocessable('Durasi tidak valid', 'INSUFFICIENT_DURATION');
     }
-
     if (score > 50 && scoreVelocity > balanceConfig.maxScorePerSec) {
-      throw ApiError.unprocessable('Laju perolehan skor melebihi batas wajar.', 'SCORE_CEILING_EXCEEDED');
+      await recordSuspiciousScore({ sessionId, userId, gameId: canonicalId, score, durationMs: verifiedDurationMs, velocity: scoreVelocity, reason: `Velocity too high` });
+      throw ApiError.unprocessable('Laju skor tidak valid', 'SCORE_CEILING_EXCEEDED');
     }
 
-    // 3. Fetch/Init Profile
+    session.consumed = true;
+    session.consumedAt = nowMs;
+
     const profile = memoryStore.competitiveProfiles.get(userId) || {
-      userId,
-      globalRating: INITIAL_RATING,
-      globalTier: getTierForRating(INITIAL_RATING),
-      peakGlobalRating: INITIAL_RATING,
-      gameRatings: {},
-      rankedGames: 0,
-      lastUpdated: Date.now(),
-      seasonId: season.seasonId
+      userId, globalRating: 1000, globalTier: getTierForRating(1000), peakGlobalRating: 1000, gameRatings: {}, rankedGames: 0, lastUpdated: nowMs, seasonId: season.seasonId
     };
 
-    const currentMatchStats = profile.gameRatings[canonicalId] || {
-      rating: INITIAL_RATING,
-      tier: getTierForRating(INITIAL_RATING),
-      matchesPlayed: 0,
-      wins: 0,
-      losses: 0,
-      lastUpdated: Date.now()
-    };
-
-    // 4. Calculate Rating
-    const delta = calculateRatingDelta(
-      currentMatchStats.rating,
-      score,
-      gameConfig.baseScore,
-      currentMatchStats.matchesPlayed
-    );
-
+    const currentMatchStats = profile.gameRatings[canonicalId] || { rating: 1000, tier: getTierForRating(1000), matchesPlayed: 0, wins: 0, losses: 0, lastUpdated: nowMs };
+    const delta = calculateRatingDelta(currentMatchStats.rating, score, gameConfig.baseScore, currentMatchStats.matchesPlayed);
     const oldRating = currentMatchStats.rating;
     const newRating = Math.max(100, oldRating + delta);
     const newTier = getTierForRating(newRating);
 
-    // 5. Update Profile
-    const updatedGameStats = {
-      rating: newRating,
-      tier: newTier,
-      matchesPlayed: currentMatchStats.matchesPlayed + 1,
-      wins: currentMatchStats.wins + (delta > 0 ? 1 : 0),
-      losses: currentMatchStats.losses + (delta < 0 ? 1 : 0),
-      lastUpdated: Date.now()
+    profile.gameRatings[canonicalId] = {
+      rating: newRating, tier: newTier, matchesPlayed: currentMatchStats.matchesPlayed + 1, wins: currentMatchStats.wins + (delta > 0 ? 1 : 0), losses: currentMatchStats.losses + (delta < 0 ? 1 : 0), lastUpdated: nowMs
     };
-
-    profile.gameRatings[canonicalId] = updatedGameStats;
-    profile.rankedGames += 1;
-    profile.lastUpdated = Date.now();
     
-    const playedGames = Object.values(profile.gameRatings);
-    profile.globalRating = Math.floor(playedGames.reduce((acc, curr) => acc + curr.rating, 0) / playedGames.length);
+    let totalR = 0; let numG = 0; let totalGames = 0;
+    for (const [gid, gr] of Object.entries(profile.gameRatings)) {
+      if (gr.matchesPlayed > 0) { totalR += gr.rating; numG++; }
+      totalGames += gr.matchesPlayed;
+    }
+    profile.globalRating = numG > 0 ? Math.floor(totalR / numG) : 1000;
     profile.globalTier = getTierForRating(profile.globalRating);
-    profile.peakGlobalRating = Math.max(profile.peakGlobalRating, profile.globalRating);
-
-    // Commit atomically
-    session.consumed = true;
-    session.consumedAt = Date.now();
-    memoryStore.sessions.set(sessionId, session);
+    profile.peakGlobalRating = Math.max(profile.peakGlobalRating || 1000, profile.globalRating);
+    profile.rankedGames = totalGames;
+    profile.lastUpdated = nowMs;
     memoryStore.competitiveProfiles.set(userId, profile);
-
-    const nowIso = new Date().toISOString();
-    const entryData = {
-      userId,
-      playerName,
-      playerAvatar,
-      score,
-      submittedAt: nowIso,
-      gameId: canonicalId,
-      masteryLevel: masteryLevel || 1,
-      tier: newTier,
-      rating: newRating
-    };
-
-    // Save to ranked leaderboards
-    const rlList = memoryStore.rankedLeaderboards.get(canonicalId) || [];
-    const rlIdx = rlList.findIndex(e => e.userId === userId);
-    if (rlIdx >= 0) {
-      rlList[rlIdx] = entryData;
-    } else {
-      rlList.push(entryData);
-    }
-    rlList.sort((a, b) => (b.rating || 1000) - (a.rating || 1000));
-    memoryStore.rankedLeaderboards.set(canonicalId, rlList);
-
-    // Save to seasonal leaderboards
-    let seasonGames = memoryStore.seasonalLeaderboards.get(season.seasonId);
-    if (!seasonGames) {
-      seasonGames = new Map<string, StoredLeaderboardEntry[]>();
-      memoryStore.seasonalLeaderboards.set(season.seasonId, seasonGames);
-    }
-    const slList = seasonGames.get(canonicalId) || [];
-    const slIdx = slList.findIndex(e => e.userId === userId);
-    if (slIdx >= 0) {
-      slList[slIdx] = entryData;
-    } else {
-      slList.push(entryData);
-    }
-    slList.sort((a, b) => (b.rating || 1000) - (a.rating || 1000));
-    seasonGames.set(canonicalId, slList);
-
-    const coinsEarned = Math.min(300, Math.floor(score * balanceConfig.baseCoinMultiplier * 1.2));
-    const xpEarned = Math.min(600, Math.floor(score * balanceConfig.baseXpMultiplier * 1.5));
-
+    
+    const coinsEarned = Math.min(300, Math.floor(score * balanceConfig.baseCoinMultiplier * 1.2)); 
+    const xpEarned = Math.min(600, Math.floor(score * balanceConfig.baseXpMultiplier * 1.5)); 
+    
     const eco = await getUserEconomy(userId);
     eco.coins += coinsEarned;
     eco.totalEarned += coinsEarned;
-    eco.lastUpdated = Date.now();
+    eco.lastUpdated = nowMs;
     memoryStore.economies.set(userId, eco);
 
     const result: RankedSubmissionResult = {
-      success: true,
-      gameId: canonicalId,
-      score,
-      coinsEarned,
-      xpEarned,
-      newCoinBalance: eco.coins,
-      leaderboards: [],
-      transactionId: `rnk_tx_${Date.now()}`,
-      oldRating,
-      newRating,
-      ratingChange: delta,
-      newTier
+      success: true, gameId: canonicalId, score, coinsEarned, xpEarned, newCoinBalance: eco.coins, leaderboards: [], transactionId: `rnk_tx_${nowMs}_${crypto.randomBytes(8).toString('hex')}`, oldRating, newRating, ratingChange: delta, newTier
     };
 
-    if (idempotencyKey) {
-      await setProcessedAction(`ranked_${userId}_${idempotencyKey}`, result);
-    }
-
+    await setProcessedAction(idempotencyId, result);
     return result;
   }
 }

@@ -69,6 +69,9 @@ export default function GamePage({ games, profile, dailyMissions, onScoreUpdate,
   const [showNavDrawer, setShowNavDrawer] = useState(false);
   const [shareResultData, setShareResultData] = useState<ShareResultData | null>(null);
   const [hasExistingSave, setHasExistingSave] = useState(false);
+  const [isStartingSession, setIsStartingSession] = useState(false);
+  const [sessionError, setSessionError] = useState<string | null>(null);
+
 
   const [recentlyPlayed, setRecentlyPlayed] = useState<string[]>(() => {
     try {
@@ -87,16 +90,41 @@ export default function GamePage({ games, profile, dailyMissions, onScoreUpdate,
   useEffect(() => {
     if (activeGame) {
       telemetryService.recordGameStart(activeGame.id, inputManager.getActiveSource());
+      let isMounted = true;
+      setIsStartingSession(true);
+      setSessionError(null);
       
       if (isRankedMode) {
         competitiveService.startRankedSession(activeGame.id).then((res) => {
-          currentSessionIdRef.current = res.sessionId;
+          if (!isMounted) return;
+          if (res && res.sessionId) {
+            currentSessionIdRef.current = res.sessionId;
+            setIsStartingSession(false);
+          } else {
+            setSessionError('Gagal memulai sesi Ranked. Silakan coba lagi.');
+            setIsRankedMode(false);
+            setIsStartingSession(false);
+          }
+        }).catch(err => {
+          if (!isMounted) return;
+          setSessionError(err.message || 'Gagal memulai sesi Ranked. Tiket mungkin tidak mencukupi.');
+          setIsRankedMode(false);
+          setIsStartingSession(false);
         });
       } else {
         scoreService.startSession(activeGame.id, profile.name).then((res) => {
-          currentSessionIdRef.current = res.sessionId;
+          if (!isMounted) return;
+          if (res && res.sessionId) {
+             currentSessionIdRef.current = res.sessionId;
+          }
+          setIsStartingSession(false);
+        }).catch(err => {
+          if (!isMounted) return;
+          setSessionError('Gagal memulai sesi.');
+          setIsStartingSession(false);
         });
       }
+      return () => { isMounted = false; };
     }
   }, [activeGame, key, profile.name, isRankedMode]);
 
@@ -178,7 +206,8 @@ export default function GamePage({ games, profile, dailyMissions, onScoreUpdate,
         sessionId: currentSessionIdRef.current,
         playerName: profile.name,
         playerAvatar: profile.avatar,
-        masteryLevel: profile.mastery?.[activeGame.id]?.level || 1
+        masteryLevel: profile.mastery?.[activeGame.id]?.level || 1,
+        idempotencyKey: 'rank_' + currentSessionIdRef.current // Use session ID as base for idempotency
       });
 
       if (res) {
@@ -244,7 +273,7 @@ export default function GamePage({ games, profile, dailyMissions, onScoreUpdate,
   const controls = {
     keys: registryItem?.controls.split(' ') || ['⬆️', '⬇️', '⬅️', '➡️', 'SPASI'],
     tips: registryItem?.description || 'Gunakan tombol arah panah dan spasi untuk mengontrol permainan.',
-    controlType: registryItem?.controlType || ('directional-action' as any)
+    controlType: registryItem?.controlType || 'actiononly'
   };
 
   const gameLayoutConfig = (gameId && GAME_LAYOUTS[gameId]) || DEFAULT_GAME_LAYOUT;
@@ -302,18 +331,13 @@ export default function GamePage({ games, profile, dailyMissions, onScoreUpdate,
       )}
 
       {/* Mobile Top Nav Tabs (Hidden in Focus Mode) */}
-      {!isFocusMode && (
-        <GamePageMobileNav
-          mobileTab={mobileTab}
-          setMobileTab={setMobileTab}
-        />
-      )}
+      
 
       {/* Main Single-Focus Hero Stage Layout */}
       <div className="flex-1 flex min-h-0 w-full overflow-hidden relative" id="gamepage-viewport-columns">
         {/* Center Stage: The Hero Game Viewport */}
         <div 
-          className={`flex-1 flex flex-col h-full min-h-0 min-w-0 p-2 sm:p-3 md:p-5 overflow-y-auto relative items-center justify-between ${
+          className={`flex-1 flex flex-col h-full min-h-0 min-w-0 p-0 sm:p-3 md:p-5 overflow-hidden sm:overflow-y-auto relative items-center justify-between ${
             mobileTab === 'game' ? 'flex' : 'hidden lg:flex'
           }`}
           id="center-game-viewport"
@@ -368,22 +392,35 @@ export default function GamePage({ games, profile, dailyMissions, onScoreUpdate,
           )}
 
           {/* Clean Focused Canvas Stage */}
-          <div className="flex-1 w-full max-w-5xl flex items-center justify-center relative min-h-0 py-1 sm:py-2">
+          <div className="flex-1 w-full max-w-5xl flex items-center justify-center relative min-h-0 py-0 sm:py-2">
             <div 
-              className="relative w-full h-full max-h-full flex items-center justify-center bg-[#090b10] border border-white/[0.08] rounded-2xl md:rounded-3xl shadow-xl overflow-hidden transition-all duration-300"
+              className="relative w-full h-full max-h-full flex items-center justify-center bg-[#090b10] border border-white/[0.08] rounded-none sm:rounded-2xl md:rounded-3xl border-0 sm:border border-white/[0.08] shadow-xl overflow-hidden transition-all duration-300"
               style={{
                 boxShadow: `0 4px 24px rgba(0,0,0,0.6)`,
-                aspectRatio: gameLayoutConfig.aspectRatio,
+                ...(window.innerWidth >= 640 ? { aspectRatio: gameLayoutConfig.aspectRatio } : {})
               }}
             >
-              {GameComponent ? (
+              {isStartingSession ? (
+                <div className="w-full h-full flex flex-col items-center justify-center p-8 text-center bg-[#090b10]">
+                  <RefreshCw size={26} className="animate-spin text-indigo-400 mb-3" />
+                  <span className="font-medium text-xs text-zinc-300">
+                    {isRankedMode ? 'Memvalidasi Tiket Ranked...' : `Memuat ${activeGame.title}...`}
+                  </span>
+                </div>
+              ) : sessionError ? (
+                <div className="w-full h-full flex flex-col items-center justify-center p-8 text-center bg-[#090b10]">
+                  <div className="text-rose-500 mb-3 text-2xl">⚠️</div>
+                  <span className="font-medium text-sm text-zinc-300 mb-4">{sessionError}</span>
+                  <button onClick={handleRestart} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 transition rounded-xl text-xs font-bold text-white cursor-pointer">Coba Lagi</button>
+                </div>
+              ) : GameComponent ? (
                 <GameErrorBoundary gameTitle={activeGame.title} onReset={handleRestart}>
                   <Suspense
                     fallback={
                       <div className="w-full h-full flex flex-col items-center justify-center p-8 text-center bg-[#090b10]">
                         <RefreshCw size={26} className="animate-spin text-indigo-400 mb-3" />
                         <span className="font-medium text-xs text-zinc-300">
-                          Memuat {activeGame.title}...
+                          Merender {activeGame.title}...
                         </span>
                       </div>
                     }
@@ -406,7 +443,7 @@ export default function GamePage({ games, profile, dailyMissions, onScoreUpdate,
           </div>
 
           {/* Compact HUD Bar beneath Canvas */}
-          <div className="w-full max-w-5xl mt-2 flex-none bg-[#0d1017]/90 backdrop-blur-md border border-white/[0.06] p-2.5 rounded-2xl flex flex-wrap items-center justify-between gap-3 font-sans shadow-sm">
+          <div className="absolute sm:relative bottom-[env(safe-area-inset-bottom,16px)] sm:bottom-auto left-2 right-2 sm:left-auto sm:right-auto z-40 w-auto sm:w-full max-w-5xl mt-0 sm:mt-2 flex-none bg-[#0d1017]/80 sm:bg-[#0d1017]/90 backdrop-blur-md border border-white/[0.06] p-2 rounded-xl sm:rounded-2xl flex items-center justify-between gap-2 font-sans shadow-lg">
             {/* Left: Score & Controls Badges */}
             <div className="flex items-center gap-3">
               <div className="flex items-center gap-1.5 px-3 py-1 bg-amber-500/10 border border-amber-500/20 text-amber-300 rounded-xl text-xs font-semibold">
@@ -439,7 +476,7 @@ export default function GamePage({ games, profile, dailyMissions, onScoreUpdate,
               )}
 
               {controls.keys && controls.keys.length > 0 && (
-                <div className="hidden md:flex items-center gap-1">
+                <div className="hidden lg:flex items-center gap-1">
                   <span className="text-[11px] text-zinc-400 font-medium mr-1">Kontrol:</span>
                   {controls.keys.map((k, idx) => (
                     <span

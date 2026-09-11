@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { useGameEngine } from '../../hooks/useGameEngine';
 import { audio } from '../../utils/audio';
 import { Particle } from '../../types';
 import { GameContainer } from '../gameplay/GameContainer';
@@ -30,22 +31,13 @@ interface BulletItem {
 }
 
 export default function CosmicAsteroidGame({ onGameOver, onScoreUpdate, highScore }: CosmicAsteroidGameProps) {
+  const { gameState, score, updateScore, startLoop, stopLoop, startWithCountdown, setupCanvasContext, triggerGameOver } = useGameEngine({ onScoreUpdate, onGameOver, maxDpr: 2 });
   const gameLoopRef = useRef<number | null>(null);
   const scoreRef = useRef(0);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [score, setScore] = useState(0);
-  const lastTimeRef = useRef<number>(0);
-  const [gameOver, setGameOver] = useState(false);
-  const isPlayingRef = useRef(false);
-  const gameOverRef = useRef(false);
 
 
-  useEffect(() => {
-    isPlayingRef.current = isPlaying;
-    gameOverRef.current = gameOver;
-    scoreRef.current = score;
-  }, [isPlaying, gameOver, score]);
+
   const [muted, setMuted] = useState(audio.getMuteState());
 
   const CANVAS_WIDTH = 400;
@@ -109,9 +101,9 @@ export default function CosmicAsteroidGame({ onGameOver, onScoreUpdate, highScor
 
   const startNewGame = () => {
     audio.playCoin();
-    setIsPlaying(true);
-    setGameOver(false);
-    setScore(0);
+    
+    
+    updateScore(0);
     onScoreUpdate(0);
 
     shipAngleRef.current = -Math.PI / 2;
@@ -121,14 +113,14 @@ export default function CosmicAsteroidGame({ onGameOver, onScoreUpdate, highScor
     shakeRef.current = 0;
     floatingTextsRef.current = [];
     spawnTimerRef.current = 0;
-    lastTimeRef.current = performance.now();
+    
 
     if (gameLoopRef?.current) cancelAnimationFrame(gameLoopRef.current);
-    gameLoopRef.current = requestAnimationFrame(update);
   };
 
   // Keyboard controls
   useEffect(() => {
+    if (gameState !== 'playing') return;
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'a' || e.key === 'd') {
         e.preventDefault();
@@ -151,7 +143,7 @@ export default function CosmicAsteroidGame({ onGameOver, onScoreUpdate, highScor
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
-  }, [isPlaying, gameOver]);
+  }, [gameState]);
 
   const rotateLeft = () => {
     shipAngleRef.current -= 0.28;
@@ -162,7 +154,7 @@ export default function CosmicAsteroidGame({ onGameOver, onScoreUpdate, highScor
   };
 
   const shootBullet = () => {
-    if (!isPlayingRef.current || gameOverRef.current ) return;
+    if (gameState !== 'playing') return;
 
     audio.playJump(); // Laser chirp sound
 
@@ -193,9 +185,9 @@ export default function CosmicAsteroidGame({ onGameOver, onScoreUpdate, highScor
     }
   };
 
-  const update = (timestamp: number) => {
+  const update = (timestamp: number, dtMs: number) => {
     const canvas = canvasRef.current;
-    if (!canvas || !isPlayingRef.current || gameOverRef.current ) return;
+    if (!canvas || gameState !== 'playing') return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
@@ -207,7 +199,7 @@ export default function CosmicAsteroidGame({ onGameOver, onScoreUpdate, highScor
       const elapsed = timestamp - lastFpsTimeRef.current;
       
       if (elapsed < interval - 1) {
-        gameLoopRef.current = requestAnimationFrame(update);
+        startLoop(update);
         return;
       }
       
@@ -216,8 +208,7 @@ export default function CosmicAsteroidGame({ onGameOver, onScoreUpdate, highScor
       lastFpsTimeRef.current = timestamp;
     }
 
-    const delta = (timestamp - lastTimeRef.current) / 16.666;
-    lastTimeRef.current = timestamp;
+    const delta = dtMs / 16.666;
 
     // HD Canvas scale and shadow setting based on graphics setting
     const graphicsQuality = localStorage.getItem('zigame-graphics') || 'high';
@@ -336,11 +327,7 @@ export default function CosmicAsteroidGame({ onGameOver, onScoreUpdate, highScor
           bullet.x = -1000;
           ast.x = -1000;
 
-          setScore(prev => {
-            const next = prev + 20;
-            onScoreUpdate(next);
-            return next;
-          });
+          updateScore(score + 20);
         }
       });
 
@@ -348,31 +335,7 @@ export default function CosmicAsteroidGame({ onGameOver, onScoreUpdate, highScor
       const shipDist = Math.hypot(shipX - ast.x, shipY - ast.y);
       if (shipDist < ast.radius + 12) {
         audio.playExplosion();
-        setGameOver(true);
-        setIsPlaying(false);
-        shakeRef.current = 24;
-        floatingTextsRef.current.push({
-          x: shipX,
-          y: shipY - 15,
-          text: "WRECKED!!",
-          color: '#ef4444',
-          alpha: 1.0,
-          vy: -1.0
-        });
-        // Big player explosion
-        for (let i = 0; i < 35; i++) {
-          particlesRef.current.push({
-            x: shipX,
-            y: shipY,
-            vx: (Math.random() - 0.5) * 10,
-            vy: (Math.random() - 0.5) * 10,
-            color: i % 2 === 0 ? '#f43f5e' : '#fb923c',
-            radius: Math.random() * 3 + 1.5,
-            alpha: 1.0,
-            decay: Math.random() * 0.04 + 0.02
-          });
-        }
-        onGameOver(score);
+        triggerGameOver();
       }
     });
 
@@ -500,7 +463,6 @@ export default function CosmicAsteroidGame({ onGameOver, onScoreUpdate, highScor
     ctx.textAlign = 'right';
     ctx.fillText(`SKOR: ${score}`, CANVAS_WIDTH - 15, 30);
 
-    gameLoopRef.current = requestAnimationFrame(update);
   };
 
   const toggleMute = () => {
@@ -508,15 +470,11 @@ export default function CosmicAsteroidGame({ onGameOver, onScoreUpdate, highScor
     setMuted(nextMuted);
   };
 
-  const getGameState = () => {
-    if (!isPlaying && score === 0) return 'ready';
-    if (!isPlaying) return 'gameover';
-    return 'playing';
-  };
+
 
   return (
     <GameContainer aspect="portrait" maxWidth="sm">
-      {isPlaying && (
+      {gameState === 'playing' && (
         <GameHUD 
           stats={[
             { id: 'score', label: 'SKOR', value: score, emphasized: true }
@@ -525,7 +483,7 @@ export default function CosmicAsteroidGame({ onGameOver, onScoreUpdate, highScor
       )}
 
       <GameOverlay
-        gameState={getGameState()}
+        gameState={gameState}
         score={score}
         onStart={startNewGame}
         onRestart={startNewGame}
@@ -541,7 +499,7 @@ export default function CosmicAsteroidGame({ onGameOver, onScoreUpdate, highScor
         />
       </div>
 
-      {isPlaying && (
+      {gameState === 'playing' && (
         <MobileControls
           onLeft={() => keysPressedRef.current['ArrowLeft'] = true}
           onLeftRelease={() => keysPressedRef.current['ArrowLeft'] = false}

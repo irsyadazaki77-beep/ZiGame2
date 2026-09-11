@@ -71,6 +71,7 @@ class CompetitiveService {
     playerName?: string;
     playerAvatar?: string;
     masteryLevel?: number;
+    idempotencyKey?: string;
   }): Promise<RankedSubmissionResult | null> {
     try {
       const headers = await getAuthHeaders();

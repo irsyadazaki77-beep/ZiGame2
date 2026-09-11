@@ -542,6 +542,188 @@ describe('ZiGame 2.0 Backend Authority & Security Tests', () => {
     });
   });
 
+  describe('Authoritative Reward Security & Exploit Resistance', () => {
+    it('should reject random uncataloged weekly_xxx IDs with INVALID_REWARD_CLAIM', async () => {
+      const testUid = `exploit-user-${Date.now()}`;
+      const res = await request(app)
+        .post('/api/economy/claim')
+        .set('x-test-uid', testUid)
+        .send({
+          claimId: 'weekly_fake_123',
+          claimType: 'challenge',
+          idempotencyKey: `idem_fake_wk_${Date.now()}`
+        });
+
+      expect(res.status).toBe(400);
+      expect(res.body.code).toBe('INVALID_REWARD_CLAIM');
+    });
+
+    it('should reject out-of-range weekly index with INVALID_REWARD_CLAIM', async () => {
+      const testUid = `exploit-user-${Date.now()}`;
+      const res = await request(app)
+        .post('/api/economy/claim')
+        .set('x-test-uid', testUid)
+        .send({
+          claimId: 'weekly_2026-W37_99',
+          claimType: 'challenge',
+          idempotencyKey: `idem_wk99_${Date.now()}`
+        });
+
+      expect(res.status).toBe(400);
+      expect(res.body.code).toBe('INVALID_REWARD_CLAIM');
+    });
+
+    it('should reject uncataloged special_xxx or season_xxx IDs with INVALID_REWARD_CLAIM', async () => {
+      const testUid = `exploit-user-${Date.now()}`;
+      const res1 = await request(app)
+        .post('/api/economy/claim')
+        .set('x-test-uid', testUid)
+        .send({
+          claimId: 'special_fake_unregistered',
+          claimType: 'challenge',
+          idempotencyKey: `idem_spec_${Date.now()}`
+        });
+
+      expect(res1.status).toBe(400);
+      expect(res1.body.code).toBe('INVALID_REWARD_CLAIM');
+
+      const res2 = await request(app)
+        .post('/api/economy/claim')
+        .set('x-test-uid', testUid)
+        .send({
+          claimId: 'season_99_challenge_9',
+          claimType: 'challenge',
+          idempotencyKey: `idem_seas_${Date.now()}`
+        });
+
+      expect(res2.status).toBe(400);
+      expect(res2.body.code).toBe('INVALID_REWARD_CLAIM');
+    });
+
+    it('should reject loose substring score_target_xxx IDs with INVALID_REWARD_CLAIM', async () => {
+      const testUid = `exploit-user-${Date.now()}`;
+      const res = await request(app)
+        .post('/api/economy/claim')
+        .set('x-test-uid', testUid)
+        .send({
+          claimId: 'score_target_fake_9999',
+          claimType: 'daily_mission',
+          idempotencyKey: `idem_score_target_${Date.now()}`
+        });
+
+      expect(res.status).toBe(400);
+      expect(res.body.code).toBe('INVALID_REWARD_CLAIM');
+    });
+
+    it('should reject duplicate claim via alias ID (starter_pack vs sp_welcome) with REWARD_ALREADY_CLAIMED', async () => {
+      const testUid = `alias-claimer-${Date.now()}`;
+
+      // Claim via starter_pack
+      const res1 = await request(app)
+        .post('/api/economy/claim')
+        .set('x-test-uid', testUid)
+        .send({
+          claimId: 'starter_pack',
+          claimType: 'starter_pack',
+          idempotencyKey: `idem_sp1_${Date.now()}`
+        });
+
+      expect(res1.status).toBe(200);
+      expect(res1.body.success).toBe(true);
+
+      // Attempt claim via alias sp_welcome
+      const res2 = await request(app)
+        .post('/api/economy/claim')
+        .set('x-test-uid', testUid)
+        .send({
+          claimId: 'sp_welcome',
+          claimType: 'starter_pack',
+          idempotencyKey: `idem_sp2_${Date.now()}`
+        });
+
+      expect(res2.status).toBe(400);
+      expect(res2.body.code).toBe('REWARD_ALREADY_CLAIMED');
+    });
+
+    it('should reject unverified daily mission claim when no games were played', async () => {
+      const testUid = `unverified-user-${Date.now()}`;
+      const todayStr = new Date().toISOString().split('T')[0];
+
+      const res = await request(app)
+        .post('/api/economy/claim')
+        .set('x-test-uid', testUid)
+        .send({
+          claimId: `m_${todayStr}_1`,
+          claimType: 'daily_mission',
+          idempotencyKey: `idem_m1_${Date.now()}`
+        });
+
+      expect(res.status).toBe(400);
+      expect(res.body.code).toBe('REWARD_REQUIREMENTS_NOT_MET');
+    });
+
+    it('should reject forged quest_tier claim when requirements not met', async () => {
+      const testUid = `forged-quest-${Date.now()}`;
+
+      const res = await request(app)
+        .post('/api/economy/claim')
+        .set('x-test-uid', testUid)
+        .send({
+          claimId: 'tier_5',
+          claimType: 'quest_tier',
+          details: { tier: 5 },
+          idempotencyKey: `idem_q5_${Date.now()}`
+        });
+
+      expect(res.status).toBe(400);
+      expect(res.body.code).toBe('REWARD_REQUIREMENTS_NOT_MET');
+    });
+
+    it('should verify and reward daily challenge after legitimate session score submission', async () => {
+      const testUid = `legit-daily-${Date.now()}`;
+      const todayStr = new Date().toISOString().split('T')[0];
+
+      // 1. Start session for snake game
+      const startRes = await request(app)
+        .post('/api/session/start')
+        .set('x-test-uid', testUid)
+        .send({ gameId: 'snake' });
+
+      expect(startRes.status).toBe(200);
+      const sessionId = startRes.body.sessionId;
+
+      // 2. Submit score 150 after 2100ms (> minDurationMs 2000ms for snake)
+      await new Promise(r => setTimeout(r, 2100));
+      const scoreRes = await request(app)
+        .post('/api/submit-score')
+        .set('x-test-uid', testUid)
+        .send({
+          sessionId,
+          gameId: 'snake',
+          score: 150,
+          playerName: 'Legit Player',
+          playerAvatar: '🚀',
+          idempotencyKey: `idem_score_legit_${Date.now()}`
+        });
+
+      expect(scoreRes.status).toBe(200);
+
+      // 3. Claim daily challenge 1 (score target >= 50)
+      const claimRes = await request(app)
+        .post('/api/economy/claim')
+        .set('x-test-uid', testUid)
+        .send({
+          claimId: `daily_${todayStr}_1`,
+          claimType: 'challenge',
+          idempotencyKey: `idem_claim_d1_${Date.now()}`
+        });
+
+      expect(claimRes.status).toBe(200);
+      expect(claimRes.body.success).toBe(true);
+      expect(claimRes.body.amount).toBeGreaterThan(0);
+    });
+  });
+
   describe('Standardized API Error Contract', () => {
     it('should return standardized error contract on invalid routes or inputs', async () => {
       const res = await request(app)

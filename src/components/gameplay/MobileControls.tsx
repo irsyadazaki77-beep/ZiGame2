@@ -54,7 +54,7 @@ export interface MobileDpadProps {
 
 export const MobileDpad: React.FC<MobileDpadProps> = ({ onDirection, className = '' }) => {
   return (
-    <div className={`grid grid-cols-3 gap-1.5 w-32 h-32 sm:w-36 sm:h-36 shrink-0 ${className}`}>
+    <div className={`grid grid-cols-3 gap-1.5 w-32 h-32 sm:w-36 sm:h-36 shrink-0 opacity-70 hover:opacity-100 pointer-events-auto ${className}`}>
       <div />
       <MobileControlButton 
         icon={<ArrowUp size={20} />} 
@@ -129,9 +129,9 @@ export const MobileControls: React.FC<MobileControlsProps> = ({
   const resolvedActionLabel = actionLabel || labelA || 'ACTION';
 
   return (
-    <div className={`w-full max-w-lg mx-auto mt-3 sm:mt-4 flex items-center justify-between gap-3 px-2 pb-safe select-none ${className}`}>
+    <div className={`absolute bottom-4 left-0 right-0 w-full max-w-lg mx-auto flex lg:hidden items-end justify-between gap-3 px-4 pb-[env(safe-area-inset-bottom,16px)] z-50 select-none pointer-events-none ${className}`}>
       {(onDirection || onLeft || onRight || onUp || onDown) && (
-        <MobileDpad onDirection={(dir, active) => {
+        <MobileDpad className="pointer-events-auto" onDirection={(dir, active) => {
           if (onDirection && active) {
             onDirection(dir);
           }
@@ -157,7 +157,7 @@ export const MobileControls: React.FC<MobileControlsProps> = ({
             label={resolvedActionLabel}
             onPress={resolvedAction}
             variant="action"
-            className="w-28 sm:w-36 h-28 sm:h-36 rounded-2xl"
+            className="w-24 sm:w-32 h-24 sm:h-32 rounded-2xl pointer-events-auto opacity-70 hover:opacity-100"
           />
         </div>
       )}

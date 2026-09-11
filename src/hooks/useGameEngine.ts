@@ -32,6 +32,7 @@ export function useGameEngine({
   const gameStateRef = useRef<GameEngineState>(gameState);
   const animFrameRef = useRef<number | null>(null);
   const lastTimestampRef = useRef<number>(0);
+  const loopCallbackRef = useRef<((timestamp: number, deltaTime: number) => void) | null>(null);
 
   // Sync performance settings
   useEffect(() => {
@@ -75,11 +76,13 @@ export function useGameEngine({
     if (animFrameRef.current !== null) {
       cancelAnimationFrame(animFrameRef.current);
       animFrameRef.current = null;
+      performanceService.registerRafEnd();
     }
   }, []);
 
   const startLoop = useCallback((callback: (timestamp: number, deltaTime: number) => void) => {
     stopLoop();
+    loopCallbackRef.current = callback;
     lastTimestampRef.current = performance.now();
     let frameCounter = 0;
     let fpsTimer = performance.now();
@@ -88,7 +91,6 @@ export function useGameEngine({
 
     const loop = (timestamp: number) => {
       if (gameStateRef.current !== 'playing') {
-        performanceService.registerRafEnd();
         stopLoop();
         return;
       }
@@ -112,7 +114,7 @@ export function useGameEngine({
       if (gameStateRef.current === 'playing') {
         animFrameRef.current = requestAnimationFrame(loop);
       } else {
-        performanceService.registerRafEnd();
+        stopLoop();
       }
     };
 
@@ -154,6 +156,7 @@ export function useGameEngine({
   const pauseGame = useCallback(() => {
     if (gameStateRef.current === 'playing') {
       setGameState('paused');
+      gameStateRef.current = 'paused';
       stopLoop();
       if (onPause) onPause();
     }
@@ -162,10 +165,14 @@ export function useGameEngine({
   const resumeGame = useCallback(() => {
     if (gameStateRef.current === 'paused') {
       setGameState('playing');
+      gameStateRef.current = 'playing';
       lastTimestampRef.current = performance.now();
       if (onResume) onResume();
+      if (loopCallbackRef.current) {
+        startLoop(loopCallbackRef.current);
+      }
     }
-  }, [onResume]);
+  }, [onResume, startLoop]);
 
   const togglePause = useCallback(() => {
     if (gameStateRef.current === 'playing') {
@@ -179,6 +186,7 @@ export function useGameEngine({
   const triggerGameOver = useCallback((finalScore?: number) => {
     stopLoop();
     setGameState('gameover');
+    gameStateRef.current = 'gameover';
     const s = finalScore !== undefined ? finalScore : scoreRef.current;
     if (onGameOver) {
       onGameOver(s);
@@ -191,6 +199,7 @@ export function useGameEngine({
     setScore(0);
     scoreRef.current = 0;
     setGameState('ready');
+    gameStateRef.current = 'ready';
     if (onRestart) onRestart();
   }, [onRestart, stopLoop]);
 
@@ -203,11 +212,11 @@ export function useGameEngine({
       countdownTimerRef.current = null;
     }
     setGameState('countdown');
+    gameStateRef.current = 'countdown';
     setCountdown(3);
     setScore(0);
     scoreRef.current = 0;
     audio.playCountdownTick();
-
     let current = 3;
     countdownTimerRef.current = setInterval(() => {
       current--;
@@ -221,6 +230,7 @@ export function useGameEngine({
         }
         audio.playCountdownGo();
         setGameState('playing');
+        gameStateRef.current = 'playing';
         if (onCountdownEnd) onCountdownEnd();
       }
     }, 800);

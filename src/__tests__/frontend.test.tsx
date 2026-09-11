@@ -1,5 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { render, screen, fireEvent } from '@testing-library/react';
+import { Button, Badge, Card, Input } from '../components/UI';
 import { APP_VERSION } from '../config/version';
 import { toCanonicalGameId, isValidGameId, CANONICAL_GAME_IDS } from '../config/canonicalGames';
 import { formatNumber } from '../utils/format';
@@ -139,4 +141,57 @@ describe('Frontend Utilities & Configuration Tests', () => {
       unsubscribe();
     });
   });
+
+  describe('Frontend Smoke Test & React Component Rendering', () => {
+    it('should confirm frontend test worker started with functional JSDOM environment', () => {
+      expect(typeof window).toBe('object');
+      expect(typeof document).toBe('object');
+      expect(document.createElement).toBeDefined();
+      expect(window.localStorage).toBeDefined();
+    });
+
+    it('should render React Button component and respond to click events in JSDOM', () => {
+      const handleClick = vi.fn();
+      render(<Button onClick={handleClick} variant="primary">Start Cyber Game</Button>);
+
+      const button = screen.getByRole('button', { name: /Start Cyber Game/i });
+      expect(button).toBeInTheDocument();
+      expect(button).toBeVisible();
+
+      fireEvent.click(button);
+      expect(handleClick).toHaveBeenCalledTimes(1);
+    });
+
+    it('should render React Card and Badge components with correct typography and layout', () => {
+      render(
+        <Card borderVariant="indigo">
+          <Badge variant="success">Online</Badge>
+          <p>Neon System Operational</p>
+        </Card>
+      );
+
+      expect(screen.getByText('Online')).toBeInTheDocument();
+      expect(screen.getByText('Neon System Operational')).toBeInTheDocument();
+    });
+
+    it('should render React Input component with accessible label and value change handling', () => {
+      const handleChange = vi.fn();
+      render(
+        <Input
+          label="Player Handle"
+          placeholder="CyberGamer"
+          onChange={handleChange}
+        />
+      );
+
+      expect(screen.getByText('Player Handle')).toBeInTheDocument();
+      const input = screen.getByPlaceholderText('CyberGamer') as HTMLInputElement;
+      expect(input).toBeInTheDocument();
+
+      fireEvent.change(input, { target: { value: 'NeoPilot' } });
+      expect(handleChange).toHaveBeenCalled();
+      expect(input.value).toBe('NeoPilot');
+    });
+  });
 });
+

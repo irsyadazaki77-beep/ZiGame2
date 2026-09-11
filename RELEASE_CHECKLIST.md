@@ -56,4 +56,16 @@
 - [x] **Runbook**: Emergency incident playbooks for economy exploits, ranked exploits, database degradation, and rollbacks (`/docs/RUNBOOK.md`).
 - [x] **New Game Contract**: Standardized contract for adding future games with audio, scoring, and telemetry (`/docs/NEW_GAME_CONTRACT.md`).
 - [x] **Changelog**: Release history from v1.0.0 through v2.0.0-RC1 (`CHANGELOG.md`).
-- [x] **Automated Tests**: Backend test suite passing 100% with 30 backend tests and 7 frontend migration tests.
+- [x] **Automated Test Suite**: 100% pass rate across 50 Vitest tests (37 backend security/authority tests, 13 frontend/migration/React JSDOM smoke tests) and 3 Playwright E2E tests. Zero tests skipped.
+
+---
+
+## 8. CI/CD & Production Runtime Quality Gates
+- [x] **Node Runtime Standardization**: Node 24 standardized as official runtime via `.nvmrc` (v24), CI workflow (`node-version: 24`), and `package.json` engines.
+- [x] **Dependency Health & Zero Vulnerabilities**: `npm audit` reports 0 vulnerabilities (addressed 10 moderate and 4 high vulnerabilities across production and transitive dependencies without blind `--force` downgrade).
+- [x] **Static Typecheck**: TypeScript strict check (`npm run typecheck`) passing with 0 errors.
+- [x] **Code Quality & Linter**: ESLint rules (`npm run lint`) passing with 0 errors.
+- [x] **Vitest Frontend & JSDOM Compatibility**: JSDOM React component rendering verified, resolved `webidl.util.markAsUncloneable` runtime edge cases with Node 24 and test setup guards.
+- [x] **Playwright E2E Verification**: Full browser headless chromium automation verified (`npm run test:e2e`).
+- [x] **Production Distribution Build**: Full Vite asset bundling, PWA service worker generation, and CommonJS server compilation (`dist/server.cjs`) verified (`npm run build`).
+- [x] **GitHub Actions Workflow Integrity**: `.github/workflows/ci.yml` strictly executes all pipeline steps in sequence without bypasses or `|| true`.

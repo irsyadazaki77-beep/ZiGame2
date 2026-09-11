@@ -105,6 +105,7 @@ export const CANONICAL_GAME_REGISTRY: Record<CanonicalGameId, GameRegistryItem> 
     accentShadow: 'shadow-[0_0_15px_rgba(168,85,247,0.15)]',
     icon: '🧠',
     controls: 'Mouse / Touch',
+    controlType: 'actiononly',
     avgDuration: '2-5 mins'
   },
   'cyber-runner': {
@@ -120,6 +121,7 @@ export const CANONICAL_GAME_REGISTRY: Record<CanonicalGameId, GameRegistryItem> 
     accentShadow: 'shadow-[0_0_15px_rgba(249,115,22,0.15)]',
     icon: '🏃‍♂️',
     controls: 'Arrows / Swipe',
+    controlType: 'actiononly',
     avgDuration: '2-4 mins'
   },
   'neon-pong': {
@@ -135,6 +137,7 @@ export const CANONICAL_GAME_REGISTRY: Record<CanonicalGameId, GameRegistryItem> 
     accentShadow: 'shadow-[0_0_15px_rgba(59,130,246,0.15)]',
     icon: '🏓',
     controls: 'Arrows / WASD',
+    controlType: 'actiononly',
     avgDuration: '2-5 mins'
   },
   'neon-stacker': {
@@ -150,6 +153,7 @@ export const CANONICAL_GAME_REGISTRY: Record<CanonicalGameId, GameRegistryItem> 
     accentShadow: 'shadow-[0_0_15px_rgba(244,63,94,0.15)]',
     icon: '🧱',
     controls: 'Arrows / WASD',
+    controlType: 'actiononly',
     avgDuration: '2-5 mins'
   },
   'vaporwave-racer': {
@@ -165,6 +169,7 @@ export const CANONICAL_GAME_REGISTRY: Record<CanonicalGameId, GameRegistryItem> 
     accentShadow: 'shadow-[0_0_15px_rgba(217,70,239,0.15)]',
     icon: '🏎️',
     controls: 'Arrows / Swipe',
+    controlType: 'actiononly',
     avgDuration: '2-4 mins'
   },
   'lock-breaker': {
@@ -180,6 +185,7 @@ export const CANONICAL_GAME_REGISTRY: Record<CanonicalGameId, GameRegistryItem> 
     accentShadow: 'shadow-[0_0_15px_rgba(245,158,11,0.15)]',
     icon: '🔐',
     controls: 'Mouse / Touch',
+    controlType: 'actiononly',
     avgDuration: '3-10 mins'
   },
   'sine-rider': {
@@ -195,6 +201,7 @@ export const CANONICAL_GAME_REGISTRY: Record<CanonicalGameId, GameRegistryItem> 
     accentShadow: 'shadow-[0_0_15px_rgba(6,182,212,0.15)]',
     icon: '🏄‍♂️',
     controls: 'Arrows / WASD',
+    controlType: 'actiononly',
     avgDuration: '2-5 mins'
   },
   'cosmic-dodge': {
@@ -210,6 +217,7 @@ export const CANONICAL_GAME_REGISTRY: Record<CanonicalGameId, GameRegistryItem> 
     accentShadow: 'shadow-[0_0_15px_rgba(16,185,129,0.15)]',
     icon: '✨',
     controls: 'Arrows / Swipe',
+    controlType: 'actiononly',
     avgDuration: '2-4 mins'
   },
   'laser-grid': {
@@ -225,6 +233,7 @@ export const CANONICAL_GAME_REGISTRY: Record<CanonicalGameId, GameRegistryItem> 
     accentShadow: 'shadow-[0_0_15px_rgba(239,68,68,0.15)]',
     icon: '⚡',
     controls: 'Arrows / WASD',
+    controlType: 'actiononly',
     avgDuration: '2-5 mins'
   },
   'cyber-simon': {
@@ -240,6 +249,7 @@ export const CANONICAL_GAME_REGISTRY: Record<CanonicalGameId, GameRegistryItem> 
     accentShadow: 'shadow-[0_0_15px_rgba(168,85,247,0.15)]',
     icon: '🧠',
     controls: 'Mouse / Touch',
+    controlType: 'actiononly',
     avgDuration: '2-5 mins'
   },
   'plinko-neo': {
@@ -255,6 +265,7 @@ export const CANONICAL_GAME_REGISTRY: Record<CanonicalGameId, GameRegistryItem> 
     accentShadow: 'shadow-[0_0_15px_rgba(245,158,11,0.15)]',
     icon: '🎰',
     controls: 'Mouse / Touch',
+    controlType: 'actiononly',
     avgDuration: '1-3 mins'
   },
   'cosmic-asteroid': {
@@ -270,6 +281,7 @@ export const CANONICAL_GAME_REGISTRY: Record<CanonicalGameId, GameRegistryItem> 
     accentShadow: 'shadow-[0_0_15px_rgba(6,182,212,0.15)]',
     icon: '☄️',
     controls: 'WASD + Space',
+    controlType: 'actiononly',
     avgDuration: '2-5 mins'
   },
   'cyber-slasher': {
@@ -285,6 +297,7 @@ export const CANONICAL_GAME_REGISTRY: Record<CanonicalGameId, GameRegistryItem> 
     accentShadow: 'shadow-[0_0_15px_rgba(16,185,129,0.15)]',
     icon: '⚔️',
     controls: 'Mouse Drag / Swipe',
+    controlType: 'actiononly',
     avgDuration: '2-4 mins'
   },
   'cyber-clicker': {
@@ -300,6 +313,7 @@ export const CANONICAL_GAME_REGISTRY: Record<CanonicalGameId, GameRegistryItem> 
     accentShadow: 'shadow-[0_0_15px_rgba(99,102,241,0.15)]',
     icon: '⚡',
     controls: 'Mouse Click / Tap',
+    controlType: 'actiononly',
     avgDuration: '5-20 mins'
   },
   'block-match': {
@@ -315,6 +329,7 @@ export const CANONICAL_GAME_REGISTRY: Record<CanonicalGameId, GameRegistryItem> 
     accentShadow: 'shadow-[0_0_15px_rgba(236,72,153,0.15)]',
     icon: '💎',
     controls: 'Mouse Click / Touch',
+    controlType: 'actiononly',
     avgDuration: '3-8 mins'
   },
   'cyber-typer': {
@@ -330,6 +345,7 @@ export const CANONICAL_GAME_REGISTRY: Record<CanonicalGameId, GameRegistryItem> 
     accentShadow: 'shadow-[0_0_15px_rgba(34,197,94,0.15)]',
     icon: '⌨️',
     controls: 'Keyboard Only',
+    controlType: 'actiononly',
     avgDuration: '2-5 mins'
   },
   'maze-runner': {
@@ -345,6 +361,7 @@ export const CANONICAL_GAME_REGISTRY: Record<CanonicalGameId, GameRegistryItem> 
     accentShadow: 'shadow-[0_0_15px_rgba(249,115,22,0.15)]',
     icon: '🧭',
     controls: 'Arrows / WASD',
+    controlType: 'actiononly',
     avgDuration: '2-5 mins'
   },
   'memory-path': {
@@ -360,6 +377,7 @@ export const CANONICAL_GAME_REGISTRY: Record<CanonicalGameId, GameRegistryItem> 
     accentShadow: 'shadow-[0_0_15px_rgba(59,130,246,0.15)]',
     icon: '👣',
     controls: 'Mouse / Touch',
+    controlType: 'actiononly',
     avgDuration: '2-5 mins'
   },
   'rhythm-tap': {
@@ -375,6 +393,7 @@ export const CANONICAL_GAME_REGISTRY: Record<CanonicalGameId, GameRegistryItem> 
     accentShadow: 'shadow-[0_0_15px_rgba(168,85,247,0.15)]',
     icon: '🎵',
     controls: 'D, F, J, K / Touch',
+    controlType: 'actiononly',
     avgDuration: '2-4 mins'
   },
   'pixel-golf': {
@@ -390,6 +409,7 @@ export const CANONICAL_GAME_REGISTRY: Record<CanonicalGameId, GameRegistryItem> 
     accentShadow: 'shadow-[0_0_15px_rgba(16,185,129,0.15)]',
     icon: '⛳',
     controls: 'Drag & Release',
+    controlType: 'actiononly',
     avgDuration: '2-5 mins'
   },
   'pixel-dino': {
@@ -405,6 +425,7 @@ export const CANONICAL_GAME_REGISTRY: Record<CanonicalGameId, GameRegistryItem> 
     accentShadow: 'shadow-[0_0_15px_rgba(234,179,8,0.15)]',
     icon: '🦖',
     controls: 'Space / Tap',
+    controlType: 'actiononly',
     avgDuration: '2-5 mins'
   },
   'cyber-tetris': {
@@ -420,6 +441,7 @@ export const CANONICAL_GAME_REGISTRY: Record<CanonicalGameId, GameRegistryItem> 
     accentShadow: 'shadow-[0_0_15px_rgba(6,182,212,0.15)]',
     icon: '🧱',
     controls: 'Arrows / Touch',
+    controlType: 'dpad',
     avgDuration: '3-10 mins'
   },
   'archery-neo': {
@@ -435,6 +457,7 @@ export const CANONICAL_GAME_REGISTRY: Record<CanonicalGameId, GameRegistryItem> 
     accentShadow: 'shadow-[0_0_15px_rgba(239,68,68,0.15)]',
     icon: '🏹',
     controls: 'Drag & Release',
+    controlType: 'actiononly',
     avgDuration: '2-5 mins'
   },
   'cyber-mines': {
@@ -450,6 +473,7 @@ export const CANONICAL_GAME_REGISTRY: Record<CanonicalGameId, GameRegistryItem> 
     accentShadow: 'shadow-[0_0_15px_rgba(245,158,11,0.15)]',
     icon: '💣',
     controls: 'Left Click (Open) / Right Click (Flag)',
+    controlType: 'actiononly',
     avgDuration: '3-10 mins'
   },
   'neon-2048': {
@@ -465,6 +489,7 @@ export const CANONICAL_GAME_REGISTRY: Record<CanonicalGameId, GameRegistryItem> 
     accentShadow: 'shadow-[0_0_15px_rgba(244,63,94,0.15)]',
     icon: '🔢',
     controls: 'Arrows / Swipe',
+    controlType: 'dpad',
     avgDuration: '5-15 mins'
   },
   'whack-a-drone': {
@@ -480,6 +505,7 @@ export const CANONICAL_GAME_REGISTRY: Record<CanonicalGameId, GameRegistryItem> 
     accentShadow: 'shadow-[0_0_15px_rgba(217,70,239,0.15)]',
     icon: '🔨',
     controls: 'Mouse Click / Tap',
+    controlType: 'actiononly',
     avgDuration: '2-4 mins'
   },
   'jump-rope': {
@@ -495,6 +521,7 @@ export const CANONICAL_GAME_REGISTRY: Record<CanonicalGameId, GameRegistryItem> 
     accentShadow: 'shadow-[0_0_15px_rgba(34,197,94,0.15)]',
     icon: '🪢',
     controls: 'Space / Tap',
+    controlType: 'actiononly',
     avgDuration: '1-3 mins'
   },
   'neon-drift': {
@@ -510,6 +537,7 @@ export const CANONICAL_GAME_REGISTRY: Record<CanonicalGameId, GameRegistryItem> 
     accentShadow: 'shadow-[0_0_15px_rgba(34,211,238,0.15)]',
     icon: '🏎️',
     controls: 'Left / Right',
+    controlType: 'leftright',
     avgDuration: '2-5 mins'
   },
   'neon-heist': {
@@ -525,6 +553,7 @@ export const CANONICAL_GAME_REGISTRY: Record<CanonicalGameId, GameRegistryItem> 
     accentShadow: 'shadow-[0_0_15px_rgba(6,182,212,0.15)]',
     icon: '🥷',
     controls: 'WASD / Mouse',
+    controlType: 'dpad',
     avgDuration: '2-5 mins'
   },
   'void-survivor': {
@@ -540,6 +569,7 @@ export const CANONICAL_GAME_REGISTRY: Record<CanonicalGameId, GameRegistryItem> 
     accentShadow: 'shadow-[0_0_15px_rgba(168,85,247,0.15)]',
     icon: '⚔️',
     controls: 'WASD / Arrows',
+    controlType: 'dpad',
     avgDuration: '5-15 mins'
   },
   'orbital-defense': {
@@ -555,6 +585,7 @@ export const CANONICAL_GAME_REGISTRY: Record<CanonicalGameId, GameRegistryItem> 
     accentShadow: 'shadow-[0_0_15px_rgba(56,189,248,0.15)]',
     icon: '🛰️',
     controls: 'Mouse / Click',
+    controlType: 'actiononly',
     avgDuration: '5-10 mins'
   },
   'gravity-shift': {
@@ -570,6 +601,7 @@ export const CANONICAL_GAME_REGISTRY: Record<CanonicalGameId, GameRegistryItem> 
     accentShadow: 'shadow-[0_0_15px_rgba(6,182,212,0.15)]',
     icon: '🌌',
     controls: 'A/D + Space',
+    controlType: 'leftright',
     avgDuration: '2-6 mins'
   },
   'hex-dominion': {
@@ -585,6 +617,7 @@ export const CANONICAL_GAME_REGISTRY: Record<CanonicalGameId, GameRegistryItem> 
     accentShadow: 'shadow-[0_0_15px_rgba(99,102,241,0.15)]',
     icon: '🔷',
     controls: 'Mouse / Click',
+    controlType: 'actiononly',
     avgDuration: '5-12 mins'
   }
 };

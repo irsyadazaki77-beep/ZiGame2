@@ -4,6 +4,7 @@
  * 
  * Strict single source of truth for all achievable rewards.
  * Clients are strictly forbidden from specifying reward amounts.
+ * Unknown or loose arbitrary claim IDs are strictly rejected.
  */
 
 export type RewardClaimType =
@@ -55,6 +56,14 @@ export const AUTHORITATIVE_QUEST_TIER_REWARDS: Record<number, { rewardCoins: num
   10: { rewardCoins: 500, rewardXp: 500, title: 'Tier 10 Cyber Crown' }
 };
 
+export const AUTHORITATIVE_SEASONAL_CHALLENGES: Record<string, { rewardCoins: number; rewardXp: number; title: string }> = {
+  'special_season_1': { rewardCoins: 500, rewardXp: 1000, title: 'Cyber Genesis Vanguard' },
+  'season_1_challenge_1': { rewardCoins: 250, rewardXp: 400, title: 'Season 1 Challenge 1' },
+  'season_1_challenge_2': { rewardCoins: 250, rewardXp: 400, title: 'Season 1 Challenge 2' },
+  'season_1_challenge_3': { rewardCoins: 250, rewardXp: 400, title: 'Season 1 Challenge 3' },
+  'season_1_challenge_4': { rewardCoins: 250, rewardXp: 400, title: 'Season 1 Challenge 4' }
+};
+
 export const CANONICAL_STARTER_PACK_ID = 'starter_pack_v1';
 
 export function getCanonicalClaimId(
@@ -64,7 +73,10 @@ export function getCanonicalClaimId(
 ): string {
   const sanitized = (claimId || '').trim();
   if (claimType === 'starter_pack') {
-    return CANONICAL_STARTER_PACK_ID;
+    if (sanitized === 'starter_pack' || sanitized === 'starter_pack_claim' || sanitized === 'sp_welcome' || sanitized === CANONICAL_STARTER_PACK_ID) {
+      return CANONICAL_STARTER_PACK_ID;
+    }
+    return sanitized;
   }
   if (claimType === 'level_up') {
     const num = targetNum || parseInt(sanitized.replace(/\D/g, ''), 10) || 2;
@@ -98,28 +110,55 @@ export function resolveAuthoritativeReward(
 
     case 'daily_mission': {
       const canonical = getCanonicalClaimId(sanitizedId, 'daily_mission');
-      if (sanitizedId === 'm_play_3' || canonical.endsWith('_3') || sanitizedId.includes('play_count')) {
-        return { rewardCoins: 50, rewardXp: 80, title: 'Daily Mission: Multigenre Exploration', canonicalId: canonical };
-      }
-      if (canonical.endsWith('_1') || sanitizedId.includes('score_target')) {
-        return { rewardCoins: 80, rewardXp: 100, title: 'Daily Mission: Score Target', canonicalId: canonical };
-      }
-      if (canonical.endsWith('_2') || sanitizedId.includes('unique_games')) {
-        return { rewardCoins: 100, rewardXp: 120, title: 'Daily Mission: High Score Breakthrough', canonicalId: canonical };
+      // Exact pattern check for daily mission: m_YYYY-MM-DD_1, m_YYYY-MM-DD_2, m_YYYY-MM-DD_3
+      const dailyMissionMatch = canonical.match(/^m_(\d{4}-\d{2}-\d{2})_([123])$/);
+      if (dailyMissionMatch) {
+        const index = dailyMissionMatch[2];
+        if (index === '1') {
+          return { rewardCoins: 100, rewardXp: 150, title: 'Daily Mission: Score Target', canonicalId: canonical };
+        } else if (index === '2') {
+          return { rewardCoins: 120, rewardXp: 180, title: 'Daily Mission: Engagement', canonicalId: canonical };
+        } else if (index === '3') {
+          return { rewardCoins: 80, rewardXp: 100, title: 'Daily Mission: Consistency', canonicalId: canonical };
+        }
       }
       return null;
     }
 
     case 'challenge': {
-      if (sanitizedId.startsWith('daily_')) {
-        return { rewardCoins: 75, rewardXp: 100, title: 'Daily Challenge Complete', canonicalId: sanitizedId };
+      // 1. Daily Challenge exact pattern check: daily_YYYY-MM-DD_1, daily_YYYY-MM-DD_2, daily_YYYY-MM-DD_3
+      const dailyMatch = sanitizedId.match(/^daily_(\d{4}-\d{2}-\d{2})_([123])$/);
+      if (dailyMatch) {
+        const index = dailyMatch[2];
+        if (index === '1') {
+          return { rewardCoins: 80, rewardXp: 120, title: 'Daily Challenge: Score Target', canonicalId: sanitizedId };
+        } else if (index === '2') {
+          return { rewardCoins: 75, rewardXp: 100, title: 'Daily Challenge: Multigenre', canonicalId: sanitizedId };
+        } else if (index === '3') {
+          return { rewardCoins: 60, rewardXp: 90, title: 'Daily Challenge: Reflex', canonicalId: sanitizedId };
+        }
       }
-      if (sanitizedId.startsWith('weekly_')) {
-        return { rewardCoins: 150, rewardXp: 250, title: 'Weekly Challenge Complete', canonicalId: sanitizedId };
+
+      // 2. Weekly Challenge exact pattern check: weekly_YYYY-Www_1, weekly_YYYY-Www_2, weekly_YYYY-Www_3
+      const weeklyMatch = sanitizedId.match(/^weekly_(\d{4}-W\d{2})_([123])$/);
+      if (weeklyMatch) {
+        const index = weeklyMatch[2];
+        if (index === '1') {
+          return { rewardCoins: 250, rewardXp: 400, title: 'Weekly Challenge: PB Breaker', canonicalId: sanitizedId };
+        } else if (index === '2') {
+          return { rewardCoins: 200, rewardXp: 350, title: 'Weekly Challenge: Marathon', canonicalId: sanitizedId };
+        } else if (index === '3') {
+          return { rewardCoins: 300, rewardXp: 500, title: 'Weekly Challenge: Score Accumulator', canonicalId: sanitizedId };
+        }
       }
-      if (sanitizedId.startsWith('special_') || sanitizedId.startsWith('season_')) {
-        return { rewardCoins: 250, rewardXp: 400, title: 'Special Challenge Complete', canonicalId: sanitizedId };
+
+      // 3. Registered Seasonal/Special Challenge check
+      if (sanitizedId in AUTHORITATIVE_SEASONAL_CHALLENGES) {
+        const seasonal = AUTHORITATIVE_SEASONAL_CHALLENGES[sanitizedId];
+        return { ...seasonal, canonicalId: sanitizedId };
       }
+
+      // Rejects any arbitrary/unregistered challenge ID
       return null;
     }
 
@@ -132,7 +171,8 @@ export function resolveAuthoritativeReward(
     }
 
     case 'starter_pack': {
-      if (sanitizedId === 'starter_pack' || sanitizedId === 'starter_pack_claim' || sanitizedId === CANONICAL_STARTER_PACK_ID) {
+      const canonical = getCanonicalClaimId(sanitizedId, 'starter_pack');
+      if (canonical === CANONICAL_STARTER_PACK_ID) {
         return { rewardCoins: 100, rewardXp: 150, title: 'Starter Recruit Bonus', canonicalId: CANONICAL_STARTER_PACK_ID };
       }
       return null;
@@ -148,3 +188,4 @@ export function resolveAuthoritativeReward(
       return null;
   }
 }
+
