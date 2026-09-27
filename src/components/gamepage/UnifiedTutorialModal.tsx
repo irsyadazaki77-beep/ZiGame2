@@ -3,6 +3,7 @@ import { Gamepad2, Lightbulb, Keyboard, MousePointer, CheckCircle2, Play, X, Zap
 import { GameStats } from '../../types';
 import { getTutorialForGame } from '../../config/gameTutorials';
 import { audio } from '../../utils/audio';
+import { logger } from '../../utils/logger';
 import { inputManager } from '../../services/inputService';
 
 interface UnifiedTutorialModalProps {
@@ -22,13 +23,24 @@ export const UnifiedTutorialModal: React.FC<UnifiedTutorialModalProps> = ({
 
   const tutorial = getTutorialForGame(game.id, game.title, game.description);
 
+  // Close modal with Escape key
+  React.useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onClose]);
+
   const handleStart = () => {
     audio.playCoin();
     if (dontShowAgain) {
       try {
         localStorage.setItem(`tutorial_disabled_${game.id}`, 'true');
       } catch (e) {
-        console.warn('LocalStorage error:', e);
+        logger.warn('LocalStorage error in tutorial modal', { error: e as Error });
       }
     }
     onStartGame();
@@ -39,16 +51,19 @@ export const UnifiedTutorialModal: React.FC<UnifiedTutorialModalProps> = ({
     <div
       className="fixed inset-0 z-[120] bg-black/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 select-none font-sans"
       id="game-unified-tutorial-modal"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="tutorial-modal-title"
     >
       <div className="bg-[#11151f] border border-white/[0.08] rounded-2xl max-w-lg w-full overflow-hidden shadow-2xl shadow-black/90 relative flex flex-col max-h-[88vh]">
         {/* Header Bar */}
         <div className="p-4 sm:p-5 bg-[#0d1017] border-b border-white/[0.06] flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <span className="text-2xl w-10 h-10 rounded-xl bg-[#181c2b] border border-white/[0.08] flex items-center justify-center shrink-0">
+            <span className="text-2xl w-10 h-10 rounded-xl bg-[#181c2b] border border-white/[0.08] flex items-center justify-center shrink-0" aria-hidden="true">
               {game.icon}
             </span>
             <div>
-              <h2 className="text-base sm:text-lg font-semibold text-white">
+              <h2 className="text-base sm:text-lg font-semibold text-white" id="tutorial-modal-title">
                 {game.title}
               </h2>
               <div className="text-xs text-zinc-400 flex items-center gap-2">
@@ -60,8 +75,8 @@ export const UnifiedTutorialModal: React.FC<UnifiedTutorialModalProps> = ({
           </div>
           <button
             onClick={onClose}
-            className="w-8 h-8 rounded-full bg-white/[0.06] hover:bg-white/[0.12] text-zinc-400 hover:text-white flex items-center justify-center transition cursor-pointer"
-            aria-label="Tutup"
+            className="w-8 h-8 rounded-full bg-white/[0.06] hover:bg-white/[0.12] focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:outline-hidden text-zinc-400 hover:text-white flex items-center justify-center transition cursor-pointer"
+            aria-label="Tutup Panduan"
           >
             <X size={16} />
           </button>
@@ -178,13 +193,16 @@ export const UnifiedTutorialModal: React.FC<UnifiedTutorialModalProps> = ({
         <div className="p-4 bg-[#0d1017] border-t border-white/[0.06] flex items-center justify-end gap-2.5 shrink-0">
           <button
             onClick={onClose}
-            className="px-4 py-2 rounded-xl text-zinc-400 hover:text-white text-xs font-medium transition cursor-pointer"
+            className="px-4 py-2 rounded-xl text-zinc-400 hover:text-white focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:outline-hidden text-xs font-medium transition cursor-pointer"
+            aria-label="Tutup panduan"
           >
             Tutup
           </button>
           <button
             onClick={handleStart}
-            className="px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-sm shadow-indigo-600/20 transition flex items-center gap-2 cursor-pointer active:scale-98"
+            className="px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:outline-hidden text-white text-xs font-semibold shadow-sm shadow-indigo-600/20 transition flex items-center gap-2 cursor-pointer active:scale-98"
+            aria-label="Mulai bermain game sekarang"
+            autoFocus
           >
             <Play size={13} fill="currentColor" />
             Mulai Bermain

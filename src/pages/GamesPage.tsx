@@ -133,14 +133,14 @@ export default function GamesPage({ games, onSelectGame }: GamesPageProps) {
       className="space-y-6 max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-4 sm:py-6"
     >
       {/* Page Header */}
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 border-b border-white/[0.05] pb-5">
+      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 border-b border-border-subtle pb-5">
         <div>
-          <h1 className="text-xl sm:text-2xl font-black tracking-wider text-white uppercase font-display flex items-center gap-2.5">
+          <h1 className="text-xl sm:text-2xl font-black tracking-wider text-text-primary uppercase font-display flex items-center gap-2.5">
             <Gamepad2 className="text-indigo-500 w-5 h-5 sm:w-6 sm:h-6" />
             Eksplorasi Arkade
           </h1>
-          <p className="text-xs text-zinc-400 mt-1 uppercase tracking-widest font-mono">
-            {games.length} Koleksi Permainan Cyber Siap Main • Filter & Discovery Cerdas
+          <p className="text-xs text-text-muted mt-1 uppercase tracking-widest font-mono">
+            {games.length} Koleksi Permainan Cyber Siap Main • Filter &amp; Discovery Cerdas
           </p>
         </div>
 
@@ -153,11 +153,11 @@ export default function GamesPage({ games, onSelectGame }: GamesPageProps) {
             }}
             className={`px-3 py-1 rounded-full text-[11px] font-mono font-bold flex items-center gap-1 transition cursor-pointer border ${
               durationFilter === 'quick'
-                ? 'bg-amber-500/20 border-amber-500/50 text-amber-300'
-                : 'bg-white/[0.03] border-white/[0.06] text-zinc-400 hover:text-white'
+                ? 'bg-amber-500/20 border-amber-500/50 text-amber-500 dark:text-amber-300'
+                : 'bg-surface-subtle border-border-subtle text-text-secondary hover:text-text-primary'
             }`}
           >
-            <Zap size={11} className="text-amber-400" />
+            <Zap size={11} className="text-amber-500" />
             <span>5-Menit Kilat</span>
           </button>
 
@@ -168,11 +168,11 @@ export default function GamesPage({ games, onSelectGame }: GamesPageProps) {
             }}
             className={`px-3 py-1 rounded-full text-[11px] font-mono font-bold flex items-center gap-1 transition cursor-pointer border ${
               inputFilter === 'gamepad'
-                ? 'bg-indigo-500/20 border-indigo-500/50 text-indigo-300'
-                : 'bg-white/[0.03] border-white/[0.06] text-zinc-400 hover:text-white'
+                ? 'bg-indigo-500/20 border-indigo-500/50 text-indigo-600 dark:text-indigo-300'
+                : 'bg-surface-subtle border-border-subtle text-text-secondary hover:text-text-primary'
             }`}
           >
-            <Gamepad2 size={11} className="text-indigo-400" />
+            <Gamepad2 size={11} className="text-indigo-500" />
             <span>Gamepad Ready</span>
           </button>
 
@@ -183,11 +183,11 @@ export default function GamesPage({ games, onSelectGame }: GamesPageProps) {
             }}
             className={`px-3 py-1 rounded-full text-[11px] font-mono font-bold flex items-center gap-1 transition cursor-pointer border ${
               tierFilter === 'flagship'
-                ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-300'
-                : 'bg-white/[0.03] border-white/[0.06] text-zinc-400 hover:text-white'
+                ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-600 dark:text-emerald-300'
+                : 'bg-surface-subtle border-border-subtle text-text-secondary hover:text-text-primary'
             }`}
           >
-            <Sparkles size={11} className="text-emerald-400" />
+            <Sparkles size={11} className="text-emerald-500" />
             <span>Flagship Tier</span>
           </button>
         </div>
@@ -230,8 +230,8 @@ export default function GamesPage({ games, onSelectGame }: GamesPageProps) {
                   onClick={() => { audio.playHit(); setCategoryTab(cat.value as any); }}
                   className={`px-3.5 py-1.5 rounded-full text-xs font-mono font-bold uppercase transition-all duration-200 shrink-0 border cursor-pointer select-none ${
                     isActive
-                      ? 'bg-indigo-600/15 border-indigo-500/40 text-indigo-400 shadow-sm shadow-indigo-600/5'
-                      : 'bg-[#121622] border-white/[0.04] text-zinc-400 hover:text-zinc-200 hover:border-white/[0.08]'
+                      ? 'bg-indigo-600/15 border-indigo-500/40 text-indigo-600 dark:text-indigo-400 shadow-xs'
+                      : 'bg-surface-subtle border-border-subtle text-text-secondary hover:text-text-primary hover:border-border-medium'
                   }`}
                 >
                   {cat.label}
@@ -243,7 +243,7 @@ export default function GamesPage({ games, onSelectGame }: GamesPageProps) {
           {hasActiveCustomFilters && (
             <button
               onClick={resetAllFilters}
-              className="text-[11px] font-mono text-zinc-400 hover:text-rose-400 flex items-center gap-1 shrink-0 px-2.5 py-1 bg-white/[0.03] hover:bg-rose-500/10 rounded-full transition cursor-pointer"
+              className="text-[11px] font-mono text-text-muted hover:text-rose-500 flex items-center gap-1 shrink-0 px-2.5 py-1 bg-surface-subtle hover:bg-rose-500/10 rounded-full transition cursor-pointer"
             >
               <X size={12} />
               <span>Reset</span>
@@ -256,7 +256,7 @@ export default function GamesPage({ games, onSelectGame }: GamesPageProps) {
           <motion.div
             initial={{ opacity: 0, height: 0 }}
             animate={{ opacity: 1, height: 'auto' }}
-            className="p-4 bg-[#121622] border border-white/[0.06] rounded-2xl grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4"
+            className="p-4 bg-surface-card border border-border-subtle rounded-2xl grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 shadow-sm"
           >
             <Select
               label="Tingkat Kesulitan"

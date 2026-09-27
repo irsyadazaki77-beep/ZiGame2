@@ -34,16 +34,33 @@ const COLORS = [
   'bg-blue-500 border-blue-400 shadow-[0_0_8px_rgba(59,130,246,0.5)]',
 ];
 
+import { useGameEngine } from '../../hooks/useGameEngine';
+
 export default function CyberTetrisGame({ onGameOver, onScoreUpdate, highScore }: GameProps) {
-  const scoreRef = useRef(0);
-  const [isPlaying, setIsPlaying] = useState(false);
+  const {
+    gameState,
+    score,
+    addScore,
+    startWithCountdown,
+    countdown,
+    triggerGameOver,
+    pauseGame,
+    resumeGame,
+    startLoop,
+    stopLoop,
+    gameStateRef,
+    scoreRef,
+  } = useGameEngine({
+    gameId: 'cybertetris',
+    onGameOver,
+    onScoreUpdate,
+  });
+
   const [board, setBoard] = useState<number[][]>(() => Array(ROWS).fill(null).map(() => Array(COLS).fill(0)));
-  const [score, setScore] = useState(0);
   const [level, setLevel] = useState(1);
   const [linesCleared, setLinesCleared] = useState(0);
 
   const boardRef = useRef<number[][]>([]);
-  const isPlayingRef = useRef(false);
 
   // Active falling piece
   const currentPiece = useRef<number[][]>([]);
@@ -57,17 +74,8 @@ export default function CyberTetrisGame({ onGameOver, onScoreUpdate, highScore }
   const shakeRef = useRef<number>(0);
 
   useEffect(() => {
-    scoreRef.current = score;
-    onScoreUpdate(score);
-  }, [score, onScoreUpdate]);
-
-  useEffect(() => {
     boardRef.current = board;
   }, [board]);
-
-  useEffect(() => {
-    isPlayingRef.current = isPlaying;
-  }, [isPlaying]);
 
   const spawnPiece = () => {
     const idx = Math.floor(Math.random() * SHAPES.length);
@@ -222,7 +230,7 @@ export default function CyberTetrisGame({ onGameOver, onScoreUpdate, highScore }
       // Update scores based on line clears
       const multiplier = [0, 100, 300, 600, 1000];
       const clearedCount = rowsToClear.length;
-      setScore(prev => prev + multiplier[clearedCount] * level);
+      addScore(multiplier[clearedCount] * level);
       setLinesCleared(prev => {
         const next = prev + clearedCount;
         if (next >= level * 10) {
@@ -240,7 +248,7 @@ export default function CyberTetrisGame({ onGameOver, onScoreUpdate, highScore }
   };
 
   const moveLeft = () => {
-    if (!isPlayingRef.current) return;
+    if (gameStateRef.current !== 'playing') return;
     const { r, c } = currentPos.current;
     if (!checkCollision(r, c - 1, currentPiece.current)) {
       audio.playCoin();
@@ -250,7 +258,7 @@ export default function CyberTetrisGame({ onGameOver, onScoreUpdate, highScore }
   };
 
   const moveRight = () => {
-    if (!isPlayingRef.current) return;
+    if (gameStateRef.current !== 'playing') return;
     const { r, c } = currentPos.current;
     if (!checkCollision(r, c + 1, currentPiece.current)) {
       audio.playCoin();
@@ -260,7 +268,7 @@ export default function CyberTetrisGame({ onGameOver, onScoreUpdate, highScore }
   };
 
   const rotatePiece = () => {
-    if (!isPlayingRef.current) return;
+    if (gameStateRef.current !== 'playing') return;
     const piece = currentPiece.current;
     const N = piece.length;
     const M = piece[0].length;
@@ -282,7 +290,7 @@ export default function CyberTetrisGame({ onGameOver, onScoreUpdate, highScore }
   };
 
   const dropDown = () => {
-    if (!isPlayingRef.current) return;
+    if (gameStateRef.current !== 'playing') return;
     const { r, c } = currentPos.current;
     if (!checkCollision(r + 1, c, currentPiece.current)) {
       currentPos.current.r = r + 1;
@@ -301,7 +309,7 @@ export default function CyberTetrisGame({ onGameOver, onScoreUpdate, highScore }
   // Keyboard navigation
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (!isPlaying) return;
+      if (gameState !== 'playing') return;
       if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') {
         e.preventDefault();
         moveLeft();
@@ -319,133 +327,108 @@ export default function CyberTetrisGame({ onGameOver, onScoreUpdate, highScore }
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isPlaying]);
+  }, [gameState]);
 
   // Main automatic drop timer loop
   useEffect(() => {
     let timerId: NodeJS.Timeout;
-    if (isPlaying) {
+    if (gameState === 'playing') {
       timerId = setInterval(() => {
         dropDown();
       }, Math.max(1000 - level * 100, 150));
     }
     return () => clearInterval(timerId);
-  }, [isPlaying, level]);
+  }, [gameState, level]);
 
   const startNewGame = () => {
-    audio.playCoin();
-    setBoard(Array(ROWS).fill(null).map(() => Array(COLS).fill(0)));
-    setScore(0);
-    setLevel(1);
-    setLinesCleared(0);
-    setIsPlaying(true);
-    setTimeout(() => {
+    startWithCountdown(() => {
+      setBoard(Array(ROWS).fill(null).map(() => Array(COLS).fill(0)));
+      setLevel(1);
+      setLinesCleared(0);
       spawnPiece();
       forceUpdateBoardState();
-    }, 100);
+      startLoop(render);
+    });
   };
 
   const endGame = () => {
-    setIsPlaying(false);
-    audio.playGameOver();
-    onGameOver(score);
+    triggerGameOver(score);
   };
 
-  // Canvas render loop for piece settlement & line-clear particle explosions
-  useEffect(() => {
-    let animId: number;
+  const render = () => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
 
-    const render = () => {
-      const canvas = canvasRef.current;
-      if (!canvas) {
-        animId = requestAnimationFrame(render);
-        return;
-      }
-      const ctx = canvas.getContext('2d');
-      if (!ctx) {
-        animId = requestAnimationFrame(render);
-        return;
-      }
+    ctx.clearRect(0, 0, 280, 420);
 
-      ctx.clearRect(0, 0, 280, 420);
-
-      // Direct DOM camera shake on the grid cabinet stage
-      const cabinet = cabinetRef.current;
-      if (cabinet) {
-        if (shakeRef.current > 0) {
-          const dx = (Math.random() - 0.5) * shakeRef.current;
-          const dy = (Math.random() - 0.5) * shakeRef.current;
-          cabinet.style.transform = `translate(${dx}px, ${dy}px)`;
-          // decay shake
-          shakeRef.current *= 0.88;
-          if (shakeRef.current < 0.5) {
-            shakeRef.current = 0;
-            cabinet.style.transform = 'none';
-          }
-        } else {
+    // Direct DOM camera shake on the grid cabinet stage
+    const cabinet = cabinetRef.current;
+    if (cabinet) {
+      if (shakeRef.current > 0) {
+        const dx = (Math.random() - 0.5) * shakeRef.current;
+        const dy = (Math.random() - 0.5) * shakeRef.current;
+        cabinet.style.transform = `translate(${dx}px, ${dy}px)`;
+        // decay shake
+        shakeRef.current *= 0.88;
+        if (shakeRef.current < 0.5) {
+          shakeRef.current = 0;
           cabinet.style.transform = 'none';
         }
+      } else {
+        cabinet.style.transform = 'none';
       }
-
-      // Update & Render neon block clear particles
-      particlesRef.current.forEach(p => {
-        p.x += p.vx;
-        p.y += p.vy;
-        p.alpha -= p.decay;
-
-        ctx.fillStyle = p.color;
-        ctx.shadowColor = p.color;
-        ctx.shadowBlur = 4;
-        ctx.globalAlpha = Math.max(0, p.alpha);
-        ctx.beginPath();
-        ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
-        ctx.fill();
-      });
-      ctx.shadowBlur = 0;
-      ctx.globalAlpha = 1.0;
-      particlesRef.current = particlesRef.current.filter(p => p.alpha > 0);
-
-      // Update & Render floating multiplier score texts
-      floatingTextsRef.current.forEach(t => {
-        t.y += t.vy;
-        t.alpha -= 0.022;
-
-        ctx.fillStyle = t.color;
-        ctx.shadowColor = t.color;
-        ctx.shadowBlur = 3;
-        ctx.globalAlpha = Math.max(0, t.alpha);
-        ctx.font = 'bold 9px "Press Start 2P", monospace';
-        ctx.textAlign = 'center';
-        ctx.fillText(t.text, t.x, t.y);
-      });
-      ctx.shadowBlur = 0;
-      ctx.globalAlpha = 1.0;
-      floatingTextsRef.current = floatingTextsRef.current.filter(t => t.alpha > 0);
-
-      animId = requestAnimationFrame(render);
-    };
-
-    if (isPlaying) {
-      animId = requestAnimationFrame(render);
     }
 
+    // Update & Render neon block clear particles
+    particlesRef.current.forEach(p => {
+      p.x += p.vx;
+      p.y += p.vy;
+      p.alpha -= p.decay;
+
+      ctx.fillStyle = p.color;
+      ctx.shadowColor = p.color;
+      ctx.shadowBlur = 4;
+      ctx.globalAlpha = Math.max(0, p.alpha);
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
+      ctx.fill();
+    });
+    ctx.shadowBlur = 0;
+    ctx.globalAlpha = 1.0;
+    particlesRef.current = particlesRef.current.filter(p => p.alpha > 0);
+
+    // Update & Render floating multiplier score texts
+    floatingTextsRef.current.forEach(t => {
+      t.y += t.vy;
+      t.alpha -= 0.022;
+
+      ctx.fillStyle = t.color;
+      ctx.shadowColor = t.color;
+      ctx.shadowBlur = 3;
+      ctx.globalAlpha = Math.max(0, t.alpha);
+      ctx.font = 'bold 9px "Press Start 2P", monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText(t.text, t.x, t.y);
+    });
+    ctx.shadowBlur = 0;
+    ctx.globalAlpha = 1.0;
+    floatingTextsRef.current = floatingTextsRef.current.filter(t => t.alpha > 0);
+  };
+
+  useEffect(() => {
     return () => {
-      if (animId) cancelAnimationFrame(animId);
+      stopLoop();
       if (cabinetRef.current) {
         cabinetRef.current.style.transform = 'none';
       }
     };
-  }, [isPlaying]);
-
-  const getGameState = () => {
-    if (!isPlaying && score === 0 && level === 1) return 'ready';
-    if (!isPlaying) return 'gameover';
-    return 'playing';
-  };
+  }, []);
 
   return (
     <GameContainer aspect="portrait" maxWidth="sm">
-      {isPlaying && (
+      {(gameState === 'playing' || gameState === 'paused') && (
         <GameHUD 
           stats={[
             { id: 'level', label: 'LEVEL', value: level },
@@ -456,10 +439,13 @@ export default function CyberTetrisGame({ onGameOver, onScoreUpdate, highScore }
       )}
 
       <GameOverlay
-        gameState={getGameState()}
+        gameState={gameState}
         score={score}
+        highScore={highScore}
         onStart={startNewGame}
         onRestart={startNewGame}
+        onResume={resumeGame}
+        countdown={countdown}
         instructions="Tumpuk dan rapikan barisan balok neon yang jatuh untuk membersihkan jalur grid."
       />
 
@@ -497,7 +483,7 @@ export default function CyberTetrisGame({ onGameOver, onScoreUpdate, highScore }
         </div>
       </div>
 
-      {isPlaying && (
+      {(gameState === 'playing' || gameState === 'paused') && (
         <MobileControls
           onUp={rotatePiece}
           onDown={dropDown}

@@ -13,7 +13,7 @@ interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
 
 export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
   ({ className = '', variant = 'primary', size = 'md', isLoading, disabled, children, ...props }, ref) => {
-    const baseStyle = 'inline-flex items-center justify-center font-semibold tracking-normal transition-all duration-150 select-none cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 focus-visible:ring-offset-[#090b10] disabled:opacity-50 disabled:pointer-events-none active:scale-[0.98]';
+    const baseStyle = 'inline-flex items-center justify-center font-semibold tracking-normal transition-all duration-150 select-none cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 focus-visible:ring-offset-bg-base disabled:opacity-50 disabled:pointer-events-none active:scale-[0.98]';
     
     const sizes = {
       sm: 'px-3 py-1.5 text-xs rounded-lg gap-1.5 min-h-[32px]',
@@ -23,9 +23,9 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
 
     const variants = {
       primary: 'bg-indigo-600 hover:bg-indigo-500 text-white border border-indigo-400/30 shadow-sm shadow-indigo-600/20',
-      secondary: 'bg-[#181c2b] hover:bg-[#20263a] text-zinc-100 border border-white/[0.08]',
-      outline: 'bg-transparent hover:bg-white/[0.06] text-zinc-200 border border-white/[0.12]',
-      ghost: 'bg-transparent hover:bg-white/[0.06] text-zinc-400 hover:text-zinc-100',
+      secondary: 'bg-surface-subtle hover:bg-surface-card-hover text-text-primary border border-border-subtle',
+      outline: 'bg-transparent hover:bg-surface-hover text-text-primary border border-border-medium',
+      ghost: 'bg-transparent hover:bg-surface-hover text-text-secondary hover:text-text-primary',
       danger: 'bg-rose-600 hover:bg-rose-500 text-white border border-rose-400/30 shadow-sm',
       cyan: 'bg-cyan-600 hover:bg-cyan-500 text-white border border-cyan-400/30 shadow-sm'
     };
@@ -70,9 +70,9 @@ export const Card: React.FC<CardProps> = ({
   };
 
   const borders = {
-    subtle: 'border-white/[0.06] bg-[#11151f] shadow-lg shadow-black/40',
-    indigo: 'border-indigo-500/30 bg-[#121624] shadow-lg shadow-black/40',
-    danger: 'border-rose-500/30 bg-[#171216] shadow-lg shadow-black/40'
+    subtle: 'border-border-subtle bg-surface-card text-text-primary shadow-md',
+    indigo: 'border-indigo-500/30 bg-surface-card text-text-primary shadow-md',
+    danger: 'border-rose-500/30 bg-surface-card text-text-primary shadow-md'
   };
 
   return (
@@ -81,7 +81,7 @@ export const Card: React.FC<CardProps> = ({
         rounded-2xl border transition-all duration-200
         ${borders[borderVariant]}
         ${paddings[padding]}
-        ${interactive ? 'hover:border-white/[0.15] hover:bg-[#151a27] hover:-translate-y-0.5 cursor-pointer group' : ''}
+        ${interactive ? 'hover:border-border-medium hover:bg-surface-card-hover hover:-translate-y-0.5 cursor-pointer group' : ''}
         ${className}
       `}
       {...props}
@@ -105,13 +105,13 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
     return (
       <div className="w-full flex flex-col gap-1.5">
         {label && (
-          <label className="text-xs font-mono font-bold text-zinc-400 uppercase tracking-wider">
+          <label className="text-xs font-mono font-bold text-text-secondary uppercase tracking-wider">
             {label}
           </label>
         )}
         <div className="relative flex items-center">
           {icon && (
-            <div className="absolute left-3.5 text-zinc-500 flex items-center justify-center pointer-events-none">
+            <div className="absolute left-3.5 text-text-muted flex items-center justify-center pointer-events-none">
               {icon}
             </div>
           )}
@@ -119,8 +119,8 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
             ref={ref}
             type={type}
             className={`
-              w-full bg-zinc-950 border border-zinc-800 text-zinc-100 font-sans text-sm rounded-[10px] py-2.5 px-3.5
-              placeholder:text-zinc-600 transition-all focus:outline-none focus:border-indigo-500
+              w-full bg-surface-sunken border border-border-medium text-text-primary font-sans text-sm rounded-[10px] py-2.5 px-3.5
+              placeholder:text-text-muted transition-all focus:outline-none focus:border-indigo-500
               focus:ring-2 focus:ring-indigo-500/20 focus:ring-offset-0 disabled:opacity-50 disabled:pointer-events-none
               ${icon ? 'pl-10' : ''}
               ${error ? 'border-red-500 focus:border-red-500 focus:ring-red-500/20' : ''}
@@ -130,7 +130,7 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
           />
         </div>
         {error && (
-          <span className="text-xs font-mono text-red-400 tracking-wide mt-0.5 uppercase">
+          <span className="text-xs font-mono text-rose-400 tracking-wide mt-0.5 uppercase">
             {error}
           </span>
         )}
@@ -149,13 +149,13 @@ interface BadgeProps extends React.HTMLAttributes<HTMLSpanElement> {
 
 export const Badge: React.FC<BadgeProps> = ({ className = '', variant = 'primary', children, ...props }) => {
   const variants = {
-    primary: 'bg-indigo-500/15 text-indigo-300 border-indigo-500/25',
-    secondary: 'bg-white/[0.05] text-zinc-300 border-white/[0.08]',
-    success: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/25',
-    warning: 'bg-amber-500/15 text-amber-300 border-amber-500/25',
-    danger: 'bg-rose-500/15 text-rose-300 border-rose-500/25',
-    cyan: 'bg-cyan-500/15 text-cyan-300 border-cyan-500/25',
-    amber: 'bg-amber-500/15 text-amber-300 border-amber-500/25'
+    primary: 'bg-indigo-500/15 text-indigo-600 dark:text-indigo-300 border-indigo-500/25',
+    secondary: 'bg-surface-subtle text-text-secondary border-border-subtle',
+    success: 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-300 border-emerald-500/25',
+    warning: 'bg-amber-500/15 text-amber-600 dark:text-amber-300 border-amber-500/25',
+    danger: 'bg-rose-500/15 text-rose-600 dark:text-rose-300 border-rose-500/25',
+    cyan: 'bg-cyan-500/15 text-cyan-600 dark:text-cyan-300 border-cyan-500/25',
+    amber: 'bg-amber-500/15 text-amber-600 dark:text-amber-300 border-amber-500/25'
   };
 
   return (
@@ -226,20 +226,20 @@ export const Modal: React.FC<ModalProps> = ({
             exit={{ y: '100%', opacity: 0 }}
             transition={{ type: 'spring', damping: 28, stiffness: 350 }}
             className={`
-              relative w-full ${sizes[size]} bg-[#11151f] border-t sm:border border-white/[0.08] 
-              rounded-t-2xl sm:rounded-2xl shadow-2xl shadow-black/90 flex flex-col 
-              max-h-[90dvh] sm:max-h-[85vh] overflow-hidden z-10 pb-safe
+              relative w-full ${sizes[size]} bg-surface-card border-t sm:border border-border-subtle 
+              rounded-t-2xl sm:rounded-2xl shadow-2xl flex flex-col 
+              max-h-[90dvh] sm:max-h-[85vh] overflow-hidden z-10 pb-safe text-text-primary
             `}
           >
             {/* Mobile Sheet Drag Indicator */}
-            <div className="sm:hidden w-full flex justify-center pt-2 pb-1 bg-[#0d1017]">
-              <div className="w-10 h-1 rounded-full bg-zinc-700/60" />
+            <div className="sm:hidden w-full flex justify-center pt-2 pb-1 bg-surface-subtle">
+              <div className="w-10 h-1 rounded-full bg-border-medium" />
             </div>
 
             {/* Modal Header */}
-            <div className="flex items-center justify-between px-4 sm:px-6 py-3 sm:py-4 border-b border-white/[0.06] bg-[#0d1017]">
+            <div className="flex items-center justify-between px-4 sm:px-6 py-3 sm:py-4 border-b border-border-subtle bg-surface-subtle">
               {title ? (
-                <h3 className="font-semibold text-sm sm:text-base text-white truncate">
+                <h3 className="font-semibold text-sm sm:text-base text-text-primary truncate">
                   {title}
                 </h3>
               ) : (
@@ -247,7 +247,7 @@ export const Modal: React.FC<ModalProps> = ({
               )}
               <button
                 onClick={onClose}
-                className="w-8 h-8 rounded-full flex items-center justify-center text-zinc-400 hover:text-white hover:bg-white/[0.06] transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer"
+                className="w-8 h-8 rounded-full flex items-center justify-center text-text-secondary hover:text-text-primary hover:bg-surface-hover transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer"
                 aria-label="Tutup Dialog"
               >
                 <X size={16} />
@@ -292,7 +292,7 @@ export const Tooltip: React.FC<TooltipProps> = ({ content, children }) => {
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 5 }}
             transition={{ duration: 0.15 }}
-            className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-3 py-1.5 bg-zinc-950 border border-zinc-800 text-zinc-300 font-mono text-[10px] font-bold uppercase tracking-wider rounded-[6px] whitespace-nowrap z-50 shadow-xl pointer-events-none"
+            className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-3 py-1.5 bg-surface-elevated border border-border-medium text-text-primary font-mono text-[10px] font-bold uppercase tracking-wider rounded-[6px] whitespace-nowrap z-50 shadow-xl pointer-events-none"
           >
             {content}
           </motion.div>
@@ -314,10 +314,10 @@ interface EmptyStateProps {
 
 export const EmptyState: React.FC<EmptyStateProps> = ({ icon, title, description, action }) => {
   return (
-    <div className="flex flex-col items-center justify-center text-center p-8 md:p-12 border border-zinc-800/50 border-dashed rounded-[16px] bg-zinc-900/10 backdrop-blur-sm">
-      {icon && <div className="text-zinc-600 mb-4">{icon}</div>}
-      <h3 className="font-display font-bold text-sm tracking-widest text-zinc-300 uppercase mb-2">{title}</h3>
-      <p className="text-xs text-zinc-500 max-w-sm leading-relaxed mb-6">{description}</p>
+    <div className="flex flex-col items-center justify-center text-center p-8 md:p-12 border border-border-medium border-dashed rounded-[16px] bg-surface-card/40 backdrop-blur-sm">
+      {icon && <div className="text-text-muted mb-4">{icon}</div>}
+      <h3 className="font-display font-bold text-sm tracking-widest text-text-primary uppercase mb-2">{title}</h3>
+      <p className="text-xs text-text-muted max-w-sm leading-relaxed mb-6">{description}</p>
       {action && <div>{action}</div>}
     </div>
   );
@@ -334,7 +334,7 @@ export const LoadingState: React.FC<LoadingStateProps> = ({ message = 'Memproses
   return (
     <div className="flex flex-col items-center justify-center py-12 px-6 gap-3.5">
       <Loader2 className="w-8 h-8 animate-spin text-indigo-500" />
-      <span className="font-mono text-xs text-zinc-400 tracking-widest uppercase animate-pulse">
+      <span className="font-mono text-xs text-text-secondary tracking-widest uppercase animate-pulse">
         {message}
       </span>
     </div>
@@ -362,7 +362,7 @@ export const ErrorState: React.FC<ErrorStateProps> = ({
       </div>
       <div>
         <h3 className="font-display font-black text-sm md:text-base text-red-400 tracking-wider uppercase mb-1">{title}</h3>
-        <p className="text-xs text-zinc-400 leading-relaxed font-sans">{message}</p>
+        <p className="text-xs text-text-muted leading-relaxed font-sans">{message}</p>
       </div>
       {onRetry && (
         <Button variant="danger" size="sm" onClick={onRetry} className="mt-2 flex items-center gap-2">
@@ -386,15 +386,15 @@ interface SectionHeadingProps {
 
 export const SectionHeading: React.FC<SectionHeadingProps> = ({ icon, title, subtitle, action }) => {
   return (
-    <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-6 border-b border-zinc-800/50 pb-4">
+    <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-6 border-b border-border-subtle pb-4">
       <div className="flex items-start gap-3">
         {icon && <div className="mt-1 flex items-center justify-center shrink-0">{icon}</div>}
         <div>
-          <h2 className="font-display font-black text-lg md:text-xl text-white tracking-widest uppercase leading-none mb-1.5">
+          <h2 className="font-display font-black text-lg md:text-xl text-text-primary tracking-widest uppercase leading-none mb-1.5">
             {title}
           </h2>
           {subtitle && (
-            <p className="text-xs text-zinc-500 uppercase tracking-wider font-mono">
+            <p className="text-xs text-text-muted uppercase tracking-wider font-mono">
               {subtitle}
             </p>
           )}
@@ -416,7 +416,7 @@ interface IconButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> 
 
 export const IconButton = React.forwardRef<HTMLButtonElement, IconButtonProps>(
   ({ className = '', icon, variant = 'secondary', size = 'md', ...props }, ref) => {
-    const baseStyle = 'inline-flex items-center justify-center font-bold tracking-wide transition-all duration-200 select-none cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950 disabled:opacity-50 disabled:pointer-events-none active:scale-[0.96]';
+    const baseStyle = 'inline-flex items-center justify-center font-bold tracking-wide transition-all duration-200 select-none cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 focus-visible:ring-offset-bg-base disabled:opacity-50 disabled:pointer-events-none active:scale-[0.96]';
     
     const sizes = {
       sm: 'w-8 h-8 rounded-[6px] text-xs',
@@ -426,10 +426,10 @@ export const IconButton = React.forwardRef<HTMLButtonElement, IconButtonProps>(
 
     const variants = {
       primary: 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-md border border-indigo-500/30',
-      secondary: 'bg-zinc-900 hover:bg-zinc-800 text-zinc-100 border border-zinc-800/80',
-      outline: 'bg-transparent hover:bg-zinc-900 text-zinc-200 border border-zinc-800',
-      ghost: 'bg-transparent hover:bg-zinc-900/60 text-zinc-400 hover:text-zinc-100',
-      danger: 'bg-red-600 hover:bg-red-500 text-white shadow-md border border-red-500/30',
+      secondary: 'bg-surface-subtle hover:bg-surface-card-hover text-text-primary border border-border-subtle',
+      outline: 'bg-transparent hover:bg-surface-hover text-text-primary border border-border-medium',
+      ghost: 'bg-transparent hover:bg-surface-hover text-text-secondary hover:text-text-primary',
+      danger: 'bg-rose-600 hover:bg-rose-500 text-white shadow-md border border-rose-500/30',
       cyan: 'bg-cyan-600 hover:bg-cyan-500 text-white shadow-md border border-cyan-500/30'
     };
 
@@ -457,15 +457,15 @@ export const SearchInput = React.forwardRef<HTMLInputElement, SearchInputProps>(
   ({ className = '', ...props }, ref) => {
     return (
       <div className="relative w-full">
-        <div className="absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-500 flex items-center justify-center pointer-events-none">
+        <div className="absolute left-3.5 top-1/2 -translate-y-1/2 text-text-muted flex items-center justify-center pointer-events-none">
           <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
         </div>
         <input
           ref={ref}
           type="text"
           className={`
-            w-full bg-zinc-950 border border-zinc-800 text-zinc-100 font-sans text-xs rounded-full pl-10 pr-4.5 py-2.5
-            placeholder:text-zinc-600 transition-all focus:outline-none focus:border-indigo-500
+            w-full bg-surface-sunken border border-border-medium text-text-primary font-sans text-xs rounded-full pl-10 pr-4.5 py-2.5
+            placeholder:text-text-muted transition-all focus:outline-none focus:border-indigo-500
             focus:ring-2 focus:ring-indigo-500/20 focus:ring-offset-0 disabled:opacity-50 disabled:pointer-events-none
             ${className}
           `}
@@ -490,7 +490,7 @@ export const Select = React.forwardRef<HTMLSelectElement, SelectProps>(
     return (
       <div className="flex flex-col gap-1.5 w-full">
         {label && (
-          <label className="text-xs font-mono font-bold text-zinc-400 uppercase tracking-wider">
+          <label className="text-xs font-mono font-bold text-text-secondary uppercase tracking-wider">
             {label}
           </label>
         )}
@@ -498,19 +498,19 @@ export const Select = React.forwardRef<HTMLSelectElement, SelectProps>(
           <select
             ref={ref}
             className={`
-              w-full bg-zinc-950 border border-zinc-800 text-zinc-300 text-xs font-bold uppercase tracking-wider rounded-[10px] px-3.5 py-2.5 pr-10
+              w-full bg-surface-sunken border border-border-medium text-text-primary text-xs font-bold uppercase tracking-wider rounded-[10px] px-3.5 py-2.5 pr-10
               focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 cursor-pointer appearance-none
               ${className}
             `}
             {...props}
           >
             {options.map((opt) => (
-              <option key={opt.value} value={opt.value} className="bg-zinc-950 text-zinc-300">
+              <option key={opt.value} value={opt.value} className="bg-surface-elevated text-text-primary">
                 {opt.label}
               </option>
             ))}
           </select>
-          <div className="absolute right-3.5 top-1/2 -translate-y-1/2 pointer-events-none text-zinc-500">
+          <div className="absolute right-3.5 top-1/2 -translate-y-1/2 pointer-events-none text-text-muted">
             <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6"/></svg>
           </div>
         </div>
@@ -533,7 +533,7 @@ export const Switch: React.FC<SwitchProps> = ({ className = '', label, checked, 
   return (
     <label className={`flex items-center justify-between cursor-pointer group select-none gap-4 ${className}`}>
       {label && (
-        <span className="text-xs font-mono font-bold text-zinc-300 uppercase tracking-wider font-sans">
+        <span className="text-xs font-mono font-bold text-text-primary uppercase tracking-wider font-sans">
           {label}
         </span>
       )}
@@ -545,7 +545,7 @@ export const Switch: React.FC<SwitchProps> = ({ className = '', label, checked, 
           className="sr-only"
           {...props}
         />
-        <div className={`w-10 h-6 rounded-full transition-colors duration-200 border border-zinc-800 ${checked ? 'bg-indigo-600' : 'bg-zinc-950'}`}></div>
+        <div className={`w-10 h-6 rounded-full transition-colors duration-200 border border-border-subtle ${checked ? 'bg-indigo-600' : 'bg-surface-sunken'}`}></div>
         <div className={`absolute top-1 left-1 w-4 h-4 rounded-full bg-white transition-transform duration-200 shadow-md ${checked ? 'translate-x-4' : 'translate-x-0'}`}></div>
       </div>
     </label>
@@ -582,20 +582,20 @@ export const BottomSheet: React.FC<BottomSheetProps> = ({ isOpen, onClose, title
             animate={{ y: 0 }}
             exit={{ y: '100%' }}
             transition={{ type: 'spring', damping: 25, stiffness: 220 }}
-            className="relative w-full max-w-lg bg-zinc-900 border-t border-zinc-800 rounded-t-[20px] shadow-2xl flex flex-col max-h-[85vh] overflow-hidden z-10"
+            className="relative w-full max-w-lg bg-surface-card border-t border-border-subtle rounded-t-[20px] shadow-2xl flex flex-col max-h-[85vh] overflow-hidden z-10 text-text-primary"
           >
             {/* Grabber handle bar for swipe down intuition */}
-            <div className="w-12 h-1.5 bg-zinc-800 rounded-full mx-auto my-3 cursor-pointer" onClick={onClose} />
+            <div className="w-12 h-1.5 bg-border-medium rounded-full mx-auto my-3 cursor-pointer" onClick={onClose} />
             
             {/* Header */}
             {title && (
-              <div className="flex items-center justify-between px-6 pb-4 border-b border-zinc-800/80">
-                <h3 className="font-display font-black text-sm tracking-widest text-white uppercase truncate">
+              <div className="flex items-center justify-between px-6 pb-4 border-b border-border-subtle">
+                <h3 className="font-display font-black text-sm tracking-widest text-text-primary uppercase truncate">
                   {title}
                 </h3>
                 <button
                   onClick={onClose}
-                  className="p-1.5 text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 rounded-[6px] transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  className="p-1.5 text-text-secondary hover:text-text-primary hover:bg-surface-hover rounded-[6px] transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500"
                   aria-label="Tutup"
                 >
                   <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
@@ -626,13 +626,13 @@ interface ProgressBarProps {
 export const ProgressBar: React.FC<ProgressBarProps> = ({ progress, colorTheme = '#6366f1', className = '' }) => {
   const pct = Math.min(100, Math.max(0, progress));
   return (
-    <div className={`w-full h-2 bg-zinc-950 rounded-full overflow-hidden border border-zinc-800 p-[1px] ${className}`}>
+    <div className={`w-full h-2 bg-surface-sunken rounded-full overflow-hidden border border-border-subtle p-[1px] ${className}`}>
       <div
         className="h-full rounded-full transition-all duration-500 ease-out relative"
         style={{ 
           width: `${pct}%`,
           backgroundColor: colorTheme,
-          boxShadow: `0 0 10px ${colorTheme}40`
+          boxShadow: `0 0 10px ${colorTheme}30`
         }}
       >
         <div className="absolute inset-0 bg-white/10 animate-pulse mix-blend-overlay"></div>
@@ -656,6 +656,6 @@ export const Skeleton: React.FC<SkeletonProps> = ({ className = '', variant = 'r
     circle: 'w-12 h-12 rounded-full'
   };
   return (
-    <div className={`animate-pulse bg-zinc-800/40 border border-zinc-800/20 ${shapes[variant]} ${className}`} />
+    <div className={`animate-pulse bg-surface-subtle border border-border-subtle ${shapes[variant]} ${className}`} />
   );
 };

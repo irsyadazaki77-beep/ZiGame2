@@ -8,6 +8,7 @@ import { storageService } from '../services/storageService';
 import { scoreService } from '../services/scoreService';
 import { audio } from '../utils/audio';
 import { auth, isFirebaseReady } from '../services/firebase';
+import { logger } from '../utils/logger';
 
 export const useGameProgress = (
   profile: PlayerProfile,
@@ -133,7 +134,7 @@ export const useGameProgress = (
     const isOfflineProfile = activeUser && activeUser !== auth?.currentUser?.uid && activeUser !== auth?.currentUser?.email;
 
     if (!isFirebaseReady() || !auth?.currentUser || isOfflineProfile) {
-      console.log('Offline/Local profile detected. Score saved locally, not submitted to public cloud leaderboard.');
+      logger.info('Offline/Local profile detected. Score saved locally, not submitted to public cloud leaderboard.');
     } else {
       const result = await scoreService.submitScore({
         gameId,
@@ -144,7 +145,7 @@ export const useGameProgress = (
       });
 
       if (!result.success) {
-        console.warn('Score rejected by server:', result.message);
+        logger.warn('Score rejected by server:', { message: result.message });
         showToast('Skor Ditolak', result.message || 'Gagal memvalidasi sesi', 'error');
         return; // Don't save if server rejects
       }

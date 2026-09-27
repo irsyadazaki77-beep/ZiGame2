@@ -5,15 +5,38 @@ import { PlayerProfile, GameStats, Achievement, RecentlyPlayedEntry } from './ty
 import { useToast } from './utils/ToastContext';
 import { AdminRoute } from './components/AdminRoute';
 
-// Lazy Loaded Pages
-const Home = React.lazy(() => import('./pages/Home'));
-const GamesPage = React.lazy(() => import('./pages/GamesPage'));
-const ChallengesPage = React.lazy(() => import('./pages/ChallengesPage'));
-const LeaderboardPage = React.lazy(() => import('./pages/LeaderboardPage'));
-const ProfilePage = React.lazy(() => import('./pages/ProfilePage'));
-const GamePage = React.lazy(() => import('./pages/GamePage'));
-const Shop = React.lazy(() => import('./pages/Shop'));
-const AdminDashboard = React.lazy(() => import('./pages/AdminDashboard'));
+// Lazy Loaded Pages with automatic retry on dynamic import failure
+function lazyWithRetry<T extends React.ComponentType<any>>(
+  factory: () => Promise<{ default: T }>
+) {
+  return React.lazy(async () => {
+    try {
+      return await factory();
+    } catch (error) {
+      try {
+        // Retry factory import once
+        return await factory();
+      } catch (retryErr) {
+        // Force reload if stale Vite module graph cache
+        const reloadKey = 'zigame_reload_' + window.location.pathname;
+        if (!sessionStorage.getItem(reloadKey)) {
+          sessionStorage.setItem(reloadKey, 'true');
+          window.location.reload();
+        }
+        throw retryErr;
+      }
+    }
+  });
+}
+
+const Home = lazyWithRetry(() => import('./pages/Home'));
+const GamesPage = lazyWithRetry(() => import('./pages/GamesPage'));
+const ChallengesPage = lazyWithRetry(() => import('./pages/ChallengesPage'));
+const LeaderboardPage = lazyWithRetry(() => import('./pages/LeaderboardPage'));
+const ProfilePage = lazyWithRetry(() => import('./pages/ProfilePage'));
+const GamePage = lazyWithRetry(() => import('./pages/GamePage'));
+const Shop = lazyWithRetry(() => import('./pages/Shop'));
+const AdminDashboard = lazyWithRetry(() => import('./pages/AdminDashboard'));
 
 export function AppRoutes() {
   const {

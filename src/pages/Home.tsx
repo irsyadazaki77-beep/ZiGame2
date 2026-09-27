@@ -130,25 +130,25 @@ export default function Home({
 
       {/* 1. Editorial Spotlight Hero Banner */}
       {spotlightGame && (
-        <section className="relative rounded-2xl sm:rounded-3xl overflow-hidden border border-white/[0.08] bg-[#11151f] shadow-2xl shadow-black/60">
+        <section className="relative rounded-2xl sm:rounded-3xl overflow-hidden border border-border-subtle bg-surface-card shadow-xl">
           <div className="absolute inset-0">
             <GameArtwork game={spotlightGame} className="opacity-30 blur-sm scale-105" />
-            <div className="absolute inset-0 bg-gradient-to-r from-[#090b10] via-[#090b10]/85 to-transparent" />
-            <div className="absolute inset-0 bg-gradient-to-t from-[#090b10] via-transparent to-transparent" />
+            <div className="absolute inset-0 bg-gradient-to-r from-surface-card via-surface-card/85 to-transparent" />
+            <div className="absolute inset-0 bg-gradient-to-t from-surface-card via-transparent to-transparent" />
           </div>
 
           <div className="relative z-10 p-5 sm:p-8 lg:p-10 flex flex-col md:flex-row items-start md:items-center justify-between gap-5 sm:gap-6">
             <div className="max-w-xl space-y-2.5 sm:space-y-3">
-              <div className="inline-flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3 py-1 rounded-full bg-white/[0.06] border border-white/[0.08] text-indigo-300 text-[11px] sm:text-xs font-medium">
-                <Sparkles size={12} className="text-indigo-400 shrink-0" />
+              <div className="inline-flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3 py-1 rounded-full bg-indigo-500/10 border border-indigo-500/20 text-indigo-500 text-[11px] sm:text-xs font-semibold">
+                <Sparkles size={12} className="text-indigo-500 shrink-0" />
                 <span>Pilihan Utama Hari Ini</span>
               </div>
 
-              <h1 className="text-2xl sm:text-3xl lg:text-4xl font-extrabold text-white tracking-tight">
+              <h1 className="text-2xl sm:text-3xl lg:text-4xl font-extrabold text-text-primary tracking-tight">
                 {spotlightGame.title}
               </h1>
 
-              <p className="text-zinc-300 text-xs sm:text-sm lg:text-base leading-relaxed font-normal line-clamp-2 sm:line-clamp-none">
+              <p className="text-text-secondary text-xs sm:text-sm lg:text-base leading-relaxed font-normal line-clamp-2 sm:line-clamp-none">
                 {spotlightGame.description}
               </p>
 
@@ -162,7 +162,7 @@ export default function Home({
                 </button>
                 <button
                   onClick={() => { audio.playCoin(); navigate('/games'); }}
-                  className="px-4 sm:px-5 py-2.5 sm:py-3 rounded-xl bg-white/[0.06] hover:bg-white/[0.1] border border-white/[0.08] text-zinc-200 hover:text-white font-semibold text-xs sm:text-sm transition cursor-pointer"
+                  className="px-4 sm:px-5 py-2.5 sm:py-3 rounded-xl bg-surface-subtle hover:bg-surface-hover border border-border-subtle text-text-primary font-semibold text-xs sm:text-sm transition cursor-pointer"
                 >
                   Jelajahi Semua
                 </button>
@@ -171,18 +171,18 @@ export default function Home({
 
             {/* Quick Stats Pill */}
             <div className="hidden lg:flex flex-col items-end gap-2 shrink-0">
-              <div className="bg-black/50 backdrop-blur-md border border-white/[0.08] p-4 rounded-2xl space-y-2 min-w-[200px]">
-                <div className="flex items-center justify-between text-xs text-zinc-400">
+              <div className="bg-surface-elevated/90 backdrop-blur-md border border-border-medium p-4 rounded-2xl space-y-2 min-w-[200px]">
+                <div className="flex items-center justify-between text-xs text-text-muted">
                   <span>Tingkat Kesulitan</span>
-                  <span className="font-semibold text-zinc-200">{spotlightGame.difficulty || 'Medium'}</span>
+                  <span className="font-semibold text-text-primary">{spotlightGame.difficulty || 'Medium'}</span>
                 </div>
-                <div className="flex items-center justify-between text-xs text-zinc-400">
+                <div className="flex items-center justify-between text-xs text-text-muted">
                   <span>Dimainkan</span>
-                  <span className="font-semibold text-zinc-200">{(spotlightGame.plays || 0).toLocaleString()} kali</span>
+                  <span className="font-semibold text-text-primary">{(spotlightGame.plays || 0).toLocaleString()} kali</span>
                 </div>
-                <div className="flex items-center justify-between text-xs text-zinc-400 pt-1 border-t border-white/[0.06]">
+                <div className="flex items-center justify-between text-xs text-text-muted pt-1 border-t border-border-subtle">
                   <span>Skor Tertinggi</span>
-                  <span className="font-semibold text-amber-400">{(spotlightGame.highScore || 0).toLocaleString()} pts</span>
+                  <span className="font-semibold text-amber-500">{(spotlightGame.highScore || 0).toLocaleString()} pts</span>
                 </div>
               </div>
             </div>
@@ -195,35 +195,35 @@ export default function Home({
         {/* Lanjutkan Bermain */}
         <div className="lg:col-span-7 flex flex-col">
           {lastPlayedGame ? (
-            <div className="bg-[#11151f] border border-white/[0.06] hover:border-white/[0.12] p-4 sm:p-6 rounded-2xl flex-1 flex flex-col justify-between transition-colors relative">
+            <div className="bg-surface-card border border-border-subtle hover:border-border-medium p-4 sm:p-6 rounded-2xl flex-1 flex flex-col justify-between transition-colors relative shadow-xs">
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-semibold text-indigo-400 flex items-center gap-1.5">
+                  <span className="text-xs font-semibold text-indigo-500 flex items-center gap-1.5">
                     Lanjutkan Bermain
                   </span>
-                  <span className="text-xs text-zinc-400">
+                  <span className="text-xs text-text-muted">
                     {lastPlayedGame.genre}
                   </span>
                 </div>
 
                 <div className="flex items-center gap-3 sm:gap-4">
-                  <div className="w-11 h-11 sm:w-12 sm:h-12 bg-[#181c2b] border border-white/[0.08] rounded-xl flex items-center justify-center text-xl sm:text-2xl shrink-0">
+                  <div className="w-11 h-11 sm:w-12 sm:h-12 bg-surface-sunken border border-border-subtle rounded-xl flex items-center justify-center text-xl sm:text-2xl shrink-0">
                     {lastPlayedGame.icon}
                   </div>
                   <div className="min-w-0">
-                    <h3 className="font-semibold text-sm sm:text-base text-white truncate">
+                    <h3 className="font-semibold text-sm sm:text-base text-text-primary truncate">
                       {lastPlayedGame.title}
                     </h3>
-                    <p className="text-xs text-zinc-400 line-clamp-1 mt-0.5">
+                    <p className="text-xs text-text-muted line-clamp-1 mt-0.5">
                       {lastPlayedGame.description}
                     </p>
                   </div>
                 </div>
 
-                <div className="flex items-center gap-3 text-xs text-zinc-400 pt-1">
-                  <div>Skor Terakhir: <span className="text-amber-400 font-semibold">{lastPlayedGameEntry.lastScore !== undefined ? lastPlayedGameEntry.lastScore : lastPlayedGame.highScore}</span></div>
-                  <div className="text-zinc-600">•</div>
-                  <div>Rekor: <span className="text-zinc-200 font-semibold">{lastPlayedGame.highScore}</span></div>
+                <div className="flex items-center gap-3 text-xs text-text-muted pt-1">
+                  <div>Skor Terakhir: <span className="text-amber-500 font-semibold">{lastPlayedGameEntry.lastScore !== undefined ? lastPlayedGameEntry.lastScore : lastPlayedGame.highScore}</span></div>
+                  <div className="text-text-muted opacity-40">•</div>
+                  <div>Rekor: <span className="text-text-primary font-semibold">{lastPlayedGame.highScore}</span></div>
                 </div>
               </div>
 
@@ -236,20 +236,20 @@ export default function Home({
                 </button>
                 <button
                   onClick={() => { audio.playCoin(); navigate('/games'); }}
-                  className="px-3.5 py-2 bg-white/[0.05] hover:bg-white/[0.08] border border-white/[0.06] text-zinc-300 font-semibold text-xs rounded-xl transition cursor-pointer"
+                  className="px-3.5 py-2 bg-surface-subtle hover:bg-surface-hover border border-border-subtle text-text-primary font-semibold text-xs rounded-xl transition cursor-pointer"
                 >
                   Pilih Lainnya
                 </button>
               </div>
             </div>
           ) : (
-            <div className="bg-[#11151f] border border-white/[0.06] p-5 sm:p-6 rounded-2xl text-center space-y-3 flex-1 flex flex-col justify-center items-center">
-              <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-xl bg-white/[0.04] border border-white/[0.06] flex items-center justify-center text-lg sm:text-xl">
+            <div className="bg-surface-card border border-border-subtle p-5 sm:p-6 rounded-2xl text-center space-y-3 flex-1 flex flex-col justify-center items-center shadow-xs">
+              <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-xl bg-surface-subtle border border-border-subtle flex items-center justify-center text-lg sm:text-xl">
                 🎮
               </div>
               <div>
-                <h4 className="text-xs sm:text-sm font-semibold text-white">Mulai Permainan Pertama Anda</h4>
-                <p className="text-xs text-zinc-400 mt-0.5">Pilih game dari perpustakaan dan ciptakan rekor skor perdana Anda!</p>
+                <h4 className="text-xs sm:text-sm font-semibold text-text-primary">Mulai Permainan Pertama Anda</h4>
+                <p className="text-xs text-text-muted mt-0.5">Pilih game dari perpustakaan dan ciptakan rekor skor perdana Anda!</p>
               </div>
               <button
                 onClick={() => { audio.playCoin(); navigate('/games'); }}
@@ -264,27 +264,27 @@ export default function Home({
         {/* Daily Challenge */}
         <div className="lg:col-span-5 flex flex-col">
           {dailyChallengeToHighlight ? (
-            <div className="bg-[#11151f] border border-white/[0.06] p-4 sm:p-6 rounded-2xl flex-1 flex flex-col justify-between">
+            <div className="bg-surface-card border border-border-subtle p-4 sm:p-6 rounded-2xl flex-1 flex flex-col justify-between shadow-xs">
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-semibold text-amber-400 flex items-center gap-1.5">
+                  <span className="text-xs font-semibold text-amber-500 flex items-center gap-1.5">
                     <Target size={14} />
                     Tantangan Harian
                   </span>
-                  <span className="text-xs text-zinc-400">
+                  <span className="text-xs text-text-muted">
                     +{dailyChallengeToHighlight.rewardCoins} koin
                   </span>
                 </div>
 
                 <div className="flex items-start gap-3">
-                  <span className="text-xl sm:text-2xl w-9 h-9 sm:w-10 sm:h-10 bg-[#181c2b] border border-white/[0.06] rounded-xl flex items-center justify-center shrink-0">
+                  <span className="text-xl sm:text-2xl w-9 h-9 sm:w-10 sm:h-10 bg-surface-sunken border border-border-subtle rounded-xl flex items-center justify-center shrink-0">
                     {dailyChallengeToHighlight.icon}
                   </span>
                   <div>
-                    <h4 className="text-xs sm:text-sm font-semibold text-white">
+                    <h4 className="text-xs sm:text-sm font-semibold text-text-primary">
                       {dailyChallengeToHighlight.title}
                     </h4>
-                    <p className="text-xs text-zinc-400 mt-0.5 line-clamp-2 leading-relaxed">
+                    <p className="text-xs text-text-muted mt-0.5 line-clamp-2 leading-relaxed">
                       {dailyChallengeToHighlight.description}
                     </p>
                   </div>
@@ -292,11 +292,11 @@ export default function Home({
 
                 {/* Progress bar */}
                 <div className="space-y-1.5 pt-1">
-                  <div className="flex justify-between text-[11px] text-zinc-400">
+                  <div className="flex justify-between text-[11px] text-text-muted">
                     <span>Progres: {dailyChallengeToHighlight.progress} / {dailyChallengeToHighlight.target}</span>
                     <span>{Math.round((dailyChallengeToHighlight.progress / dailyChallengeToHighlight.target) * 100)}%</span>
                   </div>
-                  <div className="w-full h-1.5 bg-black/40 rounded-full overflow-hidden">
+                  <div className="w-full h-1.5 bg-surface-sunken rounded-full overflow-hidden">
                     <div 
                       className="h-full bg-amber-400 transition-all duration-300 rounded-full"
                       style={{ width: `${Math.min(100, (dailyChallengeToHighlight.progress / dailyChallengeToHighlight.target) * 100)}%` }}
@@ -316,7 +316,7 @@ export default function Home({
                 ) : (
                   <button
                     onClick={() => { audio.playCoin(); navigate('/challenges'); }}
-                    className="px-4 py-2 bg-white/[0.05] hover:bg-white/[0.08] border border-white/[0.06] text-zinc-300 font-semibold text-xs rounded-xl transition cursor-pointer"
+                    className="px-4 py-2 bg-surface-subtle hover:bg-surface-hover border border-border-subtle text-text-primary font-semibold text-xs rounded-xl transition cursor-pointer"
                   >
                     Lihat Semua Tantangan
                   </button>
@@ -324,10 +324,10 @@ export default function Home({
               </div>
             </div>
           ) : (
-            <div className="bg-[#11151f] border border-white/[0.06] p-5 sm:p-6 rounded-2xl text-center space-y-2 flex-1 flex flex-col justify-center items-center">
+            <div className="bg-surface-card border border-border-subtle p-5 sm:p-6 rounded-2xl text-center space-y-2 flex-1 flex flex-col justify-center items-center shadow-xs">
               <span className="text-2xl">🏆</span>
-              <h4 className="text-xs sm:text-sm font-semibold text-white">Semua Tantangan Selesai</h4>
-              <p className="text-xs text-zinc-400">Kembali lagi besok untuk misi dan hadiah koin baru!</p>
+              <h4 className="text-xs sm:text-sm font-semibold text-text-primary">Semua Tantangan Selesai</h4>
+              <p className="text-xs text-text-muted">Kembali lagi besok untuk misi dan hadiah koin baru!</p>
             </div>
           )}
         </div>
@@ -337,17 +337,17 @@ export default function Home({
       <section className="space-y-3.5 sm:space-y-4">
         <div className="flex justify-between items-center">
           <div>
-            <h2 className="text-base sm:text-lg font-bold text-white tracking-tight flex items-center gap-2">
-              <Trophy className="text-amber-400 w-4 h-4 shrink-0" />
+            <h2 className="text-base sm:text-lg font-bold text-text-primary tracking-tight flex items-center gap-2">
+              <Trophy className="text-amber-500 w-4 h-4 shrink-0" />
               Game Unggulan (Flagship)
             </h2>
-            <p className="text-[11px] sm:text-xs text-zinc-400 mt-0.5">
+            <p className="text-[11px] sm:text-xs text-text-muted mt-0.5">
               Koleksi permainan terbaik dengan kontrol presisi, audio haptik, dan performa 60 FPS
             </p>
           </div>
           <button
             onClick={() => { audio.playCoin(); navigate('/games'); }}
-            className="text-xs text-indigo-400 hover:text-indigo-300 font-medium transition flex items-center gap-1 cursor-pointer shrink-0"
+            className="text-xs text-indigo-500 hover:text-indigo-600 dark:hover:text-indigo-400 font-medium transition flex items-center gap-1 cursor-pointer shrink-0"
           >
             Lihat Katalog <ArrowRight size={13} />
           </button>
@@ -370,17 +370,17 @@ export default function Home({
       <section className="space-y-3.5 sm:space-y-4">
         <div className="flex justify-between items-center">
           <div>
-            <h2 className="text-base sm:text-lg font-bold text-white tracking-tight flex items-center gap-2">
-              <Star className="text-indigo-400 w-4 h-4 shrink-0" />
+            <h2 className="text-base sm:text-lg font-bold text-text-primary tracking-tight flex items-center gap-2">
+              <Star className="text-indigo-500 w-4 h-4 shrink-0" />
               Rekomendasi untuk Anda
             </h2>
-            <p className="text-[11px] sm:text-xs text-zinc-400 mt-0.5">
+            <p className="text-[11px] sm:text-xs text-text-muted mt-0.5">
               Disesuaikan dengan preferensi dan gaya bermain Anda
             </p>
           </div>
           <button
             onClick={() => { audio.playCoin(); navigate('/games'); }}
-            className="text-xs text-indigo-400 hover:text-indigo-300 font-medium transition flex items-center gap-1 cursor-pointer shrink-0"
+            className="text-xs text-indigo-500 hover:text-indigo-600 dark:hover:text-indigo-400 font-medium transition flex items-center gap-1 cursor-pointer shrink-0"
           >
             Semua Game <ArrowRight size={13} />
           </button>
@@ -403,25 +403,25 @@ export default function Home({
       {quickPlayGames.length > 0 && (
         <section className="space-y-3">
           <div className="flex items-center justify-between">
-            <h3 className="text-sm sm:text-base font-bold text-white flex items-center gap-2">
-              <Zap className="text-amber-400 w-4 h-4 shrink-0" />
+            <h3 className="text-sm sm:text-base font-bold text-text-primary flex items-center gap-2">
+              <Zap className="text-amber-500 w-4 h-4 shrink-0" />
               Main 5 Menit (Quick Play)
             </h3>
-            <span className="text-[11px] sm:text-xs text-zinc-400">Sesi kilat &amp; ringan (&lt; 3 menit)</span>
+            <span className="text-[11px] sm:text-xs text-text-muted">Sesi kilat &amp; ringan (&lt; 3 menit)</span>
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2.5 sm:gap-3">
             {quickPlayGames.map(game => (
               <div
                 key={game.id}
                 onClick={() => onSelectGame(game.id)}
-                className="overflow-hidden bg-[#11151f] hover:bg-[#161c2c] border border-white/[0.06] hover:border-white/[0.12] rounded-xl cursor-pointer group transition-all flex flex-col h-full"
+                className="overflow-hidden bg-surface-card hover:bg-surface-card-hover border border-border-subtle hover:border-border-medium rounded-xl cursor-pointer group transition-all flex flex-col h-full shadow-xs"
               >
                 <div className="h-20 sm:h-24 w-full relative">
                   <GameArtwork game={game} />
                 </div>
                 <div className="p-2 sm:p-3">
-                  <div className="font-semibold text-xs text-zinc-200 group-hover:text-white truncate">{game.title}</div>
-                  <div className="text-[10px] sm:text-[11px] text-zinc-400 mt-0.5">{game.genre || 'Arcade'}</div>
+                  <div className="font-semibold text-xs text-text-primary group-hover:text-indigo-500 transition-colors truncate">{game.title}</div>
+                  <div className="text-[10px] sm:text-[11px] text-text-muted mt-0.5">{game.genre || 'Arcade'}</div>
                 </div>
               </div>
             ))}

@@ -47,7 +47,10 @@ export default function CosmicDodgeGame({ onScoreUpdate, onGameOver, highScore }
     startLoop,
     triggerGameOver,
     updateScore,
-    setupCanvasContext
+    setupCanvasContext,
+    startWithCountdown,
+    resumeGame,
+    countdown
   } = useGameEngine({
     onScoreUpdate,
     onGameOver
@@ -198,13 +201,15 @@ export default function CosmicDodgeGame({ onScoreUpdate, onGameOver, highScore }
   }, [setupCanvasContext, triggerGameOver, updateScore, playerY]);
 
   const handleStart = () => {
-    playerXRef.current = 180;
-    objectsRef.current = [];
-    particlesRef.current = [];
-    spawnTimerRef.current = 0;
-    keysPressedRef.current = {};
-    localScoreRef.current = 0;
-    startLoop(gameStep);
+    startWithCountdown(() => {
+      playerXRef.current = 180;
+      objectsRef.current = [];
+      particlesRef.current = [];
+      spawnTimerRef.current = 0;
+      keysPressedRef.current = {};
+      localScoreRef.current = 0;
+      startLoop(gameStep);
+    });
   };
 
   useEffect(() => {
@@ -262,8 +267,11 @@ export default function CosmicDodgeGame({ onScoreUpdate, onGameOver, highScore }
       <GameOverlay
         gameState={gameState}
         score={localScoreRef.current}
+        highScore={highScore}
         onStart={handleStart}
         onRestart={handleStart}
+        onResume={resumeGame}
+        countdown={countdown}
         instructions="AMBIL BINTANG, HINDARI METEOR MERAH"
       />
       

@@ -48,10 +48,16 @@ export function sendApiError(
 }
 
 export function handleServerException(err: unknown, req: Request, res: Response) {
-  if (err instanceof ApiError) {
-    return sendApiError(res, err.status, err.code, err.message, {
-      ...err.details,
-      requestId: req.id || err.requestId
+  if (
+    err instanceof ApiError || 
+    (typeof err === 'object' && err !== null && 'status' in err && 'code' in err && typeof (err as any).status === 'number')
+  ) {
+
+
+    const apiErr = err as ApiError;
+    return sendApiError(res, apiErr.status, apiErr.code, apiErr.message, {
+      ...apiErr.details,
+      requestId: req.id || apiErr.requestId
     });
   }
 

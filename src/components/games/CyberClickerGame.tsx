@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { audio } from '../../utils/audio';
+import { useGameEngine } from '../../hooks/useGameEngine';
 import { GameContainer } from '../gameplay/GameContainer';
 import { GameHUD } from '../gameplay/GameHUD';
 import { GameOverlay } from '../gameplay/GameOverlay';
@@ -20,8 +21,21 @@ interface Upgrade {
 }
 
 export default function CyberClickerGame({ onGameOver, onScoreUpdate, highScore }: GameProps) {
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [energy, setEnergy] = useState(0);
+  const {
+    gameState,
+    score,
+    addScore,
+    startWithCountdown,
+    countdown,
+    triggerGameOver,
+    pauseGame,
+    resumeGame,
+  } = useGameEngine({
+    gameId: 'cyberclicker',
+    onGameOver,
+    onScoreUpdate,
+  });
+
   const [cps, setCps] = useState(0);
   const [timeLeft, setTimeLeft] = useState(60);
   const [isFever, setIsFever] = useState(false);
@@ -39,23 +53,17 @@ export default function CyberClickerGame({ onGameOver, onScoreUpdate, highScore 
 
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const cpsRef = useRef<NodeJS.Timeout | null>(null);
-  const energyRef = useRef(0);
-
-  useEffect(() => {
-    energyRef.current = energy;
-    onScoreUpdate(Math.floor(energy));
-  }, [energy, onScoreUpdate]);
 
   // Click handler
   const handleClick = (e: React.MouseEvent<HTMLButtonElement>) => {
-    if (!isPlaying) return;
+    if (gameState !== 'playing') return;
     audio.playCoin();
     
     const clickPower = 1 + upgrades.reduce((sum, up) => sum + up.count * (up.cps * 0.1), 0);
     const multiplier = isFever ? 5 : 1;
     const gained = clickPower * multiplier;
 
-    setEnergy(prev => prev + gained);
+    addScore(gained);
     setClicksCount(prev => prev + 1);
     
     // Fever charge
@@ -104,14 +112,14 @@ export default function CyberClickerGame({ onGameOver, onScoreUpdate, highScore 
   };
 
   const buyUpgrade = (id: string) => {
-    if (!isPlaying) return;
+    if (gameState !== 'playing') return;
     const upIndex = upgrades.findIndex(u => u.id === id);
     if (upIndex === -1) return;
     const upgrade = upgrades[upIndex];
 
-    if (energy >= upgrade.cost) {
+    if (score >= upgrade.cost) {
       audio.playScore();
-      setEnergy(prev => prev - upgrade.cost);
+      addScore(-upgrade.cost);
       
       const updated = [...upgrades];
       updated[upIndex] = {
@@ -130,7 +138,7 @@ export default function CyberClickerGame({ onGameOver, onScoreUpdate, highScore 
 
   // Main game timer
   useEffect(() => {
-    if (isPlaying) {
+    if (gameState === 'playing') {
       timerRef.current = setInterval(() => {
         setTimeLeft(prev => {
           if (prev <= 1) {
@@ -155,7 +163,7 @@ export default function CyberClickerGame({ onGameOver, onScoreUpdate, highScore 
         const upgradePower = upgrades.reduce((sum, u) => sum + u.count * u.cps, 0);
         if (upgradePower > 0) {
           const tickGain = (upgradePower / 10) * (isFever ? 2 : 1);
-          setEnergy(prev => prev + tickGain);
+          addScore(tickGain);
         }
       }, 100);
     }
@@ -164,54 +172,52 @@ export default function CyberClickerGame({ onGameOver, onScoreUpdate, highScore 
       if (timerRef.current) clearInterval(timerRef.current);
       if (cpsRef.current) clearInterval(cpsRef.current);
     };
-  }, [isPlaying, upgrades, isFever]);
+  }, [gameState, upgrades, isFever]);
 
   const startGame = () => {
-    audio.playCoin();
-    setEnergy(0);
-    setCps(0);
-    setTimeLeft(60);
-    setIsFever(false);
-    setFeverProgress(0);
-    setClicksCount(0);
-    setUpgrades([
-      { id: 'extractor', name: 'Auto-Extractor', cost: 15, cps: 1, count: 0, icon: '⚡' },
-      { id: 'overclocker', name: 'Quantum Overclocker', cost: 100, cps: 8, count: 0, icon: '🌀' },
-      { id: 'condenser', name: 'Gravity Condenser', cost: 500, cps: 45, count: 0, icon: '🌌' },
-      { id: 'reactor', name: 'AI Fusion Grid', cost: 2500, cps: 250, count: 0, icon: '🤖' },
-    ]);
-    setIsPlaying(true);
-  }
-
-;
+    startWithCountdown(() => {
+      setTimeLeft(60);
+      setIsFever(false);
+      setFeverProgress(0);
+      setClicksCount(0);
+      setUpgrades([
+        { id: 'extractor', name: 'Auto-Extractor', cost: 15, cps: 1, count: 0, icon: '⚡' },
+        { id: 'overclocker', name: 'Quantum Overclocker', cost: 100, cps: 8, count: 0, icon: '🌀' },
+        { id: 'condenser', name: 'Gravity Condenser', cost: 500, cps: 45, count: 0, icon: '🌌' },
+        { id: 'reactor', name: 'AI Fusion Grid', cost: 2500, cps: 250, count: 0, icon: '🤖' },
+      ]);
+      setCps(0);
+    });
+  };
 
   const endGame = () => {
-    setIsPlaying(false);
-    audio.playGameOver();
-    onGameOver(Math.floor(energyRef.current));
+    triggerGameOver(score);
   };
 
   return (
     <GameContainer maxWidth="md" aspect="auto">
-      {isPlaying && (
+      {(gameState === 'playing' || gameState === 'paused') && (
         <GameHUD 
           stats={[
             { id: 'time', label: 'WAKTU', value: timeLeft < 10 ? `0${timeLeft}` : timeLeft, emphasized: timeLeft < 10, highlight: timeLeft < 10 ? 'text-red-500' : undefined },
-            { id: 'score', label: 'Z-ENERGY', value: Math.floor(energy), emphasized: true },
+            { id: 'score', label: 'Z-ENERGY', value: Math.floor(score), emphasized: true },
             { id: 'cps', label: 'AUTO-CPS', value: `+${cps}` }
           ]} 
         />
       )}
 
       <GameOverlay
-        gameState={isPlaying ? 'playing' : 'ready'}
-        score={Math.floor(energyRef.current)}
+        gameState={gameState}
+        score={Math.floor(score)}
+        highScore={highScore}
         onStart={startGame}
         onRestart={startGame}
+        onResume={resumeGame}
+        countdown={countdown}
         instructions="Ekstrak energi siber sebanyak mungkin dalam 60 detik. Beli upgrade untuk melipatgandakan penghasilan!"
       />
 
-      {isPlaying && (
+      {(gameState === 'playing' || gameState === 'paused') && (
         <div className="w-full grid grid-cols-1 md:grid-cols-2 gap-6 p-4 md:p-6 animate-fadeIn">
           {/* Active play panel */}
           <div className="flex flex-col items-center justify-center bg-zinc-900/30 border border-zinc-900/80 rounded-2xl p-6 min-h-[380px]">
@@ -260,7 +266,7 @@ export default function CyberClickerGame({ onGameOver, onScoreUpdate, highScore 
             </h3>
             <div className="flex-1 overflow-y-auto space-y-2 max-h-[320px] pr-1">
               {upgrades.map((upgrade) => {
-                const canBuy = energy >= upgrade.cost;
+                const canBuy = score >= upgrade.cost;
                 return (
                   <button
                     key={upgrade.id}

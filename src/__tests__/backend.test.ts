@@ -985,4 +985,343 @@ describe('ZiGame 2.0 Backend Authority & Security Tests', () => {
       expect(buy2.body.newBalance).toBe(buy1.body.newBalance);
     });
   });
+
+  describe('Ranked Hardening System Regression Tests Suite', () => {
+    it('Regression: Expired session must be authoritatively rejected', async () => {
+      const uid = `ranked-expire-${Date.now()}`;
+      const startRes = await request(app)
+        .post('/api/competitive/session/start')
+        .set('x-test-uid', uid)
+        .send({ gameId: 'snake' });
+      expect(startRes.status).toBe(200);
+
+      const { sessionId } = startRes.body;
+      const sessionObj = memoryStore.sessions.get(sessionId);
+      if (sessionObj) {
+        sessionObj.startTime = Date.now() - 5000;
+        sessionObj.expiresAt = Date.now() - 1000; // Expired 1s ago
+      }
+
+      const submitRes = await request(app)
+        .post('/api/competitive/submit')
+        .set('x-test-uid', uid)
+        .send({
+          sessionId,
+          gameId: 'snake',
+          score: 120,
+          playerName: 'Gamer',
+          idempotencyKey: `idem_expire_${Date.now()}`
+        });
+
+      expect(submitRes.status).toBe(422);
+      expect(submitRes.body.code).toBe('SESSION_EXPIRED');
+    });
+
+    it('Regression: Session from a previous/old season must be rejected', async () => {
+      const uid = `ranked-old-season-${Date.now()}`;
+      const startRes = await request(app)
+        .post('/api/competitive/session/start')
+        .set('x-test-uid', uid)
+        .send({ gameId: 'snake' });
+      expect(startRes.status).toBe(200);
+
+      const { sessionId } = startRes.body;
+      const sessionObj = memoryStore.sessions.get(sessionId);
+      if (sessionObj) {
+        sessionObj.startTime = Date.now() - 5000;
+        sessionObj.seasonId = 'old_season_id';
+      }
+
+      const submitRes = await request(app)
+        .post('/api/competitive/submit')
+        .set('x-test-uid', uid)
+        .send({
+          sessionId,
+          gameId: 'snake',
+          score: 120,
+          playerName: 'Gamer',
+          idempotencyKey: `idem_old_season_${Date.now()}`
+        });
+
+      expect(submitRes.status).toBe(422);
+      expect(submitRes.body.code).toBe('SESSION_EXPIRED');
+    });
+
+    it('Regression: Version mismatches (game, balance, ruleset) must be rejected', async () => {
+      const uid = `ranked-version-mismatch-${Date.now()}`;
+
+      // 1. gameVersion mismatch
+      const res1 = await request(app)
+        .post('/api/competitive/session/start')
+        .set('x-test-uid', uid)
+        .send({ gameId: 'snake' });
+      const sess1 = res1.body.sessionId;
+      const obj1 = memoryStore.sessions.get(sess1);
+      if (obj1) {
+        obj1.startTime = Date.now() - 5000;
+        obj1.gameVersion = '1.0.0'; // mismatched
+      }
+      const submit1 = await request(app)
+        .post('/api/competitive/submit')
+        .set('x-test-uid', uid)
+        .send({
+          sessionId: sess1,
+          gameId: 'snake',
+          score: 100,
+          playerName: 'Gamer',
+          idempotencyKey: `idem_v_game_${Date.now()}`
+        });
+      expect(submit1.status).toBe(422);
+      expect(submit1.body.code).toBe('INVALID_SESSION');
+
+      // 2. balanceVersion mismatch
+      const res2 = await request(app)
+        .post('/api/competitive/session/start')
+        .set('x-test-uid', uid)
+        .send({ gameId: 'snake' });
+      const sess2 = res2.body.sessionId;
+      const obj2 = memoryStore.sessions.get(sess2);
+      if (obj2) {
+        obj2.startTime = Date.now() - 5000;
+        obj2.balanceVersion = '1.0.0'; // mismatched
+      }
+      const submit2 = await request(app)
+        .post('/api/competitive/submit')
+        .set('x-test-uid', uid)
+        .send({
+          sessionId: sess2,
+          gameId: 'snake',
+          score: 100,
+          playerName: 'Gamer',
+          idempotencyKey: `idem_v_balance_${Date.now()}`
+        });
+      expect(submit2.status).toBe(422);
+      expect(submit2.body.code).toBe('INVALID_SESSION');
+
+      // 3. rulesetVersion mismatch
+      const res3 = await request(app)
+        .post('/api/competitive/session/start')
+        .set('x-test-uid', uid)
+        .send({ gameId: 'snake' });
+      const sess3 = res3.body.sessionId;
+      const obj3 = memoryStore.sessions.get(sess3);
+      if (obj3) {
+        obj3.startTime = Date.now() - 5000;
+        obj3.rulesetVersion = '2.0.0'; // mismatched
+      }
+      const submit3 = await request(app)
+        .post('/api/competitive/submit')
+        .set('x-test-uid', uid)
+        .send({
+          sessionId: sess3,
+          gameId: 'snake',
+          score: 100,
+          playerName: 'Gamer',
+          idempotencyKey: `idem_v_ruleset_${Date.now()}`
+        });
+      expect(submit3.status).toBe(422);
+      expect(submit3.body.code).toBe('INVALID_SESSION');
+    });
+
+    it('Regression: Session reuse (consumed sessions) must be strictly blocked', async () => {
+      const uid = `ranked-reuse-${Date.now()}`;
+      const startRes = await request(app)
+        .post('/api/competitive/session/start')
+        .set('x-test-uid', uid)
+        .send({ gameId: 'snake' });
+      expect(startRes.status).toBe(200);
+
+      const { sessionId } = startRes.body;
+      const sessionObj = memoryStore.sessions.get(sessionId);
+      if (sessionObj) {
+        sessionObj.startTime = Date.now() - 5000;
+      }
+
+      // First submit succeeds
+      const submitRes1 = await request(app)
+        .post('/api/competitive/submit')
+        .set('x-test-uid', uid)
+        .send({
+          sessionId,
+          gameId: 'snake',
+          score: 120,
+          playerName: 'Gamer',
+          idempotencyKey: `idem_first_${Date.now()}`
+        });
+      expect(submitRes1.status).toBe(200);
+
+      // Replay attempt with same sessionId but new score & idempotency key
+      const submitRes2 = await request(app)
+        .post('/api/competitive/submit')
+        .set('x-test-uid', uid)
+        .send({
+          sessionId,
+          gameId: 'snake',
+          score: 180,
+          playerName: 'Gamer',
+          idempotencyKey: `idem_replay_${Date.now()}`
+        });
+
+      expect(submitRes2.status).toBe(422);
+      expect(submitRes2.body.code).toBe('SESSION_ALREADY_CONSUMED');
+    });
+
+    it('Regression: Forged game ID must be blocked', async () => {
+      const uid = `ranked-forge-game-${Date.now()}`;
+      const startRes = await request(app)
+        .post('/api/competitive/session/start')
+        .set('x-test-uid', uid)
+        .send({ gameId: 'snake' });
+      expect(startRes.status).toBe(200);
+
+      const { sessionId } = startRes.body;
+      const sessionObj = memoryStore.sessions.get(sessionId);
+      if (sessionObj) {
+        sessionObj.startTime = Date.now() - 5000;
+      }
+
+      // Submit score specifying 'brick-breaker' instead of 'snake'
+      const submitRes = await request(app)
+        .post('/api/competitive/submit')
+        .set('x-test-uid', uid)
+        .send({
+          sessionId,
+          gameId: 'brick-breaker',
+          score: 120,
+          playerName: 'Gamer',
+          idempotencyKey: `idem_forge_${Date.now()}`
+        });
+
+      expect(submitRes.status).toBe(422);
+      expect(submitRes.body.code).toBe('SESSION_GAME_MISMATCH');
+    });
+
+    it('Regression: Duplicate score submission must be cached idempotently without double processing', async () => {
+      const uid = `ranked-idem-${Date.now()}`;
+      const startRes = await request(app)
+        .post('/api/competitive/session/start')
+        .set('x-test-uid', uid)
+        .send({ gameId: 'snake' });
+      expect(startRes.status).toBe(200);
+
+      const { sessionId } = startRes.body;
+      const sessionObj = memoryStore.sessions.get(sessionId);
+      if (sessionObj) {
+        sessionObj.startTime = Date.now() - 5000;
+      }
+
+      const idempotencyKey = `idem_dup_sub_${Date.now()}`;
+
+      // Submit 1
+      const submitRes1 = await request(app)
+        .post('/api/competitive/submit')
+        .set('x-test-uid', uid)
+        .send({
+          sessionId,
+          gameId: 'snake',
+          score: 120,
+          playerName: 'Gamer',
+          idempotencyKey
+        });
+      expect(submitRes1.status).toBe(200);
+      const firstRating = submitRes1.body.newRating;
+
+      // Duplicate Submit
+      const submitRes2 = await request(app)
+        .post('/api/competitive/submit')
+        .set('x-test-uid', uid)
+        .send({
+          sessionId,
+          gameId: 'snake',
+          score: 120,
+          playerName: 'Gamer',
+          idempotencyKey
+        });
+      expect(submitRes2.status).toBe(200);
+      expect(submitRes2.body.newRating).toBe(firstRating);
+      expect(submitRes2.body.transactionId).toBe(submitRes1.body.transactionId);
+    });
+
+    it('Regression: Invalid or non-ranked session must be blocked', async () => {
+      const uid = `ranked-invalid-session-${Date.now()}`;
+
+      // 1. Non-existent session
+      const submitRes1 = await request(app)
+        .post('/api/competitive/submit')
+        .set('x-test-uid', uid)
+        .send({
+          sessionId: 'rnk_nonexistent_session',
+          gameId: 'snake',
+          score: 120,
+          playerName: 'Gamer',
+          idempotencyKey: `idem_nonexist_${Date.now()}`
+        });
+      expect(submitRes1.status).toBe(422);
+      expect(submitRes1.body.code).toBe('SESSION_NOT_FOUND');
+
+      // 2. Non-ranked session submitted to competitive
+      const startRes = await request(app)
+        .post('/api/session/start') // Normal session start
+        .set('x-test-uid', uid)
+        .send({ gameId: 'snake' });
+      expect(startRes.status).toBe(200);
+      const normalSessionId = startRes.body.sessionId;
+      const sessionObj = memoryStore.sessions.get(normalSessionId);
+      if (sessionObj) {
+        sessionObj.startTime = Date.now() - 5000;
+      }
+
+      const submitRes2 = await request(app)
+        .post('/api/competitive/submit')
+        .set('x-test-uid', uid)
+        .send({
+          sessionId: normalSessionId,
+          gameId: 'snake',
+          score: 120,
+          playerName: 'Gamer',
+          idempotencyKey: `idem_normal_as_ranked_${Date.now()}`
+        });
+      expect(submitRes2.status).toBe(422);
+      expect(submitRes2.body.code).toBe('INVALID_SESSION');
+    });
+
+    it('Regression: Ranked play XP rewards must be successfully persisted to user progression', async () => {
+      const uid = `ranked-progression-${Date.now()}`;
+
+      // Initialize economy/progression for user
+      await request(app).get('/api/economy').set('x-test-uid', uid);
+
+      const startRes = await request(app)
+        .post('/api/competitive/session/start')
+        .set('x-test-uid', uid)
+        .send({ gameId: 'snake' });
+      expect(startRes.status).toBe(200);
+
+      const { sessionId } = startRes.body;
+      const sessionObj = memoryStore.sessions.get(sessionId);
+      if (sessionObj) {
+        sessionObj.startTime = Date.now() - 5000;
+      }
+
+      const submitRes = await request(app)
+        .post('/api/competitive/submit')
+        .set('x-test-uid', uid)
+        .send({
+          sessionId,
+          gameId: 'snake',
+          score: 120,
+          playerName: 'Gamer',
+          idempotencyKey: `idem_prog_${Date.now()}`
+        });
+      expect(submitRes.status).toBe(200);
+      expect(submitRes.body.xpEarned).toBeGreaterThan(0);
+
+      const expectedXp = submitRes.body.xpEarned;
+
+      // Verify that economy fetch reports the persisted XP and Level
+      const econRes = await request(app).get('/api/economy').set('x-test-uid', uid);
+      expect(econRes.status).toBe(200);
+      expect(econRes.body.totalXp).toBe(expectedXp);
+    });
+  });
 });

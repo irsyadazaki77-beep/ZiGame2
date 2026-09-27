@@ -31,7 +31,22 @@ interface BulletItem {
 }
 
 export default function CosmicAsteroidGame({ onGameOver, onScoreUpdate, highScore }: CosmicAsteroidGameProps) {
-  const { gameState, score, updateScore, startLoop, stopLoop, startWithCountdown, setupCanvasContext, triggerGameOver } = useGameEngine({ onScoreUpdate, onGameOver, maxDpr: 2 });
+  const {
+    gameState,
+    score,
+    updateScore,
+    startLoop,
+    stopLoop,
+    startWithCountdown,
+    setupCanvasContext,
+    triggerGameOver,
+    resumeGame,
+    countdown
+  } = useGameEngine({
+    onScoreUpdate,
+    onGameOver,
+    maxDpr: 2
+  });
   const gameLoopRef = useRef<number | null>(null);
   const scoreRef = useRef(0);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -100,22 +115,16 @@ export default function CosmicAsteroidGame({ onGameOver, onScoreUpdate, highScor
   };
 
   const startNewGame = () => {
-    audio.playCoin();
-    
-    
-    updateScore(0);
-    onScoreUpdate(0);
-
-    shipAngleRef.current = -Math.PI / 2;
-    asteroidsRef.current = [];
-    bulletsRef.current = [];
-    particlesRef.current = [];
-    shakeRef.current = 0;
-    floatingTextsRef.current = [];
-    spawnTimerRef.current = 0;
-    
-
-    if (gameLoopRef?.current) cancelAnimationFrame(gameLoopRef.current);
+    startWithCountdown(() => {
+      shipAngleRef.current = -Math.PI / 2;
+      asteroidsRef.current = [];
+      bulletsRef.current = [];
+      particlesRef.current = [];
+      shakeRef.current = 0;
+      floatingTextsRef.current = [];
+      spawnTimerRef.current = 0;
+      startLoop(update);
+    });
   };
 
   // Keyboard controls
@@ -199,7 +208,6 @@ export default function CosmicAsteroidGame({ onGameOver, onScoreUpdate, highScor
       const elapsed = timestamp - lastFpsTimeRef.current;
       
       if (elapsed < interval - 1) {
-        startLoop(update);
         return;
       }
       
@@ -485,8 +493,11 @@ export default function CosmicAsteroidGame({ onGameOver, onScoreUpdate, highScor
       <GameOverlay
         gameState={gameState}
         score={score}
+        highScore={highScore}
         onStart={startNewGame}
         onRestart={startNewGame}
+        onResume={resumeGame}
+        countdown={countdown}
         instructions="PUTAR KAPAL DAN TEMBAK METEOR DRIFTING"
       />
 

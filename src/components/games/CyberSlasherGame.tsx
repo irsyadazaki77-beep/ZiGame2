@@ -30,24 +30,29 @@ interface TrailPoint {
   time: number;
 }
 
+import { useGameEngine } from '../../hooks/useGameEngine';
+
 export default function CyberSlasherGame({ onGameOver, onScoreUpdate, highScore }: CyberSlasherGameProps) {
-  const gameLoopRef = useRef<number | null>(null);
-  const scoreRef = useRef(0);
+  const {
+    gameState,
+    score,
+    addScore,
+    startWithCountdown,
+    countdown,
+    triggerGameOver,
+    pauseGame,
+    resumeGame,
+    startLoop,
+    stopLoop,
+    gameStateRef,
+    scoreRef,
+  } = useGameEngine({
+    gameId: 'cyberslasher',
+    onGameOver,
+    onScoreUpdate,
+  });
+
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [score, setScore] = useState(0);
-  const lastTimeRef = useRef<number>(0);
-  const [gameOver, setGameOver] = useState(false);
-  const isPlayingRef = useRef(false);
-  const gameOverRef = useRef(false);
-
-
-  useEffect(() => {
-    isPlayingRef.current = isPlaying;
-    gameOverRef.current = gameOver;
-    scoreRef.current = score;
-  }, [isPlaying, gameOver, score]);
-  const [muted, setMuted] = useState(audio.getMuteState());
 
   const CANVAS_WIDTH = 400;
   const CANVAS_HEIGHT = 500;
@@ -59,12 +64,10 @@ export default function CyberSlasherGame({ onGameOver, onScoreUpdate, highScore 
   const shakeRef = useRef<number>(0);
   const floatingTextsRef = useRef<{ x: number; y: number; text: string; color: string; alpha: number; vy: number }[]>([]);
 
-  const isMouseDownRef = useRef(false);
-
   useEffect(() => {
     drawStatic();
     return () => {
-      if (gameLoopRef?.current) cancelAnimationFrame(gameLoopRef.current);
+      stopLoop();
     };
   }, []);
 
@@ -103,20 +106,13 @@ export default function CyberSlasherGame({ onGameOver, onScoreUpdate, highScore 
   };
 
   const startNewGame = () => {
-    audio.playCoin();
-    setIsPlaying(true);
-    setGameOver(false);
-    setScore(0);
-    onScoreUpdate(0);
-
-    itemsRef.current = [];
-    trailRef.current = [];
-    particlesRef.current = [];
-    spawnTimerRef.current = 0;
-    lastTimeRef.current = performance.now();
-
-    if (gameLoopRef?.current) cancelAnimationFrame(gameLoopRef.current);
-    gameLoopRef.current = requestAnimationFrame(update);
+    startWithCountdown(() => {
+      itemsRef.current = [];
+      trailRef.current = [];
+      particlesRef.current = [];
+      spawnTimerRef.current = 0;
+      startLoop(update);
+    });
   };
 
   const spawnFruitItem = () => {
@@ -161,7 +157,7 @@ export default function CyberSlasherGame({ onGameOver, onScoreUpdate, highScore 
 
   // Drag trail calculation and slicing check
   const handlePointerMove = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
-    if (!isPlayingRef.current || gameOverRef.current ) return;
+    if (gameStateRef.current !== 'playing') return;
 
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -227,8 +223,6 @@ export default function CyberSlasherGame({ onGameOver, onScoreUpdate, highScore 
               alpha: 1.0,
               vy: -1.2
             });
-            setGameOver(true);
-            setIsPlaying(false);
             // Create massive burst of bomb spark particles
             for (let i = 0; i < 25; i++) {
               particlesRef.current.push({
@@ -242,7 +236,7 @@ export default function CyberSlasherGame({ onGameOver, onScoreUpdate, highScore 
                 decay: Math.random() * 0.04 + 0.02
               });
             }
-            onGameOver(score);
+            triggerGameOver(scoreRef.current);
           } else {
             audio.playScore();
             shakeRef.current = 5;
@@ -256,27 +250,20 @@ export default function CyberSlasherGame({ onGameOver, onScoreUpdate, highScore 
               vy: -0.8
             });
             createSliceSparks(item.x, item.y, item.color);
-            
-            setScore(prev => {
-              const next = prev + points;
-              onScoreUpdate(next);
-              return next;
-            });
+            addScore(points);
           }
         }
       });
     }
   };
 
-  const update = (timestamp: number) => {
+  const update = (timestamp: number, deltaTime: number) => {
     const canvas = canvasRef.current;
-    if (!canvas || !isPlayingRef.current) return;
+    if (!canvas || gameStateRef.current !== 'playing') return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    const delta = (timestamp - lastTimeRef.current) / 16.666;
-    lastTimeRef.current = timestamp;
-
+    const delta = deltaTime / 16.666;
     const gravity = 0.28;
 
     // Spawn waves
@@ -437,24 +424,11 @@ export default function CyberSlasherGame({ onGameOver, onScoreUpdate, highScore 
     ctx.fillText(`TEBASAN BERUNTUN: ${Math.floor(score / 10)}`, 15, 30);
     ctx.textAlign = 'right';
     ctx.fillText(`SKOR: ${score}`, CANVAS_WIDTH - 15, 30);
-
-    gameLoopRef.current = requestAnimationFrame(update);
-  };
-
-  const toggleMute = () => {
-    const nextMuted = audio.toggleMute();
-    setMuted(nextMuted);
-  };
-
-  const getGameState = () => {
-    if (!isPlaying && score === 0 && !gameOver) return 'ready';
-    if (!isPlaying) return 'gameover';
-    return 'playing';
   };
 
   return (
     <GameContainer aspect="portrait" maxWidth="sm">
-      {isPlaying && (
+      {(gameState === 'playing' || gameState === 'paused') && (
         <GameHUD 
           stats={[
             { id: 'combo', label: 'TEBASAN BERUNTUN', value: Math.floor(score / 10) },
@@ -464,10 +438,13 @@ export default function CyberSlasherGame({ onGameOver, onScoreUpdate, highScore 
       )}
 
       <GameOverlay
-        gameState={getGameState()}
+        gameState={gameState}
         score={score}
+        highScore={highScore}
         onStart={startNewGame}
         onRestart={startNewGame}
+        onResume={resumeGame}
+        countdown={countdown}
         instructions="GESER KURSOR/JARI UNTUK TEBAS NEON. Hati-hati jangan sampai menebas BOMB MERAH!"
       />
 

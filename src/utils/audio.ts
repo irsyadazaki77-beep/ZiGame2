@@ -1,4 +1,6 @@
 // Web Audio API retro sound generator with volume control & music toggles
+import { logger } from './logger';
+
 class RetroAudio {
   private ctx: AudioContext | null = null;
   private isMuted: boolean = false;
@@ -23,8 +25,8 @@ class RetroAudio {
       if (savedSfxVol !== null) {
         this.sfxVolume = parseFloat(savedSfxVol);
       }
-    } catch (e) {
-      console.warn('Audio settings read error:', e);
+    } catch (e: any) {
+      logger.warn('Audio settings read error:', { error: e });
     }
   }
 

@@ -14,7 +14,10 @@ export default tseslint.config(
     rules: {
       '@typescript-eslint/no-explicit-any': 'warn',
       '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }],
-      'no-useless-escape': 'warn'
+      'no-useless-escape': 'warn',
+      'no-empty': 'off',
+      '@typescript-eslint/no-namespace': 'off',
+      'no-useless-assignment': 'off'
     },
   }
 );

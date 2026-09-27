@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Gamepad2, Lightbulb, Keyboard, MousePointer, CheckCircle2, Play, X } from 'lucide-react';
 import { GameStats } from '../../types';
 import { audio } from '../../utils/audio';
+import { logger } from '../../utils/logger';
 
 interface GameTutorialModalProps {
   game: GameStats;
@@ -28,7 +29,7 @@ export const GameTutorialModal: React.FC<GameTutorialModalProps> = ({
       try {
         localStorage.setItem(`tutorial_disabled_${game.id}`, 'true');
       } catch (e) {
-        console.warn('LocalStorage error:', e);
+        logger.warn('LocalStorage error in legacy tutorial modal', { error: e as Error });
       }
     }
     onStartGame();

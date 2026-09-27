@@ -12,31 +12,41 @@ interface GameProps {
 
 const MATRIX_SIZE = 16; // 4x4 grid
 
+import { useGameEngine } from '../../hooks/useGameEngine';
+
 export default function MemoryPathGame({ onGameOver, onScoreUpdate, highScore }: GameProps) {
-  const scoreRef = useRef(0);
-  const [isPlaying, setIsPlaying] = useState(false);
+  const {
+    gameState,
+    score,
+    addScore,
+    startWithCountdown,
+    countdown,
+    triggerGameOver,
+    pauseGame,
+    resumeGame,
+    gameStateRef,
+    scoreRef,
+  } = useGameEngine({
+    gameId: 'memorypath',
+    onGameOver,
+    onScoreUpdate,
+  });
+
   const [sequence, setSequence] = useState<number[]>([]);
   const [userSelected, setUserSelected] = useState<number[]>([]);
   const [isRevealing, setIsRevealing] = useState(false);
-  const [score, setScore] = useState(0);
   const [lives, setLives] = useState(3);
   const [level, setLevel] = useState(1);
   const [gridState, setGridState] = useState<'idle' | 'flash' | 'player'>('idle');
 
   const sequenceRef = useRef<number[]>([]);
 
-  useEffect(() => {
-    scoreRef.current = score;
-    onScoreUpdate(score);
-  }, [score, onScoreUpdate]);
-
   const startNewGame = () => {
-    audio.playCoin();
-    setScore(0);
-    setLives(3);
-    setLevel(1);
-    setIsPlaying(true);
-    startNewLevel(1);
+    startWithCountdown(() => {
+      setLives(3);
+      setLevel(1);
+      startNewLevel(1);
+    });
   };
 
   const startNewLevel = (currentLevel: number) => {
@@ -65,7 +75,7 @@ export default function MemoryPathGame({ onGameOver, onScoreUpdate, highScore }:
   };
 
   const handleCellClick = (idx: number) => {
-    if (!isPlaying || isRevealing || gridState !== 'player') return;
+    if (gameState !== 'playing' || isRevealing || gridState !== 'player') return;
 
     // Check if the clicked cell is in the target sequence
     if (sequenceRef.current.includes(idx)) {
@@ -78,7 +88,7 @@ export default function MemoryPathGame({ onGameOver, onScoreUpdate, highScore }:
       // Check if all correct boxes are clicked
       if (nextSelected.length === sequenceRef.current.length) {
         audio.playLevelUp();
-        setScore(prev => prev + level * 50);
+        addScore(level * 50);
         const nextLvl = level + 1;
         setLevel(nextLvl);
         setGridState('idle');
@@ -103,20 +113,12 @@ export default function MemoryPathGame({ onGameOver, onScoreUpdate, highScore }:
   };
 
   const endGame = () => {
-    setIsPlaying(false);
-    audio.playGameOver();
-    onGameOver(score);
-  };
-
-  const getGameState = () => {
-    if (!isPlaying && score === 0 && lives === 3) return 'ready';
-    if (!isPlaying) return 'gameover';
-    return 'playing';
+    triggerGameOver(score);
   };
 
   return (
     <GameContainer aspect="square" maxWidth="sm">
-      {isPlaying && (
+      {(gameState === 'playing' || gameState === 'paused') && (
         <GameHUD 
           stats={[
             { id: 'level', label: 'LEVEL', value: level },
@@ -127,16 +129,19 @@ export default function MemoryPathGame({ onGameOver, onScoreUpdate, highScore }:
       )}
 
       <GameOverlay
-        gameState={getGameState()}
+        gameState={gameState}
         score={score}
+        highScore={highScore}
         onStart={startNewGame}
         onRestart={startNewGame}
+        onResume={resumeGame}
+        countdown={countdown}
         instructions="Hafalkan letak grid siber biru yang menyala sekejap, lalu ketuk kembali semua sel tersebut dengan presisi kognitif sempurna!"
       />
 
       <div className="w-full aspect-square bg-zinc-950 p-2 sm:p-4 rounded-xl border-4 border-zinc-900 shadow-2xl relative flex flex-col justify-center items-center">
         {/* Mode Indicator Toast */}
-        {isPlaying && (
+        {(gameState === 'playing' || gameState === 'paused') && (
           <div className="mb-4 font-mono text-xs uppercase tracking-wider text-center h-4">
             {gridState === 'flash' ? (
               <span className="text-yellow-400 font-black">HAFALKAN GRID TEAL! 👁️</span>

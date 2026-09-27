@@ -18,7 +18,7 @@ interface GamePageRightSidebarProps {
   isFullscreen: boolean;
 }
 
-export const GamePageRightSidebar: React.FC<GamePageRightSidebarProps> = ({
+export const GamePageRightSidebar: React.FC<GamePageRightSidebarProps> = React.memo(({
   activeGame,
   profile,
   dailyMissions,
@@ -44,10 +44,10 @@ export const GamePageRightSidebar: React.FC<GamePageRightSidebarProps> = ({
     >
       <div className="flex flex-col h-full overflow-hidden" id="sidebar-panel-container">
         {/* Sidebar Nav Tabs */}
-        <div className="flex-none flex border-b border-white/[0.06] bg-[#0d1017] p-1.5 gap-1 select-none">
+        <div className="flex-none flex border-b border-white/[0.06] bg-zinc-900 p-1.5 gap-1 select-none">
           <button
             onClick={() => { audio.playCoin(); setActiveTab('chat'); }}
-            className={`flex-1 py-1.5 px-2.5 rounded-lg flex items-center justify-center gap-1.5 text-xs font-medium transition-all duration-150 cursor-pointer ${
+            className={`flex-1 py-1.5 px-2.5 rounded-lg flex items-center justify-center gap-1.5 text-xs font-medium transition-all duration-150 ease-out cursor-pointer hover:scale-[1.02] active:scale-[0.98] ${
               activeTab === 'chat'
                 ? 'bg-white/[0.08] text-white shadow-sm'
                 : 'text-zinc-400 hover:text-zinc-200 hover:bg-white/[0.04]'
@@ -59,7 +59,7 @@ export const GamePageRightSidebar: React.FC<GamePageRightSidebarProps> = ({
 
           <button
             onClick={() => { audio.playCoin(); setActiveTab('leaderboard'); }}
-            className={`flex-1 py-1.5 px-2.5 rounded-lg flex items-center justify-center gap-1.5 text-xs font-medium transition-all duration-150 cursor-pointer ${
+            className={`flex-1 py-1.5 px-2.5 rounded-lg flex items-center justify-center gap-1.5 text-xs font-medium transition-all duration-150 ease-out cursor-pointer hover:scale-[1.02] active:scale-[0.98] ${
               activeTab === 'leaderboard'
                 ? 'bg-white/[0.08] text-white shadow-sm'
                 : 'text-zinc-400 hover:text-zinc-200 hover:bg-white/[0.04]'
@@ -71,7 +71,7 @@ export const GamePageRightSidebar: React.FC<GamePageRightSidebarProps> = ({
 
           <button
             onClick={() => { audio.playCoin(); setActiveTab('quests'); }}
-            className={`flex-1 py-1.5 px-2.5 rounded-lg flex items-center justify-center gap-1.5 text-xs font-medium transition-all duration-150 cursor-pointer ${
+            className={`flex-1 py-1.5 px-2.5 rounded-lg flex items-center justify-center gap-1.5 text-xs font-medium transition-all duration-150 ease-out cursor-pointer hover:scale-[1.02] active:scale-[0.98] ${
               activeTab === 'quests'
                 ? 'bg-white/[0.08] text-white shadow-sm'
                 : 'text-zinc-400 hover:text-zinc-200 hover:bg-white/[0.04]'
@@ -198,4 +198,4 @@ export const GamePageRightSidebar: React.FC<GamePageRightSidebarProps> = ({
       </div>
     </div>
   );
-};
+});

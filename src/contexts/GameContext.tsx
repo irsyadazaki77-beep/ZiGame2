@@ -28,6 +28,8 @@ interface GameContextType {
   handleGameOver: (gameId: string, finalScore: number, sessionId?: string, sessionDuration?: number) => Promise<void>;
   handleResetStats: () => void;
   masteries: Record<string, GameMastery>;
+  theme: 'light' | 'dark';
+  toggleTheme: () => void;
 }
 
 const GameContext = createContext<GameContextType | undefined>(undefined);
@@ -37,6 +39,49 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
   const { profile, setProfile, handleUpdateProfile } = usePlayerProfile();
   const { masteries, processGameSession } = useProgressionManager(profile, handleUpdateProfile, INITIAL_GAMES);
   const gameProgress = useGameProgress(profile, handleUpdateProfile, showToast, processGameSession);
+
+  const [theme, setThemeState] = useState<'light' | 'dark'>(() => {
+    try {
+      const saved = localStorage.getItem('zigame_theme');
+      if (saved === 'light' || saved === 'dark') return saved;
+      const systemPrefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+      return systemPrefersDark ? 'dark' : 'light';
+    } catch {
+      return 'dark';
+    }
+  });
+
+  const toggleTheme = React.useCallback(() => {
+    setThemeState(prev => {
+      const next = prev === 'dark' ? 'light' : 'dark';
+      try {
+        localStorage.setItem('zigame_theme', next);
+        document.documentElement.setAttribute('data-theme', next);
+        if (next === 'light') {
+          document.documentElement.classList.add('light');
+          document.documentElement.classList.remove('dark');
+        } else {
+          document.documentElement.classList.add('dark');
+          document.documentElement.classList.remove('light');
+        }
+      } catch (e) {
+        console.error('Error toggling theme', e);
+      }
+      return next;
+    });
+  }, []);
+
+  // Sync theme classes on start & state change
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+    if (theme === 'light') {
+      document.documentElement.classList.add('light');
+      document.documentElement.classList.remove('dark');
+    } else {
+      document.documentElement.classList.add('dark');
+      document.documentElement.classList.remove('light');
+    }
+  }, [theme]);
 
   useEffect(() => {
     if (profile.settings?.reducedMotion) {
@@ -88,7 +133,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
   }, [profile, gameProgress.games, gameProgress.achievements, gameProgress.dailyMissions, gameProgress.recentlyPlayed]);
 
   return (
-    <GameContext.Provider value={{ profile, setProfile, handleUpdateProfile, masteries, ...gameProgress }}>
+    <GameContext.Provider value={{ profile, setProfile, handleUpdateProfile, masteries, theme, toggleTheme, ...gameProgress }}>
       {children}
     </GameContext.Provider>
   );

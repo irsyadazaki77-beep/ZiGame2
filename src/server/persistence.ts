@@ -15,7 +15,13 @@ import { requireCanonicalGameId, CanonicalGameId } from '../config/canonicalGame
 import { getAuthoritativeCatalogItem } from '../config/shopCatalog';
 import { getGameBalanceConfig } from '../config/balanceConfig';
 import { resolveAuthoritativeReward, RewardClaimType, AUTHORITATIVE_SEASONAL_CHALLENGES } from '../config/rewardCatalog';
+import { 
+  getAuthoritativeDailyMissions, 
+  getAuthoritativeDailyChallenges, 
+  getAuthoritativeWeeklyChallenges 
+} from '../config/authoritativeMissions';
 import { CANONICAL_GAME_REGISTRY } from '../config/gameRegistry';
+
 import { 
   getTierForRating, 
   INITIAL_RATING, 
@@ -1246,81 +1252,116 @@ export async function executeClaimReward(
     }
   } else if (claimType === 'daily_mission') {
     const match = canonicalClaimId.match(/^m_(\d{4}-\d{2}-\d{2})_([123])$/);
-    if (match) {
-      const dateStr = match[1];
-      const index = match[2];
-      const dailySessions = await getDailySessionHistory(userId, dateStr);
-      const countPlayedToday = await getCountOfGamesPlayedToday(userId);
+    if (!match) {
+      throw ApiError.badRequest('Format ID misi harian tidak valid.', 'INVALID_REWARD_CLAIM');
+    }
+    const dateStr = match[1];
+    const todayUtc = getUtcDateString();
+    if (dateStr !== todayUtc) {
+      throw ApiError.badRequest('Klaim misi harian hanya berlaku untuk tanggal aktif hari ini (UTC). Klaim masa lalu atau masa depan ditolak.', 'INVALID_REWARD_CLAIM');
+    }
 
-      if (index === '1') {
-        const dateObj = new Date(dateStr);
-        const seed = isNaN(dateObj.getDate()) ? 1 : dateObj.getDate();
-        const games = ['snake', 'brick-breaker', 'flappy-pixel', 'space-defender', 'memory-grid', 'cyber-runner', 'vaporwave-racer', 'cyber-tetris', 'cyber-mines', 'neon-2048'];
-        const gameIdx = seed % games.length;
-        const selectedGame = games[gameIdx];
-        const target = 50 + (seed % 3) * 50;
+    const missions = getAuthoritativeDailyMissions(todayUtc);
+    const mission = missions.find(m => m.id === canonicalClaimId);
+    if (!mission) {
+      throw ApiError.badRequest('Definisi misi harian tidak ditemukan.', 'INVALID_REWARD_CLAIM');
+    }
 
-        const highScore = await getUserHighScore(userId, selectedGame);
-        const sessionHigh = dailySessions.some(s => s.gameId === selectedGame && s.score >= target);
-        if (sessionHigh || highScore >= target) {
-          verified = true;
-        }
-      } else if (index === '2') {
-        const hasPb = dailySessions.some(s => s.isPersonalBest);
-        const distinctGenres = new Set(dailySessions.map(s => s.genre)).size;
-        if (hasPb || distinctGenres >= 2 || countPlayedToday >= 2) {
-          verified = true;
-        }
-      } else if (index === '3') {
-        if (dailySessions.length >= 3 || countPlayedToday >= 3) {
-          verified = true;
-        }
+    const dailySessions = await getDailySessionHistory(userId, todayUtc);
+    const countPlayedToday = await getCountOfGamesPlayedToday(userId);
+
+    if (mission.type === 'score_target') {
+      const highScore = mission.gameId ? await getUserHighScore(userId, mission.gameId) : 0;
+      const sessionHigh = dailySessions.some(s => s.gameId === mission.gameId && s.score >= mission.target);
+      if (sessionHigh || highScore >= mission.target) {
+        verified = true;
+      }
+    } else if (mission.type === 'beat_pb') {
+      const hasPb = dailySessions.some(s => s.isPersonalBest);
+      if (hasPb) {
+        verified = true;
+      }
+    } else if (mission.type === 'total_score') {
+      const sum = dailySessions.reduce((acc, s) => acc + s.score, 0);
+      if (sum >= mission.target) {
+        verified = true;
+      }
+    } else if (mission.type === 'play_genre_count') {
+      const distinctGenres = new Set(dailySessions.map(s => s.genre)).size;
+      if (distinctGenres >= mission.target) {
+        verified = true;
+      }
+    } else if (mission.type === 'play_count') {
+      if (dailySessions.length >= mission.target || countPlayedToday >= mission.target) {
+        verified = true;
       }
     }
   } else if (claimType === 'challenge') {
     const dailyMatch = canonicalClaimId.match(/^daily_(\d{4}-\d{2}-\d{2})_([123])$/);
     const weeklyMatch = canonicalClaimId.match(/^weekly_(\d{4}-W\d{2})_([123])$/);
+    const todayUtc = getUtcDateString();
+    const weekUtc = getIsoWeekString();
 
     if (dailyMatch) {
       const dateStr = dailyMatch[1];
-      const index = dailyMatch[2];
-      const dailySessions = await getDailySessionHistory(userId, dateStr);
+      if (dateStr !== todayUtc) {
+        throw ApiError.badRequest('Klaim tantangan harian hanya berlaku untuk tanggal aktif hari ini (UTC). Klaim masa lalu atau masa depan ditolak.', 'INVALID_REWARD_CLAIM');
+      }
+
+      const challenges = getAuthoritativeDailyChallenges(todayUtc);
+      const chal = challenges.find(c => c.id === canonicalClaimId);
+      if (!chal) {
+        throw ApiError.badRequest('Definisi tantangan harian tidak ditemukan.', 'INVALID_REWARD_CLAIM');
+      }
+
+      const dailySessions = await getDailySessionHistory(userId, todayUtc);
       const countPlayedToday = await getCountOfGamesPlayedToday(userId);
 
-      if (index === '1') {
-        if (dailySessions.some(s => s.score >= 50) || countPlayedToday >= 1) {
+      if (chal.category === 'score') {
+        const highScore = chal.gameId ? await getUserHighScore(userId, chal.gameId) : 0;
+        const sessionHigh = dailySessions.some(s => (chal.gameId ? s.gameId === chal.gameId : true) && s.score >= chal.target);
+        if (sessionHigh || highScore >= chal.target) {
           verified = true;
         }
-      } else if (index === '2') {
+      } else if (chal.category === 'genre') {
         const distinctGenres = new Set(dailySessions.map(s => s.genre)).size;
-        if (distinctGenres >= 2 || dailySessions.length >= 2 || countPlayedToday >= 2) {
+        if (distinctGenres >= chal.target || countPlayedToday >= chal.target) {
           verified = true;
         }
-      } else if (index === '3') {
-        if (dailySessions.length >= 3 || countPlayedToday >= 3) {
+      } else if (chal.category === 'featured') {
+        if (dailySessions.some(s => chal.gameId ? s.gameId === chal.gameId : true) || dailySessions.length >= 1 || countPlayedToday >= 1) {
           verified = true;
         }
       }
     } else if (weeklyMatch) {
       const weekStr = weeklyMatch[1];
-      const index = weeklyMatch[2];
-      const weeklySessions = await getWeeklySessionHistory(userId, weekStr);
+      if (weekStr !== weekUtc) {
+        throw ApiError.badRequest('Klaim tantangan mingguan hanya berlaku untuk minggu aktif (UTC). Klaim masa lalu atau masa depan ditolak.', 'INVALID_REWARD_CLAIM');
+      }
+
+      const challenges = getAuthoritativeWeeklyChallenges(weekUtc);
+      const chal = challenges.find(c => c.id === canonicalClaimId);
+      if (!chal) {
+        throw ApiError.badRequest('Definisi tantangan mingguan tidak ditemukan.', 'INVALID_REWARD_CLAIM');
+      }
+
+      const weeklySessions = await getWeeklySessionHistory(userId, weekUtc);
       const achCount = await getUserVerifiedAchievementsCount(userId);
       const countPlayedToday = await getCountOfGamesPlayedToday(userId);
       const cumScore = await getUserCumulativeScore(userId);
 
-      if (index === '1') {
+      if (chal.category === 'personal_best') {
         const pbCount = weeklySessions.filter(s => s.isPersonalBest).length;
-        if (pbCount >= 2 || achCount >= 2) {
+        if (pbCount >= chal.target || achCount >= chal.target) {
           verified = true;
         }
-      } else if (index === '2') {
-        if (weeklySessions.length >= 5 || countPlayedToday >= 3) {
+      } else if (chal.category === 'endurance') {
+        if (weeklySessions.length >= chal.target || countPlayedToday >= chal.target) {
           verified = true;
         }
-      } else if (index === '3') {
+      } else if (chal.category === 'score') {
         const weeklySum = weeklySessions.reduce((acc, s) => acc + s.score, 0);
-        if (weeklySum >= 500 || cumScore >= 1000) {
+        if (weeklySum >= chal.target || cumScore >= chal.target) {
           verified = true;
         }
       }
@@ -1331,8 +1372,11 @@ export async function executeClaimReward(
       if (history.length >= 3 || comp.rankedGames >= 1 || hasScore) {
         verified = true;
       }
+    } else {
+      throw ApiError.badRequest('ID tantangan tidak valid atau tidak terdaftar.', 'INVALID_REWARD_CLAIM');
     }
   }
+
 
   if (!verified) {
     throw ApiError.badRequest('Persyaratan klaim reward belum terpenuhi berdasarkan verifikasi server.', 'REWARD_REQUIREMENTS_NOT_MET');
@@ -1915,12 +1959,15 @@ export interface RankedSubmissionResult extends ScoreSubmissionResult {
   newTier: string;
 }
 
-function validateSessionHard(
+export function validateSessionHard(
   session: StoredGameSession,
   userId: string,
   canonicalId: CanonicalGameId,
   activeSeason: StoredSeason
 ): void {
+  if (!session) {
+    throw ApiError.unprocessable('Sesi tidak ditemukan.', 'SESSION_NOT_FOUND');
+  }
   if (session.userId !== userId) {
     throw ApiError.unprocessable('Sesi ranked bukan milik pengguna ini.', 'SESSION_USER_MISMATCH');
   }
@@ -1942,11 +1989,14 @@ function validateSessionHard(
   if (!RANKED_GAME_ALLOWLIST.includes(canonicalId)) {
     throw ApiError.unprocessable('Game ini tidak valid untuk mode ranked.', 'GAME_NOT_RANKED_ELIGIBLE');
   }
-  if (session.gameVersion && session.gameVersion !== '2.0.0') {
+  if (!session.gameVersion || session.gameVersion !== '2.0.0') {
     throw ApiError.unprocessable('Versi game tidak cocok dengan sesi.', 'INVALID_SESSION');
   }
-  if (session.balanceVersion && session.balanceVersion !== '2.5.0') {
+  if (!session.balanceVersion || session.balanceVersion !== '2.5.0') {
     throw ApiError.unprocessable('Versi balancing tidak cocok dengan sesi.', 'INVALID_SESSION');
+  }
+  if (!session.rulesetVersion || session.rulesetVersion !== '1.0.0') {
+    throw ApiError.unprocessable('Versi ruleset tidak cocok dengan sesi.', 'INVALID_SESSION');
   }
 }
 
@@ -1998,10 +2048,8 @@ export async function executeRankedSubmission(input: ScoreSubmissionInput): Prom
         if (!sessDoc.exists) throw ApiError.unprocessable('Sesi ranked tidak ditemukan.', 'SESSION_NOT_FOUND');
         const session = sessDoc.data() as StoredGameSession;
 
-        if (session.userId !== userId) throw ApiError.unprocessable('User mismatch', 'SESSION_USER_MISMATCH');
-        if (session.gameId !== canonicalId) throw ApiError.unprocessable('Game mismatch', 'SESSION_GAME_MISMATCH');
-        if (session.consumed) throw ApiError.unprocessable('Session used', 'SESSION_ALREADY_CONSUMED');
-        if (nowMs > session.expiresAt) throw ApiError.unprocessable('Session expired', 'SESSION_EXPIRED');
+        // One single authoritative validation function
+        validateSessionHard(session, userId, canonicalId, season);
 
         const verifiedDurationMs = nowMs - session.startTime;
         const durationSeconds = Math.max(verifiedDurationMs / 1000, 0.5);
@@ -2108,6 +2156,23 @@ export async function executeRankedSubmission(input: ScoreSubmissionInput): Prom
           });
         }
 
+        // Progression Update
+        if (xpEarned > 0) {
+          const progRef = db.collection('userProgression').doc(userId);
+          const progDoc = await tx.get(progRef);
+          const currentProg = progDoc.exists ? (progDoc.data() as StoredUserProgression) : { userId, totalXp: 0, level: 1, lastUpdated: nowMs };
+          const newTotalXp = currentProg.totalXp + xpEarned;
+          tx.set(progRef, { userId, totalXp: newTotalXp, level: calculateLevelFromXp(newTotalXp), lastUpdated: nowMs });
+        }
+
+        // Insert Game History
+        const historyId = `hist_${nowMs}_${crypto.randomBytes(6).toString('hex')}`;
+        const historyRef = db.collection('userGameHistory').doc(historyId);
+        const genre = CANONICAL_GAME_REGISTRY[canonicalId]?.genre || 'Arcade';
+        tx.set(historyRef, {
+          historyId, userId, sessionId, gameId: canonicalId, genre, score, isPersonalBest: true, timestamp: nowMs, dateStr: getUtcDateString(nowMs), weekStr: getIsoWeekString(nowMs), seasonId: season.seasonId, isRanked: true
+        });
+
         const result: RankedSubmissionResult = {
           success: true, gameId: canonicalId, score, coinsEarned, xpEarned, newCoinBalance: updatedEco.coins, leaderboards: [], transactionId: txId, oldRating, newRating, ratingChange: delta, newTier
         };
@@ -2127,14 +2192,13 @@ export async function executeRankedSubmission(input: ScoreSubmissionInput): Prom
     return finalResult!;
   } else {
     const cached = await getProcessedAction(idempotencyId);
-    if (cached) return cached.result as RankedSubmissionResult;
+    if (cached) return cached as RankedSubmissionResult;
 
     const session = memoryStore.sessions.get(sessionId);
-    if (!session) throw ApiError.unprocessable('Session not found', 'SESSION_NOT_FOUND');
-    if (session.userId !== userId) throw ApiError.unprocessable('User mismatch', 'SESSION_USER_MISMATCH');
-    if (session.gameId !== canonicalId) throw ApiError.unprocessable('Game mismatch', 'SESSION_GAME_MISMATCH');
-    if (session.consumed) throw ApiError.unprocessable('Session used', 'SESSION_ALREADY_CONSUMED');
-    if (nowMs > session.expiresAt) throw ApiError.unprocessable('Session expired', 'SESSION_EXPIRED');
+    if (!session) throw ApiError.unprocessable('Sesi ranked tidak ditemukan.', 'SESSION_NOT_FOUND');
+
+    // One single authoritative validation function
+    validateSessionHard(session, userId, canonicalId, season);
 
     const verifiedDurationMs = nowMs - session.startTime;
     const durationSeconds = Math.max(verifiedDurationMs / 1000, 0.5);
@@ -2191,8 +2255,91 @@ export async function executeRankedSubmission(input: ScoreSubmissionInput): Prom
     eco.lastUpdated = nowMs;
     memoryStore.economies.set(userId, eco);
 
+    const txId = `rnk_tx_${nowMs}_${crypto.randomBytes(8).toString('hex')}`;
+    if (coinsEarned > 0) {
+      memoryStore.ledger.push({
+        transactionId: txId, userId, type: 'GAME_REWARD', amount: coinsEarned, balanceBefore: eco.coins - coinsEarned, balanceAfter: eco.coins, reason: `RANKED_REWARD_${canonicalId.toUpperCase()}`, referenceId: sessionId, createdAt: nowIso
+      });
+    }
+
+    // Progression Update
+    if (xpEarned > 0) {
+      const prog = memoryStore.userProgression.get(userId) || { userId, totalXp: 0, level: 1, lastUpdated: nowMs };
+      prog.totalXp += xpEarned;
+      prog.level = calculateLevelFromXp(prog.totalXp);
+      prog.lastUpdated = nowMs;
+      memoryStore.userProgression.set(userId, prog);
+    }
+
+    // Insert Game History
+    const genre = CANONICAL_GAME_REGISTRY[canonicalId]?.genre || 'Arcade';
+    const historyEntry: StoredGameHistoryEntry = {
+      historyId: `hist_${nowMs}_${crypto.randomBytes(6).toString('hex')}`,
+      userId,
+      sessionId,
+      gameId: canonicalId,
+      genre,
+      score,
+      isPersonalBest: true,
+      timestamp: nowMs,
+      dateStr: getUtcDateString(nowMs),
+      weekStr: getIsoWeekString(nowMs),
+      seasonId: season.seasonId,
+    };
+    memoryStore.gameHistory.push(historyEntry);
+
+    const entryData = {
+      userId,
+      playerName: playerName || 'Player',
+      playerAvatar: playerAvatar || '👾',
+      score,
+      submittedAt: nowIso,
+      gameId: canonicalId,
+      masteryLevel: masteryLevel || 1,
+      tier: newTier,
+      rating: newRating
+    };
+
+    // Update Memory Ranked Leaderboard
+    const rankedList = memoryStore.rankedLeaderboards.get(canonicalId) || [];
+    const rIdx = rankedList.findIndex(e => e.userId === userId);
+    if (rIdx >= 0) {
+      rankedList[rIdx] = entryData;
+    } else {
+      rankedList.push(entryData);
+    }
+    rankedList.sort((a, b) => (b.rating || 0) - (a.rating || 0));
+    memoryStore.rankedLeaderboards.set(canonicalId, rankedList);
+
+    // Update Memory Seasonal Leaderboard
+    let seasonalGames = memoryStore.seasonalLeaderboards.get(season.seasonId);
+    if (!seasonalGames) {
+      seasonalGames = new Map<string, StoredLeaderboardEntry[]>();
+      memoryStore.seasonalLeaderboards.set(season.seasonId, seasonalGames);
+    }
+    const seasonalList = seasonalGames.get(canonicalId) || [];
+    const sIdx = seasonalList.findIndex(e => e.userId === userId);
+    if (sIdx >= 0) {
+      seasonalList[sIdx] = entryData;
+    } else {
+      seasonalList.push(entryData);
+    }
+    seasonalList.sort((a, b) => (b.rating || 0) - (a.rating || 0));
+    seasonalGames.set(canonicalId, seasonalList);
+
     const result: RankedSubmissionResult = {
-      success: true, gameId: canonicalId, score, coinsEarned, xpEarned, newCoinBalance: eco.coins, leaderboards: [], transactionId: `rnk_tx_${nowMs}_${crypto.randomBytes(8).toString('hex')}`, oldRating, newRating, ratingChange: delta, newTier
+      success: true,
+      gameId: canonicalId,
+      score,
+      coinsEarned,
+      xpEarned,
+      newCoinBalance: eco.coins,
+      leaderboards: [],
+      transactionId: txId,
+      oldRating,
+      newRating,
+      ratingChange: delta,
+      newTier
     };
 
     await setProcessedAction(idempotencyId, result);

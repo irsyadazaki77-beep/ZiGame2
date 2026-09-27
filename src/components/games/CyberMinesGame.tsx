@@ -39,7 +39,8 @@ export default function CyberMinesGame({ onScoreUpdate, onGameOver, highScore }:
     updateScore,
     triggerGameOver,
     startWithCountdown,
-    countdown
+    countdown,
+    resumeGame,
   } = useGameEngine({
     gameId: 'cyber-mines',
     onGameOver,
@@ -365,6 +366,7 @@ export default function CyberMinesGame({ onScoreUpdate, onGameOver, highScore }:
           countdown={countdown}
           onStart={startGame}
           onRestart={startGame}
+          onResume={resumeGame}
           instructions="Bongkar seluruh ladang ranjau siber tanpa meledakkan bom! Gunakan mode bendera atau tekan lama untuk menandai ranjau."
         />
       </div>

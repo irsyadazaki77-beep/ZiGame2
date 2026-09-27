@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { audio } from '../utils/audio';
 import { PlayerProfile, GameStats, Achievement } from '../types';
+import { useGameContext } from '../contexts/GameContext';
 import { 
   Settings as SettingsIcon, 
   Volume2, 
@@ -78,6 +79,7 @@ interface SettingsProps {
 }
 
 export default function Settings({ profile, onUpdateProfile, onResetStats, onLogout }: SettingsProps) {
+  const { theme, toggleTheme } = useGameContext();
   // Screen size preference
   const [defaultScreenSize, setDefaultScreenSize] = useState<'standard' | 'wide' | 'theater'>(() => {
     return (localStorage.getItem('zigame-screensize') as 'standard' | 'wide' | 'theater') || 'wide';
@@ -223,14 +225,14 @@ export default function Settings({ profile, onUpdateProfile, onResetStats, onLog
   };
 
   return (
-    <div className="w-full max-w-4xl mx-auto space-y-6 pb-12">
+    <div className="w-full max-w-4xl mx-auto space-y-6 pb-12 text-text-primary">
       <div className="flex items-center gap-3">
-        <div className="p-2.5 rounded-xl bg-[#0f131c] border border-white/[0.06] text-indigo-400">
+        <div className="p-2.5 rounded-xl bg-surface-card border border-border-subtle text-indigo-500">
           <SettingsIcon className="w-5 h-5" />
         </div>
         <div>
-          <h2 className="text-xl md:text-2xl font-display font-black tracking-wide text-white uppercase">PENGATURAN</h2>
-          <p className="text-xs font-mono text-zinc-400 uppercase tracking-wider mt-0.5">Konfigurasi sesi, audio, tampilan, dan keamanan</p>
+          <h2 className="text-xl md:text-2xl font-display font-black tracking-wide text-text-primary uppercase">PENGATURAN</h2>
+          <p className="text-xs font-mono text-text-secondary uppercase tracking-wider mt-0.5">Konfigurasi sesi, audio, tampilan, dan keamanan</p>
         </div>
       </div>
 
@@ -241,9 +243,9 @@ export default function Settings({ profile, onUpdateProfile, onResetStats, onLog
             initial={{ opacity: 0, y: -10 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -10 }}
-            className="p-3.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center gap-2 text-emerald-400 text-xs font-mono"
+            className="p-3.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center gap-2 text-emerald-500 text-xs font-mono"
           >
-            <Sparkles className="w-4 h-4 text-emerald-400" />
+            <Sparkles className="w-4 h-4 text-emerald-500" />
             <span>{successMsg}</span>
           </motion.div>
         )}
@@ -255,20 +257,20 @@ export default function Settings({ profile, onUpdateProfile, onResetStats, onLog
         <div className="lg:col-span-7 space-y-6">
           
           {/* Audio Settings Card */}
-          <div className="bg-[#0f131c] border border-white/[0.06] rounded-2xl p-5 sm:p-6 shadow-sm space-y-4">
-            <h3 className="text-xs font-mono font-bold text-white tracking-wider uppercase flex items-center gap-2">
-              <Volume2 className="w-4 h-4 text-indigo-400" /> SINTESIS AUDIO & SUARA
+          <div className="bg-surface-card border border-border-subtle rounded-2xl p-5 sm:p-6 shadow-xs space-y-4">
+            <h3 className="text-xs font-mono font-bold text-text-primary tracking-wider uppercase flex items-center gap-2">
+              <Volume2 className="w-4 h-4 text-indigo-500" /> SINTESIS AUDIO & SUARA
             </h3>
             
             <div className="space-y-3">
-              <div className="flex items-center justify-between p-3.5 bg-[#151a26] border border-white/[0.06] rounded-xl">
+              <div className="flex items-center justify-between p-3.5 bg-surface-subtle border border-border-subtle rounded-xl">
                 <div>
-                  <span className="text-xs font-bold text-zinc-200 uppercase tracking-wide block">Bungkam Semua Suara</span>
-                  <span className="text-xs text-zinc-400 font-mono mt-0.5 block">Matikan seluruh efek audio synthesizer.</span>
+                  <span className="text-xs font-bold text-text-primary uppercase tracking-wide block">Bungkam Semua Suara</span>
+                  <span className="text-xs text-text-secondary font-mono mt-0.5 block">Matikan seluruh efek audio synthesizer.</span>
                 </div>
                 <button
                   onClick={handleToggleMute}
-                  className={`w-11 h-6 rounded-full p-0.5 transition-colors duration-200 cursor-pointer focus:outline-none ${
+                  className={`w-11 h-6 rounded-full p-0.5 transition-colors duration-200 cursor-pointer focus:outline-hidden ${
                     isMuted ? 'bg-zinc-800' : 'bg-indigo-600'
                   }`}
                 >
@@ -278,15 +280,15 @@ export default function Settings({ profile, onUpdateProfile, onResetStats, onLog
                 </button>
               </div>
 
-              <div className="flex items-center justify-between p-3.5 bg-[#151a26] border border-white/[0.06] rounded-xl">
+              <div className="flex items-center justify-between p-3.5 bg-surface-subtle border border-border-subtle rounded-xl">
                 <div>
-                  <span className="text-xs font-bold text-zinc-200 uppercase tracking-wide block">Uji Generator Suara</span>
-                  <span className="text-xs text-zinc-400 font-mono mt-0.5 block">Tes respon audio Web-Audio API.</span>
+                  <span className="text-xs font-bold text-text-primary uppercase tracking-wide block">Uji Generator Suara</span>
+                  <span className="text-xs text-text-secondary font-mono mt-0.5 block">Tes respon audio Web-Audio API.</span>
                 </div>
                 <button
                   onClick={handleTestSound}
                   disabled={isMuted}
-                  className="px-3.5 py-1.5 rounded-lg border border-white/[0.08] bg-[#0f131c] text-xs font-mono font-bold text-zinc-300 hover:text-white hover:bg-zinc-800 cursor-pointer transition disabled:opacity-30 disabled:cursor-not-allowed"
+                  className="px-3.5 py-1.5 rounded-lg border border-border-medium bg-surface-card text-xs font-mono font-bold text-text-primary hover:text-white hover:bg-indigo-600 cursor-pointer transition disabled:opacity-30 disabled:cursor-not-allowed"
                 >
                   TES SUARA 🎵
                 </button>
@@ -295,23 +297,23 @@ export default function Settings({ profile, onUpdateProfile, onResetStats, onLog
           </div>
 
           {/* Video / Display Preferences */}
-          <div className="bg-[#0f131c] border border-white/[0.06] rounded-2xl p-5 sm:p-6 shadow-sm space-y-4">
-            <h3 className="text-xs font-mono font-bold text-white tracking-wider uppercase flex items-center gap-2">
-              <Monitor className="w-4 h-4 text-indigo-400" /> TAMPILAN LAYAR GAME
+          <div className="bg-surface-card border border-border-subtle rounded-2xl p-5 sm:p-6 shadow-xs space-y-4">
+            <h3 className="text-xs font-mono font-bold text-text-primary tracking-wider uppercase flex items-center gap-2">
+              <Monitor className="w-4 h-4 text-indigo-500" /> TAMPILAN LAYAR GAME
             </h3>
 
             <div className="space-y-2">
               <div>
-                <span className="text-xs font-bold text-zinc-200 uppercase tracking-wide block mb-1">Ukuran Canvas Standar</span>
-                <span className="text-xs text-zinc-400 font-mono block mb-3">Pilih ukuran lebar layar canvas game yang sesuai resolusi monitor/layar.</span>
+                <span className="text-xs font-bold text-text-primary uppercase tracking-wide block mb-1">Ukuran Canvas Standar</span>
+                <span className="text-xs text-text-secondary font-mono block mb-3">Pilih ukuran lebar layar canvas game yang sesuai resolusi monitor/layar.</span>
                 
-                <div className="grid grid-cols-3 gap-2 bg-[#151a26] border border-white/[0.06] rounded-xl p-1">
+                <div className="grid grid-cols-3 gap-2 bg-surface-subtle border border-border-subtle rounded-xl p-1">
                   <button
                     onClick={() => handleScreenSize('standard')}
                     className={`py-2 rounded-lg text-xs font-mono font-bold flex flex-col items-center gap-1 cursor-pointer transition select-none ${
                       defaultScreenSize === 'standard'
                         ? 'bg-indigo-600 text-white shadow-sm'
-                        : 'text-zinc-400 hover:text-zinc-200'
+                        : 'text-text-muted hover:text-text-primary'
                     }`}
                   >
                     <span>📱</span>
@@ -322,7 +324,7 @@ export default function Settings({ profile, onUpdateProfile, onResetStats, onLog
                     className={`py-2 rounded-lg text-xs font-mono font-bold flex flex-col items-center gap-1 cursor-pointer transition select-none ${
                       defaultScreenSize === 'wide'
                         ? 'bg-indigo-600 text-white shadow-sm'
-                        : 'text-zinc-400 hover:text-zinc-200'
+                        : 'text-text-muted hover:text-text-primary'
                     }`}
                   >
                     <span>💻</span>
@@ -333,7 +335,7 @@ export default function Settings({ profile, onUpdateProfile, onResetStats, onLog
                     className={`py-2 rounded-lg text-xs font-mono font-bold flex flex-col items-center gap-1 cursor-pointer transition select-none ${
                       defaultScreenSize === 'theater'
                         ? 'bg-indigo-600 text-white shadow-sm'
-                        : 'text-zinc-400 hover:text-zinc-200'
+                        : 'text-text-muted hover:text-text-primary'
                     }`}
                   >
                     <span>📺</span>
@@ -341,30 +343,60 @@ export default function Settings({ profile, onUpdateProfile, onResetStats, onLog
                   </button>
                 </div>
               </div>
+
+              <div className="pt-4 border-t border-border-subtle">
+                <span className="text-xs font-bold text-text-primary uppercase tracking-wide block mb-1">Tema Tampilan Kabinet</span>
+                <span className="text-xs text-text-secondary font-mono block mb-3">Pilih tema visual kabinet ZiGame2 antara mode terang dan gelap yang terpadu.</span>
+                
+                <div className="grid grid-cols-2 gap-2 bg-surface-subtle border border-border-subtle rounded-xl p-1">
+                  <button
+                    onClick={() => { audio.playCoin(); if (theme === 'dark') toggleTheme(); }}
+                    className={`py-2 rounded-lg text-xs font-mono font-bold flex items-center justify-center gap-2 cursor-pointer transition select-none ${
+                      theme === 'light'
+                        ? 'bg-indigo-600 text-white shadow-sm'
+                        : 'text-text-muted hover:text-text-primary'
+                    }`}
+                  >
+                    <span>☀️</span>
+                    <span>MODE TERANG</span>
+                  </button>
+                  <button
+                    onClick={() => { audio.playCoin(); if (theme === 'light') toggleTheme(); }}
+                    className={`py-2 rounded-lg text-xs font-mono font-bold flex items-center justify-center gap-2 cursor-pointer transition select-none ${
+                      theme === 'dark'
+                        ? 'bg-indigo-600 text-white shadow-sm'
+                        : 'text-text-muted hover:text-text-primary'
+                    }`}
+                  >
+                    <span>🌙</span>
+                    <span>MODE GELAP</span>
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
 
           {/* Graphics & Performance Settings Card */}
-          <div className="bg-[#0f131c] border border-white/[0.06] rounded-2xl p-5 sm:p-6 shadow-sm space-y-5">
-            <h3 className="text-xs font-mono font-bold text-white tracking-wider uppercase flex items-center gap-2">
-              <Cpu className="w-4 h-4 text-indigo-400" /> PERFORMA & GRAFIS
+          <div className="bg-surface-card border border-border-subtle rounded-2xl p-5 sm:p-6 shadow-xs space-y-5">
+            <h3 className="text-xs font-mono font-bold text-text-primary tracking-wider uppercase flex items-center gap-2">
+              <Cpu className="w-4 h-4 text-indigo-500" /> PERFORMA & GRAFIS
             </h3>
 
             <div className="space-y-4">
               {/* Graphics Quality */}
               <div>
-                <span className="text-xs font-bold text-zinc-200 uppercase tracking-wide block mb-1">Kualitas Grafis (Fidelity)</span>
-                <span className="text-xs text-zinc-400 font-mono block mb-2.5">
+                <span className="text-xs font-bold text-text-primary uppercase tracking-wide block mb-1">Kualitas Grafis (Fidelity)</span>
+                <span className="text-xs text-text-secondary font-mono block mb-2.5">
                   Pilih kualitas efek partikel dan shadow untuk mengoptimalkan frame rate.
                 </span>
                 
-                <div className="grid grid-cols-3 gap-2 bg-[#151a26] border border-white/[0.06] rounded-xl p-1">
+                <div className="grid grid-cols-3 gap-2 bg-surface-subtle border border-border-subtle rounded-xl p-1">
                   <button
                     onClick={() => handleGraphicsChange('low')}
                     className={`py-2 rounded-lg text-xs font-mono font-bold flex flex-col items-center gap-1 cursor-pointer transition select-none ${
                       graphicsQuality === 'low'
                         ? 'bg-indigo-600 text-white shadow-sm'
-                        : 'text-zinc-400 hover:text-zinc-200'
+                        : 'text-text-muted hover:text-text-primary'
                     }`}
                   >
                     <span className="text-base">⚡</span>
@@ -375,7 +407,7 @@ export default function Settings({ profile, onUpdateProfile, onResetStats, onLog
                     className={`py-2 rounded-lg text-xs font-mono font-bold flex flex-col items-center gap-1 cursor-pointer transition select-none ${
                       graphicsQuality === 'medium'
                         ? 'bg-indigo-600 text-white shadow-sm'
-                        : 'text-zinc-400 hover:text-zinc-200'
+                        : 'text-text-muted hover:text-text-primary'
                     }`}
                   >
                     <span className="text-base">⚖️</span>
@@ -386,7 +418,7 @@ export default function Settings({ profile, onUpdateProfile, onResetStats, onLog
                     className={`py-2 rounded-lg text-xs font-mono font-bold flex flex-col items-center gap-1 cursor-pointer transition select-none ${
                       graphicsQuality === 'high'
                         ? 'bg-indigo-600 text-white shadow-sm'
-                        : 'text-zinc-400 hover:text-zinc-200'
+                        : 'text-text-muted hover:text-text-primary'
                     }`}
                   >
                     <span className="text-base">💎</span>
@@ -397,12 +429,12 @@ export default function Settings({ profile, onUpdateProfile, onResetStats, onLog
 
               {/* FPS Limit */}
               <div>
-                <span className="text-xs font-bold text-zinc-200 uppercase tracking-wide block mb-1">Target Batasan FPS</span>
-                <span className="text-xs text-zinc-400 font-mono block mb-2.5">
+                <span className="text-xs font-bold text-text-primary uppercase tracking-wide block mb-1">Target Batasan FPS</span>
+                <span className="text-xs text-text-secondary font-mono block mb-2.5">
                   Batasi frame rate untuk menghemat daya baterai atau menjaga stabilitas.
                 </span>
                 
-                <div className="grid grid-cols-4 gap-1.5 bg-[#151a26] border border-white/[0.06] rounded-xl p-1">
+                <div className="grid grid-cols-4 gap-1.5 bg-surface-subtle border border-border-subtle rounded-xl p-1">
                   {(['30', '60', '120', 'auto'] as const).map((limit) => (
                     <button
                       key={limit}
@@ -410,7 +442,7 @@ export default function Settings({ profile, onUpdateProfile, onResetStats, onLog
                       className={`py-2 rounded-lg text-xs font-mono font-bold flex flex-col items-center gap-0.5 cursor-pointer transition select-none ${
                         fpsLimit === limit
                           ? 'bg-indigo-600 text-white shadow-sm'
-                          : 'text-zinc-400 hover:text-zinc-200'
+                          : 'text-text-muted hover:text-text-primary'
                       }`}
                     >
                       <span className="text-sm">
@@ -425,22 +457,22 @@ export default function Settings({ profile, onUpdateProfile, onResetStats, onLog
           </div>
 
           {/* Security & Backup Card */}
-          <div className="bg-[#0f131c] border border-white/[0.06] rounded-2xl p-5 sm:p-6 shadow-sm space-y-5">
-            <h3 className="text-xs font-mono font-bold text-white tracking-wider uppercase flex items-center gap-2">
-              <ShieldCheck className="w-4 h-4 text-emerald-400" /> INTEGRITAS & KEAMANAN
+          <div className="bg-surface-card border border-border-subtle rounded-2xl p-5 sm:p-6 shadow-xs space-y-5">
+            <h3 className="text-xs font-mono font-bold text-text-primary tracking-wider uppercase flex items-center gap-2">
+              <ShieldCheck className="w-4 h-4 text-emerald-500" /> INTEGRITAS & KEAMANAN
             </h3>
 
             <div className="space-y-5">
               {/* Auto Lock Session */}
               <div>
-                <span className="text-xs font-bold text-zinc-200 uppercase tracking-wide block mb-1">
+                <span className="text-xs font-bold text-text-primary uppercase tracking-wide block mb-1">
                   Kunci Sesi Otomatis (Auto-Lock)
                 </span>
-                <span className="text-xs text-zinc-400 font-mono block mb-2.5">
+                <span className="text-xs text-text-secondary font-mono block mb-2.5">
                   Sistem mengunci akun jika tidak ada aktivitas dalam waktu tertentu.
                 </span>
                 
-                <div className="grid grid-cols-4 gap-1.5 bg-[#151a26] border border-white/[0.06] rounded-xl p-1">
+                <div className="grid grid-cols-4 gap-1.5 bg-surface-subtle border border-border-subtle rounded-xl p-1">
                   {([
                     { value: 'off', label: 'OFF' },
                     { value: '1', label: '1 MENIT' },
@@ -459,7 +491,7 @@ export default function Settings({ profile, onUpdateProfile, onResetStats, onLog
                       className={`py-2 rounded-lg text-xs font-mono font-bold flex flex-col items-center gap-0.5 cursor-pointer transition select-none ${
                         autolockVal === opt.value
                           ? 'bg-emerald-600 text-white shadow-sm'
-                          : 'text-zinc-400 hover:text-zinc-200'
+                          : 'text-text-muted hover:text-text-primary'
                       }`}
                     >
                       <span>🔒</span>
@@ -470,12 +502,12 @@ export default function Settings({ profile, onUpdateProfile, onResetStats, onLog
               </div>
 
               {/* Encrypted Backups Row */}
-              <div className="border-t border-white/[0.06] pt-4 space-y-3">
+              <div className="border-t border-border-subtle pt-4 space-y-3">
                 <div>
-                  <span className="text-xs font-bold text-zinc-200 uppercase tracking-wide block mb-1">
+                  <span className="text-xs font-bold text-text-primary uppercase tracking-wide block mb-1">
                     Cadangan Terenkripsi
                   </span>
-                  <span className="text-xs text-zinc-400 font-mono block mb-3">
+                  <span className="text-xs text-text-secondary font-mono block mb-3">
                     Ekspor seluruh koin dan highscore Anda ke format bertanda tangan kriptografis.
                   </span>
                 </div>
@@ -502,7 +534,7 @@ export default function Settings({ profile, onUpdateProfile, onResetStats, onLog
                             setBackupError(err.message || 'Gagal mengekspor data.');
                           }
                         }}
-                        className="flex-1 py-2 px-3 bg-[#151a26] hover:bg-zinc-800 border border-white/[0.06] text-zinc-200 rounded-xl text-xs font-mono font-bold tracking-wider cursor-pointer flex items-center justify-center gap-2 transition"
+                        className="flex-1 py-2 px-3 bg-surface-subtle hover:bg-surface-card-hover border border-border-subtle text-text-primary rounded-xl text-xs font-mono font-bold tracking-wider cursor-pointer flex items-center justify-center gap-2 transition"
                       >
                         📥 EKSPOR CADANGAN
                       </button>
@@ -512,7 +544,7 @@ export default function Settings({ profile, onUpdateProfile, onResetStats, onLog
                           setShowImportArea(!showImportArea);
                           setBackupError('');
                         }}
-                        className="flex-1 py-2 px-3 bg-[#151a26] hover:bg-zinc-800 border border-white/[0.06] text-zinc-200 rounded-xl text-xs font-mono font-bold tracking-wider cursor-pointer flex items-center justify-center gap-2 transition"
+                        className="flex-1 py-2 px-3 bg-surface-subtle hover:bg-surface-card-hover border border-border-subtle text-text-primary rounded-xl text-xs font-mono font-bold tracking-wider cursor-pointer flex items-center justify-center gap-2 transition"
                       >
                         📤 IMPOR CADANGAN
                       </button>
@@ -520,27 +552,27 @@ export default function Settings({ profile, onUpdateProfile, onResetStats, onLog
 
                     {exportedJson && (
                       <div className="space-y-1.5">
-                        <label className="block text-[10px] font-mono text-zinc-500 uppercase">KODE ENKRIPSI CADANGAN ANDA</label>
+                        <label className="block text-[10px] font-mono text-text-muted uppercase">KODE ENKRIPSI CADANGAN ANDA</label>
                         <textarea
                           readOnly
                           value={exportedJson}
                           onClick={(e) => (e.target as HTMLTextAreaElement).select()}
-                          className="w-full h-16 bg-zinc-950 border border-white/[0.06] rounded-xl p-2 font-mono text-xs text-zinc-300 outline-none resize-none"
+                          className="w-full h-16 bg-surface-sunken border border-border-subtle rounded-xl p-2 font-mono text-xs text-text-primary outline-none resize-none"
                         />
                       </div>
                     )}
 
                     {showImportArea && (
-                      <div className="space-y-3 p-3 bg-[#151a26] border border-white/[0.06] rounded-xl">
-                        <span className="block text-xs font-mono font-bold text-zinc-300 uppercase">Tempel Kode Cadangan</span>
+                      <div className="space-y-3 p-3 bg-surface-subtle border border-border-subtle rounded-xl">
+                        <span className="block text-xs font-mono font-bold text-text-primary uppercase">Tempel Kode Cadangan</span>
                         <textarea
                           placeholder='Tempel JSON cadangan di sini (termasuk kode "signature")...'
                           value={importText}
                           onChange={(e) => setImportText(e.target.value)}
-                          className="w-full h-16 bg-zinc-950 border border-white/[0.06] rounded-xl p-2 font-mono text-xs text-zinc-200 outline-none resize-none focus:border-indigo-500"
+                          className="w-full h-16 bg-surface-sunken border border-border-subtle rounded-xl p-2 font-mono text-xs text-text-primary outline-none resize-none focus:border-indigo-500"
                         />
                         {backupError && (
-                          <p className="text-xs font-mono text-rose-400 uppercase leading-normal">
+                          <p className="text-xs font-mono text-rose-500 uppercase leading-normal">
                             🚨 {backupError}
                           </p>
                         )}
@@ -595,8 +627,8 @@ export default function Settings({ profile, onUpdateProfile, onResetStats, onLog
                     )}
                   </div>
                 ) : (
-                  <div className="p-3 bg-[#151a26] border border-white/[0.06] rounded-xl text-center">
-                    <span className="text-xs text-zinc-400 font-mono uppercase tracking-wider block">
+                  <div className="p-3 bg-surface-subtle border border-border-subtle rounded-xl text-center">
+                    <span className="text-xs text-text-secondary font-mono uppercase tracking-wider block">
                       Masuk akun terlebih dahulu untuk menggunakan fitur enkripsi & cadangan.
                     </span>
                   </div>
@@ -606,21 +638,21 @@ export default function Settings({ profile, onUpdateProfile, onResetStats, onLog
           </div>
 
           {/* Reset stats options */}
-          <div className="bg-[#0f131c] border border-rose-500/20 rounded-2xl p-5 sm:p-6 shadow-sm space-y-4">
-            <h3 className="text-xs font-mono font-bold text-rose-400 tracking-wider uppercase flex items-center gap-2">
-              <ShieldAlert className="w-4 h-4 text-rose-400" /> ZONA BERBAHAYA
+          <div className="bg-surface-card border border-rose-500/20 rounded-2xl p-5 sm:p-6 shadow-xs space-y-4">
+            <h3 className="text-xs font-mono font-bold text-rose-500 tracking-wider uppercase flex items-center gap-2">
+              <ShieldAlert className="w-4 h-4 text-rose-500" /> ZONA BERBAHAYA
             </h3>
 
             <div className="space-y-3">
-              <div className="p-3.5 bg-rose-500/[0.04] border border-rose-500/10 rounded-xl flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+              <div className="p-3.5 bg-rose-500/5 border border-rose-500/10 rounded-xl flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
                 <div>
-                  <span className="text-xs font-bold text-rose-300 uppercase tracking-wide block">Reset Rekor & Skor</span>
-                  <span className="text-xs text-zinc-400 font-mono mt-0.5 block">Kembalikan plays, highscore, dan misi ke 0.</span>
+                  <span className="text-xs font-bold text-rose-500 uppercase tracking-wide block">Reset Rekor & Skor</span>
+                  <span className="text-xs text-text-secondary font-mono mt-0.5 block">Kembalikan plays, highscore, dan misi ke 0.</span>
                 </div>
                 {!showResetConfirm ? (
                   <button
                     onClick={() => { audio.playCoin(); setShowResetConfirm(true); }}
-                    className="px-3.5 py-1.5 bg-[#151a26] border border-rose-500/20 text-rose-400 hover:bg-rose-500/10 rounded-xl text-xs font-mono font-bold tracking-wider cursor-pointer transition"
+                    className="px-3.5 py-1.5 bg-surface-subtle border border-rose-500/20 text-rose-500 hover:bg-rose-500/10 rounded-xl text-xs font-mono font-bold tracking-wider cursor-pointer transition"
                   >
                     RESET DATA
                   </button>
@@ -634,7 +666,7 @@ export default function Settings({ profile, onUpdateProfile, onResetStats, onLog
                     </button>
                     <button
                       onClick={() => { audio.playCoin(); setShowResetConfirm(false); }}
-                      className="px-3 py-1.5 bg-zinc-800 text-zinc-400 hover:text-zinc-200 rounded-lg text-xs font-mono font-bold cursor-pointer uppercase"
+                      className="px-3 py-1.5 bg-surface-hover text-text-secondary hover:text-text-primary rounded-lg text-xs font-mono font-bold cursor-pointer uppercase"
                     >
                       BATAL
                     </button>
@@ -643,15 +675,15 @@ export default function Settings({ profile, onUpdateProfile, onResetStats, onLog
               </div>
 
               {loggedInUser && (
-                <div className="p-3.5 bg-rose-500/[0.04] border border-rose-500/10 rounded-xl flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+                <div className="p-3.5 bg-rose-500/5 border border-rose-500/10 rounded-xl flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
                   <div>
-                    <span className="text-xs font-bold text-rose-300 uppercase tracking-wide block">Hapus Akun Aktif</span>
-                    <span className="text-xs text-zinc-400 font-mono mt-0.5 block">Hapus permanen akun @{loggedInUser}.</span>
+                    <span className="text-xs font-bold text-rose-500 uppercase tracking-wide block">Hapus Akun Aktif</span>
+                    <span className="text-xs text-text-secondary font-mono mt-0.5 block">Hapus permanen akun @{loggedInUser}.</span>
                   </div>
                   {!showDeleteConfirm ? (
                     <button
                       onClick={() => { audio.playCoin(); setShowDeleteConfirm(true); }}
-                      className="px-3.5 py-1.5 bg-[#151a26] border border-rose-500/20 text-rose-400 hover:bg-rose-500/10 rounded-xl text-xs font-mono font-bold tracking-wider cursor-pointer transition"
+                      className="px-3.5 py-1.5 bg-surface-subtle border border-rose-500/20 text-rose-500 hover:bg-rose-500/10 rounded-xl text-xs font-mono font-bold tracking-wider cursor-pointer transition"
                     >
                       HAPUS AKUN
                     </button>
@@ -665,7 +697,7 @@ export default function Settings({ profile, onUpdateProfile, onResetStats, onLog
                       </button>
                       <button
                         onClick={() => { audio.playCoin(); setShowDeleteConfirm(false); }}
-                        className="px-3 py-1.5 bg-zinc-800 text-zinc-400 hover:text-zinc-200 rounded-lg text-xs font-mono font-bold cursor-pointer uppercase"
+                        className="px-3 py-1.5 bg-surface-hover text-text-secondary hover:text-text-primary rounded-lg text-xs font-mono font-bold cursor-pointer uppercase"
                       >
                         BATAL
                       </button>
@@ -682,26 +714,26 @@ export default function Settings({ profile, onUpdateProfile, onResetStats, onLog
         <div className="lg:col-span-5 space-y-6">
           
           {/* Profile Customization Card */}
-          <div className="bg-[#0f131c] border border-white/[0.06] rounded-2xl p-5 sm:p-6 shadow-sm space-y-4">
-            <h3 className="text-xs font-mono font-bold text-white tracking-wider uppercase flex items-center gap-2">
-              <Smile className="w-4 h-4 text-indigo-400" /> KUSTOMISASI PROFIL
+          <div className="bg-surface-card border border-border-subtle rounded-2xl p-5 sm:p-6 shadow-xs space-y-4">
+            <h3 className="text-xs font-mono font-bold text-text-primary tracking-wider uppercase flex items-center gap-2">
+              <Smile className="w-4 h-4 text-indigo-500" /> KUSTOMISASI PROFIL
             </h3>
 
             <div className="space-y-4">
               {/* Profile Avatar Preview */}
-              <div className="flex flex-col items-center py-4 bg-[#151a26] border border-white/[0.06] rounded-xl">
+              <div className="flex flex-col items-center py-4 bg-surface-subtle border border-border-subtle rounded-xl">
                 <div 
-                  className="w-16 h-16 rounded-2xl bg-[#0f131c] border border-white/10 flex items-center justify-center text-3xl shadow-sm relative"
+                  className="w-16 h-16 rounded-2xl bg-surface-card border border-border-medium flex items-center justify-center text-3xl shadow-xs relative"
                   style={{ borderColor: themeColor }}
                 >
                   {avatar}
                 </div>
-                <span className="text-[10px] font-mono text-zinc-400 uppercase tracking-wider mt-2">PRATINJAU AVATAR</span>
+                <span className="text-[10px] font-mono text-text-secondary uppercase tracking-wider mt-2">PRATINJAU AVATAR</span>
               </div>
 
               {/* Edit Display Name */}
               <div className="space-y-1.5">
-                <label className="block text-xs font-mono font-bold tracking-wider text-zinc-300 uppercase">
+                <label className="block text-xs font-mono font-bold tracking-wider text-text-secondary uppercase">
                   NAMA PEMAIN
                 </label>
                 <input
@@ -709,16 +741,16 @@ export default function Settings({ profile, onUpdateProfile, onResetStats, onLog
                   maxLength={14}
                   value={displayName}
                   onChange={(e) => setDisplayName(e.target.value.toUpperCase())}
-                  className="w-full bg-[#151a26] border border-white/[0.06] focus:border-indigo-500 rounded-xl py-2.5 px-3.5 text-xs font-mono text-white placeholder-zinc-500 outline-none transition uppercase"
+                  className="w-full bg-surface-sunken border border-border-subtle focus:border-indigo-500 rounded-xl py-2.5 px-3.5 text-xs font-mono text-text-primary placeholder-text-muted outline-none transition uppercase"
                 />
               </div>
 
               {/* Edit Avatar Row */}
               <div className="space-y-1.5">
-                <label className="block text-xs font-mono font-bold tracking-wider text-zinc-300 uppercase">
+                <label className="block text-xs font-mono font-bold tracking-wider text-text-secondary uppercase">
                   PILIH IKON AVATAR
                 </label>
-                <div className="flex flex-wrap gap-1.5 p-2 bg-[#151a26] rounded-xl border border-white/[0.06]">
+                <div className="flex flex-wrap gap-1.5 p-2 bg-surface-subtle rounded-xl border border-border-subtle">
                   {avatars.map((av) => (
                     <button
                       key={av}
@@ -727,7 +759,7 @@ export default function Settings({ profile, onUpdateProfile, onResetStats, onLog
                       className={`w-8 h-8 rounded-lg flex items-center justify-center text-lg cursor-pointer transition select-none ${
                         avatar === av
                           ? 'bg-indigo-600 text-white'
-                          : 'bg-[#0f131c] hover:bg-zinc-800'
+                          : 'bg-surface-card hover:bg-surface-hover text-text-primary'
                       }`}
                     >
                       {av}
@@ -738,7 +770,7 @@ export default function Settings({ profile, onUpdateProfile, onResetStats, onLog
 
               {/* Color Themes */}
               <div className="space-y-1.5">
-                <label className="block text-xs font-mono font-bold tracking-wider text-zinc-300 uppercase">
+                <label className="block text-xs font-mono font-bold tracking-wider text-text-secondary uppercase">
                   TEMA WARNA AKSEN
                 </label>
                 <div className="grid grid-cols-2 gap-1.5">
@@ -749,8 +781,8 @@ export default function Settings({ profile, onUpdateProfile, onResetStats, onLog
                       onClick={() => { audio.playCoin(); setThemeColor(c.value); }}
                       className={`py-2 px-2.5 rounded-lg text-xs font-mono font-bold flex items-center gap-2 cursor-pointer border select-none transition ${
                         themeColor === c.value
-                          ? 'bg-[#151a26] border-white/20 text-white'
-                          : 'bg-[#151a26]/40 border-white/[0.04] text-zinc-400 hover:text-zinc-200'
+                          ? 'bg-surface-subtle border-indigo-500 text-text-primary'
+                          : 'bg-surface-card/40 border-border-subtle text-text-secondary hover:text-text-primary'
                       }`}
                     >
                       <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: c.value }}></span>
@@ -772,27 +804,27 @@ export default function Settings({ profile, onUpdateProfile, onResetStats, onLog
           </div>
 
           {/* Credits / About card */}
-          <div className="bg-[#0f131c] border border-white/[0.06] rounded-2xl p-5 sm:p-6 shadow-sm space-y-4">
-            <h3 className="text-xs font-mono font-bold text-white tracking-wider uppercase flex items-center gap-2">
-              <Code2 className="w-4 h-4 text-indigo-400" /> INFORMASI ZIGAME
+          <div className="bg-surface-card border border-border-subtle rounded-2xl p-5 sm:p-6 shadow-xs space-y-4">
+            <h3 className="text-xs font-mono font-bold text-text-primary tracking-wider uppercase flex items-center gap-2">
+              <Code2 className="w-4 h-4 text-indigo-500" /> INFORMASI ZIGAME
             </h3>
 
-            <div className="space-y-2.5 font-mono text-xs text-zinc-400 uppercase tracking-wider">
-              <div className="flex justify-between border-b border-white/[0.06] pb-2">
+            <div className="space-y-2.5 font-mono text-xs text-text-secondary uppercase tracking-wider">
+              <div className="flex justify-between border-b border-border-subtle pb-2">
                 <span>VERSI SISTEM</span>
-                <span className="text-zinc-200">ZIGAME V3.0-PRO</span>
+                <span className="text-text-primary">ZIGAME V3.0-PRO</span>
               </div>
-              <div className="flex justify-between border-b border-white/[0.06] pb-2">
+              <div className="flex justify-between border-b border-border-subtle pb-2">
                 <span>FRAMEWORK</span>
-                <span className="text-zinc-200">REACT 19 + VITE + TAILWIND</span>
+                <span className="text-text-primary">REACT 19 + VITE + TAILWIND</span>
               </div>
-              <div className="flex justify-between border-b border-white/[0.06] pb-2">
+              <div className="flex justify-between border-b border-border-subtle pb-2">
                 <span>SOUND ENGINE</span>
-                <span className="text-zinc-200">WEB AUDIO OSCILLATOR</span>
+                <span className="text-text-primary">WEB AUDIO OSCILLATOR</span>
               </div>
               <div className="flex justify-between pb-1">
                 <span>STUDIO</span>
-                <span className="text-zinc-200">ARKADE STUDIO</span>
+                <span className="text-text-primary">ARKADE STUDIO</span>
               </div>
             </div>
           </div>

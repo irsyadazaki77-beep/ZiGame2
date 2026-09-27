@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Trophy, CheckCircle } from 'lucide-react';
 import { GameStats, LeaderboardEntry } from '../types';
+import { logger } from '../utils/logger';
 
 interface GlobalLeaderboardProps {
   game: GameStats | null;
@@ -21,7 +22,7 @@ export default function GlobalLeaderboard({ game }: GlobalLeaderboardProps) {
           setLeaderboard(data.leaderboard || []);
         }
       } catch (e) {
-        console.error('Failed to fetch leaderboard:', e);
+        logger.error('Failed to fetch leaderboard', { error: e as Error });
       }
       setLoading(false);
     };
@@ -49,7 +50,7 @@ export default function GlobalLeaderboard({ game }: GlobalLeaderboardProps) {
       ) : leaderboard.length > 0 ? (
         <div className="space-y-2">
           {leaderboard.slice(0, 5).map((entry, idx) => (
-            <div key={idx} className="flex items-center justify-between p-2.5 rounded-xl bg-zinc-950/80 border border-zinc-800 hover:border-zinc-700 transition">
+            <div key={idx} className="flex items-center justify-between p-2.5 rounded-xl bg-zinc-950/80 border border-zinc-800 hover:border-zinc-700 hover:scale-[1.015] transition-all duration-150 ease-out">
               <div className="flex items-center gap-2.5">
                 <span className={`font-mono text-xs w-4 text-center font-black ${idx === 0 ? 'text-amber-400' : idx === 1 ? 'text-zinc-300' : idx === 2 ? 'text-amber-700' : 'text-zinc-600'}`}>
                   #{idx + 1}

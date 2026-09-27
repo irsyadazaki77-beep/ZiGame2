@@ -22,40 +22,51 @@ interface Hole {
 const HOLE_COUNT = 9;
 const GAME_DURATION = 30; // 30 seconds
 
+import { useGameEngine } from '../../hooks/useGameEngine';
+
 export default function WhackADroneGame({ onGameOver, onScoreUpdate, highScore }: WhackADroneProps) {
+  const {
+    gameState,
+    score,
+    addScore,
+    startWithCountdown,
+    countdown,
+    triggerGameOver,
+    pauseGame,
+    resumeGame,
+    gameStateRef,
+    scoreRef,
+  } = useGameEngine({
+    gameId: 'whackadrone',
+    onGameOver,
+    onScoreUpdate,
+  });
+
   const [holes, setHoles] = useState<Hole[]>(Array(HOLE_COUNT).fill(null).map((_, i) => ({ id: i, droneType: 'none', active: false, hit: false })));
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [gameOver, setGameOver] = useState(false);
-  const [score, setScore] = useState(0);
   const [timeLeft, setTimeLeft] = useState(GAME_DURATION);
-  const [muted, setMuted] = useState(audio.getMuteState());
 
   const spawnTimerRef = useRef<number | null>(null);
   const gameTimerRef = useRef<number | null>(null);
 
   const startGame = () => {
-    setScore(0);
-    setTimeLeft(GAME_DURATION);
-    setIsPlaying(true);
-    setGameOver(false);
-    setHoles(Array(HOLE_COUNT).fill(null).map((_, i) => ({ id: i, droneType: 'none', active: false, hit: false })));
+    startWithCountdown(() => {
+      setTimeLeft(GAME_DURATION);
+      setHoles(Array(HOLE_COUNT).fill(null).map((_, i) => ({ id: i, droneType: 'none', active: false, hit: false })));
 
+      // Start game timer
+      if (gameTimerRef.current) clearInterval(gameTimerRef.current);
+      gameTimerRef.current = window.setInterval(() => {
+        setTimeLeft((prev) => {
+          if (prev <= 1) {
+            endGame();
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
 
-    audio.playCoin();
-
-    // Start game timer
-    if (gameTimerRef.current) clearInterval(gameTimerRef.current);
-    gameTimerRef.current = window.setInterval(() => {
-      setTimeLeft((prev) => {
-        if (prev <= 1) {
-          endGame();
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-
-    spawnDrones();
+      spawnDrones();
+    });
   };
 
   const spawnDrones = () => {
@@ -112,16 +123,13 @@ export default function WhackADroneGame({ onGameOver, onScoreUpdate, highScore }
   };
 
   useEffect(() => {
-    if (isPlaying && !gameOver) {
+    if (gameState === 'playing') {
       // Adjust spawn rate occasionally based on time left
       spawnDrones();
     }
-  }, [timeLeft]);
-
+  }, [timeLeft, gameState]);
 
   const endGame = () => {
-    setIsPlaying(false);
-    setGameOver(true);
     if (gameTimerRef.current) clearInterval(gameTimerRef.current);
     if (spawnTimerRef.current) clearTimeout(spawnTimerRef.current);
     
@@ -130,12 +138,12 @@ export default function WhackADroneGame({ onGameOver, onScoreUpdate, highScore }
 
     audio.playLevelUp();
     setTimeout(() => {
-      onGameOver(score);
+      triggerGameOver(scoreRef.current);
     }, 1500);
   };
 
   const hitDrone = (id: number, type: Hole['droneType']) => {
-    if (!isPlaying || gameOver || type === 'none') return;
+    if (gameState !== 'playing' || type === 'none') return;
 
     setHoles(prev => {
       if (!prev[id].active || prev[id].hit) return prev;
@@ -161,13 +169,10 @@ export default function WhackADroneGame({ onGameOver, onScoreUpdate, highScore }
       case 'bomb':
         points = -50;
         audio.playExplosion();
-        // Shake effect could be added here
         break;
     }
 
-    const newScore = Math.max(0, score + points);
-    setScore(newScore);
-    onScoreUpdate(newScore);
+    addScore(points);
 
     // Reset hole quickly after hit
     setTimeout(() => {
@@ -185,12 +190,6 @@ export default function WhackADroneGame({ onGameOver, onScoreUpdate, highScore }
       if (spawnTimerRef.current) clearTimeout(spawnTimerRef.current);
     };
   }, []);
-
-  const toggleMute = () => {
-    const newMute = !muted;
-    setMuted(newMute);
-    audio.toggleMute();
-  };
 
   const getDroneVisuals = (type: Hole['droneType'], isHit: boolean) => {
     if (isHit) {
@@ -219,15 +218,9 @@ export default function WhackADroneGame({ onGameOver, onScoreUpdate, highScore }
     }
   };
 
-  const getGameState = () => {
-    if (!isPlaying && score === 0 && timeLeft === 30) return 'ready';
-    if (!isPlaying) return 'gameover';
-    return 'playing';
-  };
-
   return (
     <GameContainer aspect="square" maxWidth="sm">
-      {isPlaying && (
+      {(gameState === 'playing' || gameState === 'paused') && (
         <GameHUD 
           stats={[
             { id: 'score', label: 'SKOR', value: score, emphasized: true },
@@ -237,10 +230,13 @@ export default function WhackADroneGame({ onGameOver, onScoreUpdate, highScore }
       )}
 
       <GameOverlay
-        gameState={getGameState()}
+        gameState={gameState}
         score={score}
+        highScore={highScore}
         onStart={startGame}
         onRestart={startGame}
+        onResume={resumeGame}
+        countdown={countdown}
         instructions="Ketuk atau klik drone cyber yang muncul dari lubang! Hindari bom merah. Kumpulkan skor sebanyak mungkin dalam 30 detik."
       />
 

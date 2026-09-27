@@ -219,7 +219,7 @@ export default function Shoutbox({ playerName, playerAvatar, playerThemeColor }:
             key={i}
             type="button"
             onClick={() => handleQuickSend(react)}
-            className="px-2 py-1 bg-zinc-800/60 hover:bg-zinc-700/80 border border-zinc-700/50 text-[10px] text-zinc-300 rounded-md font-mono transition shrink-0 cursor-pointer"
+            className="px-2 py-1 bg-zinc-800/60 hover:bg-zinc-700/80 hover:scale-[1.02] active:scale-[0.98] border border-zinc-700/50 text-[10px] text-zinc-300 rounded-md font-mono transition-all duration-150 ease-out shrink-0 cursor-pointer"
           >
             {react}
           </button>
@@ -234,11 +234,11 @@ export default function Shoutbox({ playerName, playerAvatar, playerThemeColor }:
           onChange={(e) => setInputText(e.target.value)}
           placeholder="Ketik obrolan lobi..."
           maxLength={80}
-          className="flex-1 glass-panel rounded-xl px-4 py-2.5 text-xs sm:text-xs text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-red-500/70 font-mono transition"
+          className="flex-1 glass-panel rounded-xl px-4 py-2.5 text-xs sm:text-xs text-zinc-200 placeholder-zinc-500 focus:outline-none focus:ring-1 focus:ring-red-500/50 focus:border-red-500/70 font-mono transition-all"
         />
         <button
           type="submit"
-          className="px-4 py-2 bg-gradient-to-r from-red-600 to-red-800 hover:from-red-500 hover:to-red-700 text-white rounded-xl transition cursor-pointer flex items-center justify-center border border-red-500/20 shadow-lg shadow-red-500/20"
+          className="px-4 py-2 bg-gradient-to-r from-red-600 to-red-800 hover:from-red-500 hover:to-red-700 hover:scale-[1.03] active:scale-[0.97] text-white rounded-xl transition-all duration-150 ease-out cursor-pointer flex items-center justify-center border border-red-500/20 shadow-lg shadow-red-500/20"
         >
           <Send size={14} />
         </button>

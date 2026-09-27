@@ -1,5 +1,6 @@
 import React, { Component, ErrorInfo, ReactNode } from 'react';
 import { AlertTriangle, RefreshCw } from 'lucide-react';
+import { logger } from '../../utils/logger';
 
 interface Props {
   children: ReactNode;
@@ -23,7 +24,10 @@ export class GameErrorBoundary extends Component<Props, State> {
   }
 
   public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
-    console.error('Game Module Exception caught by GameErrorBoundary:', error, errorInfo);
+    logger.error('Game Module Exception caught by GameErrorBoundary', {
+      error,
+      context: { errorInfo: errorInfo as any }
+    });
   }
 
   private handleReset = () => {

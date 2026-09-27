@@ -1,6 +1,7 @@
 import { isFirebaseReady, auth, provider, signInWithPopup, fbSignOut, onAuthStateChanged, db, doc, getDoc, setDoc } from './firebase';
 import { PlayerProfile, GameStats, Achievement, DailyMission, RecentlyPlayedEntry } from '../types';
 import { storageService } from './storageService';
+import { logger } from '../utils/logger';
 
 export interface UserSessionData {
   uid: string;
@@ -113,8 +114,8 @@ class AuthService {
   private saveLocalAccounts(accounts: LocalAccount[]) {
     try {
       localStorage.setItem('zigame_accounts', JSON.stringify(accounts));
-    } catch (e) {
-      console.error('Failed to save local accounts:', e);
+    } catch (e: any) {
+      logger.error('Failed to save local accounts:', { error: e });
     }
   }
 
@@ -368,7 +369,7 @@ class AuthService {
       this.broadcastSession(session);
       return { success: true, message: `Berhasil masuk dengan Google (${user.displayName})!`, session };
     } catch (e: any) {
-      console.error('Google Sign-in Error:', e);
+      logger.error('Google Sign-in Error:', { error: e });
       return { success: false, message: e.message || 'Gagal login Google.' };
     }
   }
@@ -378,8 +379,8 @@ class AuthService {
     if (isFirebaseReady() && auth) {
       try {
         await fbSignOut(auth);
-      } catch (e) {
-        console.warn('Firebase signout warning:', e);
+      } catch (e: any) {
+        logger.warn('Firebase signout warning:', { error: e });
       }
     }
 
@@ -398,8 +399,8 @@ class AuthService {
         return docSnap.data();
       }
       return null;
-    } catch (e) {
-      console.warn('Firestore fetch error:', e);
+    } catch (e: any) {
+      logger.warn('Firestore fetch error:', { error: e });
       return null;
     }
   }
@@ -413,8 +414,8 @@ class AuthService {
         lastSyncedAt: Date.now()
       }, { merge: true });
       return true;
-    } catch (e) {
-      console.warn('Firestore save error:', e);
+    } catch (e: any) {
+      logger.warn('Firestore save error:', { error: e });
       return false;
     }
   }

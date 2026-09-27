@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { audio } from '../../utils/audio';
+import { useGameEngine } from '../../hooks/useGameEngine';
 import { GameContainer } from '../gameplay/GameContainer';
 import { GameHUD } from '../gameplay/GameHUD';
 import { GameOverlay } from '../gameplay/GameOverlay';
@@ -31,18 +32,25 @@ const COLOR_STYLES: Record<BlockColor, string> = {
 const GRID_SIZE = 6;
 
 export default function BlockMatchGame({ onGameOver, onScoreUpdate, highScore }: GameProps) {
-  const scoreRef = useRef(0);
-  const [isPlaying, setIsPlaying] = useState(false);
+  const {
+    gameState,
+    score,
+    addScore,
+    startWithCountdown,
+    countdown,
+    triggerGameOver,
+    pauseGame,
+    resumeGame,
+  } = useGameEngine({
+    gameId: 'blockmatch',
+    onGameOver,
+    onScoreUpdate,
+  });
+
   const [grid, setGrid] = useState<GridCell[][]>([]);
-  const [score, setScore] = useState(0);
   const [movesLeft, setMovesLeft] = useState(25);
   const [hasValidMoves, setHasValidMoves] = useState(true);
   const [combo, setCombo] = useState(1);
-
-  useEffect(() => {
-    scoreRef.current = score;
-    onScoreUpdate(score);
-  }, [score, onScoreUpdate]);
 
   const initGrid = (): GridCell[][] => {
     const newGrid: GridCell[][] = [];
@@ -61,13 +69,12 @@ export default function BlockMatchGame({ onGameOver, onScoreUpdate, highScore }:
   };
 
   const startNewGame = () => {
-    audio.playCoin();
-    setScore(0);
-    setMovesLeft(25);
-    setCombo(1);
-    setGrid(initGrid());
-    setIsPlaying(true);
-    setHasValidMoves(true);
+    startWithCountdown(() => {
+      setMovesLeft(25);
+      setCombo(1);
+      setGrid(initGrid());
+      setHasValidMoves(true);
+    });
   };
 
   // BFS / Flood-fill to find connected matching blocks
@@ -110,7 +117,7 @@ export default function BlockMatchGame({ onGameOver, onScoreUpdate, highScore }:
   };
 
   const handleCellClick = (r: number, c: number) => {
-    if (!isPlaying || movesLeft <= 0) return;
+    if (gameState !== 'playing' || movesLeft <= 0) return;
 
     const targetColor = grid[r][c].color;
     const matchingCoordinates = getConnectedBlocks(r, c, targetColor, grid);
@@ -125,7 +132,7 @@ export default function BlockMatchGame({ onGameOver, onScoreUpdate, highScore }:
     
     // Calculate points
     const earnedPoints = matchingCoordinates.length * 10 * combo;
-    setScore(prev => prev + earnedPoints);
+    addScore(earnedPoints);
     setMovesLeft(prev => prev - 1);
 
     // Apply blast (nullify color)
@@ -189,26 +196,18 @@ export default function BlockMatchGame({ onGameOver, onScoreUpdate, highScore }:
   };
 
   const endGame = () => {
-    setIsPlaying(false);
-    audio.playGameOver();
-    onGameOver(score);
+    triggerGameOver(score);
   };
 
   useEffect(() => {
-    if (isPlaying && movesLeft <= 0) {
+    if (gameState === 'playing' && movesLeft <= 0) {
       endGame();
     }
-  }, [movesLeft, isPlaying]);
-
-  const getGameState = () => {
-    if (!isPlaying && score === 0 && movesLeft === 25) return 'ready';
-    if (!isPlaying) return 'gameover';
-    return 'playing';
-  };
+  }, [movesLeft, gameState]);
 
   return (
     <GameContainer aspect="square" maxWidth="sm">
-      {isPlaying && (
+      {(gameState === 'playing' || gameState === 'paused') && (
         <GameHUD 
           stats={[
             { id: 'moves', label: 'LANGKAH', value: `${movesLeft} KALI`, emphasized: movesLeft <= 5 },
@@ -219,10 +218,13 @@ export default function BlockMatchGame({ onGameOver, onScoreUpdate, highScore }:
       )}
 
       <GameOverlay
-        gameState={getGameState()}
+        gameState={gameState}
         score={score}
+        highScore={highScore}
         onStart={startNewGame}
         onRestart={startNewGame}
+        onResume={resumeGame}
+        countdown={countdown}
         instructions="Hancurkan barisan balok neon berwarna sama yang saling terhubung."
       />
 
@@ -240,8 +242,8 @@ export default function BlockMatchGame({ onGameOver, onScoreUpdate, highScore }:
         )}
       </div>
 
-      {isPlaying && (
-        <div className="game-mobile-controls mt-4 flex items-center gap-2 text-zinc-500 font-mono text-xs uppercase tracking-wider mx-auto">
+      {gameState === 'playing' && (
+        <div className="game-mobile-controls mt-4 flex items-center justify-center gap-2 text-zinc-500 font-mono text-xs uppercase tracking-wider mx-auto">
           <RefreshCw size={10} className="animate-spin text-zinc-600" />
           Papan otomatis diacak kembali jika menemui jalan buntu.
         </div>

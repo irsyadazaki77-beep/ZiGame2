@@ -1,6 +1,7 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut as fbSignOut, onAuthStateChanged, User } from 'firebase/auth';
 import { getFirestore, doc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
+import { logger } from '../utils/logger';
 
 // Fallback to empty config if not provided, allowing the app to run in local-only mode
 const firebaseConfig = {
@@ -27,7 +28,7 @@ try {
     isInitialized = true;
   }
 } catch (e) {
-  console.warn("Firebase not fully configured or failed to initialize", e);
+  logger.warn("Firebase not fully configured or failed to initialize", { error: e as Error });
 }
 
 export const isFirebaseReady = () => isInitialized;

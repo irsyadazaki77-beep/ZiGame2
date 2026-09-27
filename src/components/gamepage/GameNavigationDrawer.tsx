@@ -46,7 +46,8 @@ export const GameNavigationDrawer: React.FC<GameNavigationDrawerProps> = ({
             audio.playCoin();
             onSelectGame(prevGame.id);
           }}
-          className="w-full sm:w-auto px-4 py-2.5 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-zinc-300 hover:text-white transition flex items-center justify-center sm:justify-start gap-3 group cursor-pointer"
+          className="w-full sm:w-auto px-4 py-2.5 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-zinc-300 hover:text-white focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:outline-hidden transition flex items-center justify-center sm:justify-start gap-3 group cursor-pointer"
+          aria-label={`Beralih ke game sebelumnya: ${prevGame.title}`}
         >
           <ArrowLeft size={16} className="text-zinc-500 group-hover:-translate-x-1 transition-transform" />
           <div className="text-left">
@@ -57,7 +58,7 @@ export const GameNavigationDrawer: React.FC<GameNavigationDrawerProps> = ({
           </div>
         </button>
 
-        <div className="text-center font-mono text-xs text-zinc-500 hidden md:block">
+        <div className="text-center font-mono text-xs text-zinc-500 hidden md:block" aria-hidden="true">
           GELANGGANG ARKADE ZIGAME • {currentIndex + 1} / {allGames.length}
         </div>
 
@@ -66,7 +67,8 @@ export const GameNavigationDrawer: React.FC<GameNavigationDrawerProps> = ({
             audio.playCoin();
             onSelectGame(nextGame.id);
           }}
-          className="w-full sm:w-auto px-4 py-2.5 rounded-xl bg-indigo-600/20 hover:bg-indigo-600/30 border border-indigo-500/30 text-indigo-300 hover:text-white transition flex items-center justify-center sm:justify-end gap-3 group cursor-pointer"
+          className="w-full sm:w-auto px-4 py-2.5 rounded-xl bg-indigo-600/20 hover:bg-indigo-600/30 border border-indigo-500/30 text-indigo-300 hover:text-white focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:outline-hidden transition flex items-center justify-center sm:justify-end gap-3 group cursor-pointer"
+          aria-label={`Beralih ke game selanjutnya: ${nextGame.title}`}
         >
           <div className="text-right">
             <div className="text-[10px] font-mono text-indigo-400 uppercase">GAME SELANJUTNYA</div>
@@ -87,13 +89,14 @@ export const GameNavigationDrawer: React.FC<GameNavigationDrawerProps> = ({
 
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           {fallbackGames.map((g) => (
-            <div
+            <button
               key={g.id}
               onClick={() => {
                 audio.playCoin();
                 onSelectGame(g.id);
               }}
-              className="p-3 bg-zinc-900/60 hover:bg-zinc-900 border border-zinc-800 hover:border-indigo-500/40 rounded-xl flex items-center justify-between cursor-pointer transition group"
+              className="p-3 w-full bg-zinc-900/60 hover:bg-zinc-900 border border-zinc-800 hover:border-indigo-500/40 focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:outline-hidden rounded-xl flex items-center justify-between cursor-pointer transition group text-left"
+              aria-label={`Mainkan game serupa: ${g.title}`}
             >
               <div className="flex items-center gap-2.5 overflow-hidden">
                 <div className="w-11 h-11 rounded-lg overflow-hidden border border-zinc-800 relative shrink-0">
@@ -105,7 +108,7 @@ export const GameNavigationDrawer: React.FC<GameNavigationDrawerProps> = ({
                 </div>
               </div>
               <Play size={14} className="text-zinc-600 group-hover:text-indigo-400 shrink-0 ml-1" />
-            </div>
+            </button>
           ))}
         </div>
       </div>

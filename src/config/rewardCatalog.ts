@@ -7,6 +7,12 @@
  * Unknown or loose arbitrary claim IDs are strictly rejected.
  */
 
+import {
+  getAuthoritativeDailyMissions,
+  getAuthoritativeDailyChallenges,
+  getAuthoritativeWeeklyChallenges
+} from './authoritativeMissions';
+
 export type RewardClaimType =
   | 'achievement'
   | 'daily_mission'
@@ -14,6 +20,7 @@ export type RewardClaimType =
   | 'quest_tier'
   | 'starter_pack'
   | 'level_up';
+
 
 export interface AuthoritativeRewardDefinition {
   id: string;

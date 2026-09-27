@@ -7,6 +7,7 @@
  */
 
 import { Router, Request, Response } from 'express';
+import crypto from 'crypto';
 import { authenticateToken, requireAuth, requireAdmin } from './authMiddleware';
 import { rateLimit } from './rateLimiter';
 import { serverLogger } from './logger';
@@ -180,9 +181,16 @@ const handleSubmitScore = async (req: Request, res: Response) => {
       return sendApiError(res, 422, 'VERIFIED_SESSION_REQUIRED', 'ID Sesi permainan (sessionId) wajib disertakan untuk submission skor.');
     }
 
-    if (!idempotencyKey || !isValidIdempotencyKey(idempotencyKey)) {
-      return sendApiError(res, 400, 'INVALID_IDEMPOTENCY_KEY', 'Kunci idempotency wajib disertakan dan harus valid.');
+    let resolvedIdempotencyKey: string;
+    if (idempotencyKey) {
+      if (!isValidIdempotencyKey(idempotencyKey)) {
+        return sendApiError(res, 400, 'INVALID_IDEMPOTENCY_KEY', 'Kunci idempotency tidak valid.');
+      }
+      resolvedIdempotencyKey = idempotencyKey;
+    } else {
+      resolvedIdempotencyKey = `score_${sessionId}_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
     }
+
 
     const name = typeof playerName === 'string' && playerName.trim()
       ? playerName.trim().slice(0, 32)
@@ -200,8 +208,9 @@ const handleSubmitScore = async (req: Request, res: Response) => {
       playerName: name,
       playerAvatar: avatar,
       masteryLevel: typeof masteryLevel === 'number' ? Math.max(1, Math.min(100, masteryLevel)) : 1,
-      idempotencyKey
+      idempotencyKey: resolvedIdempotencyKey
     });
+
 
     serverLogger.info('SCORE_ACCEPTED', `Score ${score} accepted for ${result.gameId}`, {
       gameId: result.gameId,

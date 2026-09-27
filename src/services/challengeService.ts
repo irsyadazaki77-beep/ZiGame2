@@ -1,5 +1,11 @@
 import { Challenge, GameStats } from '../types';
 import { SEASON_CONFIG } from '../config/balanceConfig';
+import { 
+  getUtcTodayDateString, 
+  getUtcWeekString, 
+  getAuthoritativeDailyChallenges, 
+  getAuthoritativeWeeklyChallenges 
+} from '../config/authoritativeMissions';
 
 export const challengeService = {
   getStoredChallenges(): Challenge[] {
@@ -21,15 +27,11 @@ export const challengeService = {
 
   generateChallengesIfOutdated(games: GameStats[]): Challenge[] {
     const existing = this.getStoredChallenges();
-    const today = new Date().toISOString().split('T')[0];
+    const today = getUtcTodayDateString();
+    const weekId = getUtcWeekString();
     
     // Check if daily challenges need refresh
     const hasTodayDaily = existing.some(c => c.frequency === 'daily' && c.expiryDate === today);
-    
-    // Calculate current week id
-    const now = new Date();
-    const weekNum = Math.ceil((((now.getTime() - new Date(now.getFullYear(), 0, 1).getTime()) / 86400000) + 1) / 7);
-    const weekId = `${now.getFullYear()}-W${weekNum}`;
     const hasThisWeek = existing.some(c => c.frequency === 'weekly' && c.expiryDate === weekId);
 
     let updated = existing.filter(c => {
@@ -40,115 +42,16 @@ export const challengeService = {
 
     // Generate fresh Daily Challenges
     if (!hasTodayDaily && games.length > 0) {
-      const seed = now.getDate();
-      const featuredGame1 = games[seed % games.length];
-      const featuredGame2 = games[(seed + 3) % games.length];
-
-      const dailyChallenges: Challenge[] = [
-        {
-          id: `daily_${today}_1`,
-          title: `Skor Target: ${featuredGame1.title}`,
-          description: `Raih minimal 100 poin dalam satu sesi di ${featuredGame1.title}`,
-          frequency: 'daily',
-          category: 'score',
-          target: 100,
-          progress: 0,
-          completed: false,
-          claimed: false,
-          rewardCoins: 80,
-          rewardXp: 120,
-          gameId: featuredGame1.id,
-          expiryDate: today,
-          icon: '🎯'
-        },
-        {
-          id: `daily_${today}_2`,
-          title: 'Eksplorasi Multigenre',
-          description: 'Mainkan 3 genre game yang berbeda hari ini',
-          frequency: 'daily',
-          category: 'genre',
-          target: 3,
-          progress: 0,
-          completed: false,
-          claimed: false,
-          rewardCoins: 75,
-          rewardXp: 100,
-          expiryDate: today,
-          icon: '🌐'
-        },
-        {
-          id: `daily_${today}_3`,
-          title: `Tantangan Refleks: ${featuredGame2.title}`,
-          description: `Selesaikan sesi tanpa menyerah di ${featuredGame2.title}`,
-          frequency: 'daily',
-          category: 'featured',
-          target: 1,
-          progress: 0,
-          completed: false,
-          claimed: false,
-          rewardCoins: 60,
-          rewardXp: 90,
-          gameId: featuredGame2.id,
-          expiryDate: today,
-          icon: '⚡'
-        }
-      ];
-
+      const dailyChallenges = getAuthoritativeDailyChallenges(today, games);
       updated = [...updated.filter(c => c.frequency !== 'daily'), ...dailyChallenges];
     }
 
     // Generate fresh Weekly Challenges
-    if (!hasThisWeek && games.length > 0) {
-      const weeklyChallenges: Challenge[] = [
-        {
-          id: `weekly_${weekId}_1`,
-          title: 'Pemecah Rekor Mingguan',
-          description: 'Pecahkan 2 rekor skor tertinggi (Personal Best) di game apa pun',
-          frequency: 'weekly',
-          category: 'personal_best',
-          target: 2,
-          progress: 0,
-          completed: false,
-          claimed: false,
-          rewardCoins: 250,
-          rewardXp: 400,
-          expiryDate: weekId,
-          icon: '🔥'
-        },
-        {
-          id: `weekly_${weekId}_2`,
-          title: 'Maraton Arcade 15 Ronde',
-          description: 'Mainkan total 15 sesi permainan game apa pun minggu ini',
-          frequency: 'weekly',
-          category: 'endurance',
-          target: 15,
-          progress: 0,
-          completed: false,
-          claimed: false,
-          rewardCoins: 200,
-          rewardXp: 350,
-          expiryDate: weekId,
-          icon: '🕹️'
-        },
-        {
-          id: `weekly_${weekId}_3`,
-          title: 'Kolektor Skor Akbar',
-          description: 'Kumpulkan akumulasi total 5,000 poin di berbagai game',
-          frequency: 'weekly',
-          category: 'score',
-          target: 5000,
-          progress: 0,
-          completed: false,
-          claimed: false,
-          rewardCoins: 300,
-          rewardXp: 500,
-          expiryDate: weekId,
-          icon: '🏆'
-        }
-      ];
-
+    if (!hasThisWeek) {
+      const weeklyChallenges = getAuthoritativeWeeklyChallenges(weekId);
       updated = [...updated.filter(c => c.frequency !== 'weekly'), ...weeklyChallenges];
     }
+
 
     // Ensure Special Seasonal Challenge exists
     const seasonId = SEASON_CONFIG.activeSeason.id;

@@ -11,6 +11,7 @@ import { competitiveService } from '../services/competitiveService';
 import { RANKED_GAME_ALLOWLIST } from '../config/competitiveConfig';
 import { telemetryService } from '../services/telemetryService';
 import { inputManager } from '../services/inputService';
+import { logger } from '../utils/logger';
 
 import { GamePageHeader } from '../components/gamepage/GamePageHeader';
 import { GamePageRightSidebar } from '../components/gamepage/GamePageRightSidebar';
@@ -21,6 +22,7 @@ import { GameErrorBoundary } from '../components/gameplay/GameErrorBoundary';
 import { UnifiedTutorialModal } from '../components/gamepage/UnifiedTutorialModal';
 import { ShareResultModal } from '../components/gamepage/ShareResultModal';
 import { GameNavigationDrawer } from '../components/gamepage/GameNavigationDrawer';
+import { QuickArcadeSettings } from '../components/gamepage/QuickArcadeSettings';
 import { RefreshCw, Sparkles, Trophy, HelpCircle, Navigation, X, Maximize2, Minimize2, Share2, Shield, Play, RotateCcw } from 'lucide-react';
 
 interface GamePageProps {
@@ -38,6 +40,57 @@ const BACKGROUND_AMBIENTS = [
   { id: 'amber', name: 'Solar Gold', class: 'from-amber-950/30 via-zinc-950 to-zinc-950', color: '#f59e0b' },
   { id: 'cyan', name: 'Vapor Blue', class: 'from-cyan-950/40 via-zinc-950 to-zinc-950', color: '#06b6d4' },
 ];
+
+interface MemoizedGameFrameProps {
+  GameComponent: React.ComponentType<any>;
+  gameKey: number;
+  onGameOver: (score: number) => void;
+  onScoreUpdate: (score: number) => void;
+  highScore: number;
+  gameTitle: string;
+  onReset: () => void;
+}
+
+const MemoizedGameFrame = React.memo<MemoizedGameFrameProps>(({
+  GameComponent,
+  gameKey,
+  onGameOver,
+  onScoreUpdate,
+  highScore,
+  gameTitle,
+  onReset,
+}) => {
+  return (
+    <GameErrorBoundary gameTitle={gameTitle} onReset={onReset}>
+      <Suspense
+        fallback={
+          <div className="w-full h-full flex flex-col items-center justify-center p-8 text-center bg-[#090b10]">
+            <RefreshCw size={26} className="animate-spin text-indigo-400 mb-3" />
+            <span className="font-medium text-xs text-zinc-300">
+              Merender {gameTitle}...
+            </span>
+          </div>
+        }
+      >
+        <GameComponent
+          key={gameKey}
+          onGameOver={onGameOver}
+          onScoreUpdate={onScoreUpdate}
+          highScore={highScore}
+        />
+      </Suspense>
+    </GameErrorBoundary>
+  );
+}, (prev, next) => {
+  return (
+    prev.GameComponent === next.GameComponent &&
+    prev.gameKey === next.gameKey &&
+    prev.highScore === next.highScore &&
+    prev.gameTitle === next.gameTitle &&
+    prev.onGameOver === next.onGameOver &&
+    prev.onScoreUpdate === next.onScoreUpdate
+  );
+});
 
 export default function GamePage({ games, profile, dailyMissions, onScoreUpdate, onGameOver }: GamePageProps) {
   const { gameId } = useParams<{ gameId: string }>();
@@ -63,6 +116,7 @@ export default function GamePage({ games, profile, dailyMissions, onScoreUpdate,
   const [isBgmOn, setIsBgmOn] = useState(true);
   const [isBossMode, setIsBossMode] = useState(false);
   const [mobileTab, setMobileTab] = useState<'game' | 'community'>('game');
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
   // Onboarding tutorial state & inter-game drawer
   const [isTutorialOpen, setIsTutorialOpen] = useState(false);
@@ -191,6 +245,12 @@ export default function GamePage({ games, profile, dailyMissions, onScoreUpdate,
     setShareResultData(null);
   }, []);
 
+  const handleScoreUpdate = useCallback((score: number) => {
+    if (activeGame) {
+      onScoreUpdate(activeGame.id, score);
+    }
+  }, [activeGame?.id, onScoreUpdate]);
+
   const handleWrappedGameOver = useCallback(async (score: number) => {
     if (!activeGame) return;
     audio.playGameOver();
@@ -240,11 +300,11 @@ export default function GamePage({ games, profile, dailyMissions, onScoreUpdate,
     if (!containerRef.current) return;
     if (!document.fullscreenElement) {
       containerRef.current.requestFullscreen().then(() => setIsFullscreen(true)).catch(err => {
-        console.warn("Fullscreen request failed:", err);
+        logger.warn("Fullscreen request failed:", { error: err });
       });
     } else {
       document.exitFullscreen().then(() => setIsFullscreen(false)).catch(err => {
-        console.warn("Exit fullscreen failed:", err);
+        logger.warn("Exit fullscreen failed:", { error: err });
       });
     }
   }, []);
@@ -310,25 +370,37 @@ export default function GamePage({ games, profile, dailyMissions, onScoreUpdate,
       {!isFocusMode && (
         <GamePageHeader
           activeGame={activeGame}
-          currentAmbient={currentAmbient}
-          backgroundAmbients={BACKGROUND_AMBIENTS}
-          bgAmbient={bgAmbient}
-          setBgAmbient={setBgAmbient}
-          isCrtFilter={isCrtFilter}
-          setIsCrtFilter={setIsCrtFilter}
           onRestart={handleRestart}
-          isMuted={isMuted}
-          onToggleMute={handleToggleMute}
-          isBgmOn={isBgmOn}
-          setIsBgmOn={setIsBgmOn}
-          isFullscreen={isFullscreen}
-          toggleFullscreen={toggleFullscreen}
+          onNavigateHome={() => navigate('/')}
+          onOpenSettings={() => setIsSettingsOpen(true)}
           isSidebarOpen={isSidebarOpen}
           setIsSidebarOpen={setIsSidebarOpen}
-          onNavigateHome={() => navigate('/')}
-          onOpenTutorial={() => setIsTutorialOpen(true)}
         />
       )}
+
+      {/* Arcade Cabinet adjustments */}
+      <QuickArcadeSettings
+        isOpen={isSettingsOpen}
+        onClose={() => setIsSettingsOpen(false)}
+        activeGame={activeGame}
+        games={games}
+        recentlyPlayedIds={recentlyPlayed}
+        onSelectGame={(id) => navigate(`/game/${id}`)}
+        onOpenTutorial={() => setIsTutorialOpen(true)}
+        isMuted={isMuted}
+        onToggleMute={handleToggleMute}
+        isBgmOn={isBgmOn}
+        setIsBgmOn={setIsBgmOn}
+        isCrtFilter={isCrtFilter}
+        setIsCrtFilter={setIsCrtFilter}
+        bgAmbient={bgAmbient}
+        setBgAmbient={setBgAmbient}
+        backgroundAmbients={BACKGROUND_AMBIENTS}
+        isFullscreen={isFullscreen}
+        toggleFullscreen={toggleFullscreen}
+        isFocusMode={isFocusMode}
+        setIsFocusMode={setIsFocusMode}
+      />
 
       {/* Mobile Top Nav Tabs (Hidden in Focus Mode) */}
       
@@ -392,12 +464,12 @@ export default function GamePage({ games, profile, dailyMissions, onScoreUpdate,
           )}
 
           {/* Clean Focused Canvas Stage */}
-          <div className="flex-1 w-full max-w-5xl flex items-center justify-center relative min-h-0 py-0 sm:py-2">
+          <div className="flex-1 w-full max-w-5xl flex items-center justify-center relative min-h-0 p-1 sm:p-4">
             <div 
-              className="relative w-full h-full max-h-full flex items-center justify-center bg-[#090b10] border border-white/[0.08] rounded-none sm:rounded-2xl md:rounded-3xl border-0 sm:border border-white/[0.08] shadow-xl overflow-hidden transition-all duration-300"
+              className="relative w-auto h-auto max-w-full max-h-full flex items-center justify-center bg-[#090b10] border border-white/[0.08] rounded-xl sm:rounded-2xl md:rounded-3xl shadow-2xl overflow-hidden transition-all duration-300"
               style={{
                 boxShadow: `0 4px 24px rgba(0,0,0,0.6)`,
-                ...(window.innerWidth >= 640 ? { aspectRatio: gameLayoutConfig.aspectRatio } : {})
+                aspectRatio: gameLayoutConfig.aspectRatio,
               }}
             >
               {isStartingSession ? (
@@ -414,25 +486,15 @@ export default function GamePage({ games, profile, dailyMissions, onScoreUpdate,
                   <button onClick={handleRestart} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 transition rounded-xl text-xs font-bold text-white cursor-pointer">Coba Lagi</button>
                 </div>
               ) : GameComponent ? (
-                <GameErrorBoundary gameTitle={activeGame.title} onReset={handleRestart}>
-                  <Suspense
-                    fallback={
-                      <div className="w-full h-full flex flex-col items-center justify-center p-8 text-center bg-[#090b10]">
-                        <RefreshCw size={26} className="animate-spin text-indigo-400 mb-3" />
-                        <span className="font-medium text-xs text-zinc-300">
-                          Merender {activeGame.title}...
-                        </span>
-                      </div>
-                    }
-                  >
-                    <GameComponent
-                      key={key}
-                      onGameOver={handleWrappedGameOver}
-                      onScoreUpdate={(score: number) => onScoreUpdate(activeGame.id, score)}
-                      highScore={activeGame.highScore}
-                    />
-                  </Suspense>
-                </GameErrorBoundary>
+                <MemoizedGameFrame
+                  GameComponent={GameComponent}
+                  gameKey={key}
+                  onGameOver={handleWrappedGameOver}
+                  onScoreUpdate={handleScoreUpdate}
+                  highScore={activeGame.highScore}
+                  gameTitle={activeGame.title}
+                  onReset={handleRestart}
+                />
               ) : (
                 <div className="text-center p-8">
                   <Sparkles size={32} className="text-amber-400 mx-auto mb-2" />
@@ -442,79 +504,52 @@ export default function GamePage({ games, profile, dailyMissions, onScoreUpdate,
             </div>
           </div>
 
-          {/* Compact HUD Bar beneath Canvas */}
-          <div className="absolute sm:relative bottom-[env(safe-area-inset-bottom,16px)] sm:bottom-auto left-2 right-2 sm:left-auto sm:right-auto z-40 w-auto sm:w-full max-w-5xl mt-0 sm:mt-2 flex-none bg-[#0d1017]/80 sm:bg-[#0d1017]/90 backdrop-blur-md border border-white/[0.06] p-2 rounded-xl sm:rounded-2xl flex items-center justify-between gap-2 font-sans shadow-lg">
-            {/* Left: Score & Controls Badges */}
-            <div className="flex items-center gap-3">
-              <div className="flex items-center gap-1.5 px-3 py-1 bg-amber-500/10 border border-amber-500/20 text-amber-300 rounded-xl text-xs font-semibold">
-                <Trophy size={14} className="text-amber-400" />
-                <span>Rekor: {activeGame.highScore.toLocaleString()} pts</span>
-              </div>
+          {/* Virtual Touch Controller Deck for Mobile */}
+          <MobileTouchControls visible={mobileTab === 'game'} controlType={controls.controlType} />
 
-              {competitiveInfo && (
-                <div className="hidden sm:flex items-center gap-1 px-2.5 py-1 bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 rounded-xl text-xs font-semibold">
-                  <Shield size={13} className="text-emerald-400" />
-                  <span>Rating: {competitiveInfo.rating} ({competitiveInfo.tier})</span>
-                </div>
-              )}
+          {/* Simplified Arcade-Grade HUD Bar */}
+          <div className="relative flex-none w-full max-w-5xl mt-1.5 sm:mt-2 bg-zinc-900/90 border border-white/[0.06] backdrop-blur-md px-2 py-1.5 sm:px-3.5 sm:py-2 rounded-lg sm:rounded-xl flex flex-row items-center justify-between gap-1.5 sm:gap-2.5 font-sans shadow-lg shadow-black/20">
+            {/* Left: Score & Highscore indicators */}
+            <div className="flex items-center gap-1.5 sm:gap-2">
+              <div className="flex items-center gap-1 px-2 py-0.5 sm:px-3 sm:py-1 bg-amber-500/10 border border-amber-500/20 text-amber-300 rounded-lg text-[9px] xs:text-[10px] sm:text-xs font-semibold select-none">
+                <Trophy size={10} className="text-amber-400" />
+                <span className="font-mono">HI: <span className="hidden xs:inline">SCORE: </span>{activeGame.highScore.toLocaleString()}</span>
+              </div>
 
               {activeGame && RANKED_GAME_ALLOWLIST.includes(activeGame.id as any) && (
                 <button
                   onClick={() => {
+                    audio.playCoin();
                     setIsRankedMode(!isRankedMode);
                     handleRestart();
                   }}
-                  className={`flex items-center gap-1.5 px-3 py-1 border rounded-xl text-xs font-bold transition-all ${
+                  className={`flex items-center gap-1 px-2 py-0.5 sm:px-3 sm:py-1 border rounded-lg text-[9px] xs:text-[10px] sm:text-xs font-bold transition-all cursor-pointer select-none ${
                     isRankedMode 
-                      ? 'bg-rose-500/20 border-rose-500/50 text-rose-400 animate-pulse' 
-                      : 'bg-zinc-500/10 border-zinc-500/20 text-zinc-400 hover:bg-zinc-500/20'
+                      ? 'bg-rose-500/15 border-rose-500/35 text-rose-400 animate-pulse' 
+                      : 'bg-white/[0.03] border-white/[0.06] text-zinc-400 hover:text-white hover:bg-white/[0.06]'
                   }`}
                 >
-                  <Trophy size={14} className={isRankedMode ? 'text-rose-400' : 'text-zinc-500'} />
-                  <span>{isRankedMode ? 'MODE RANKED AKTIF' : 'AKTIFKAN RANKED'}</span>
+                  <span className={`w-1 h-1 sm:w-1.5 sm:h-1.5 rounded-full ${isRankedMode ? 'bg-rose-500 animate-ping' : 'bg-zinc-600'}`} />
+                  <span>{isRankedMode ? 'RANK' : 'NORM'}</span>
                 </button>
-              )}
-
-              {controls.keys && controls.keys.length > 0 && (
-                <div className="hidden lg:flex items-center gap-1">
-                  <span className="text-[11px] text-zinc-400 font-medium mr-1">Kontrol:</span>
-                  {controls.keys.map((k, idx) => (
-                    <span
-                      key={idx}
-                      className="px-2 py-0.5 bg-white/[0.06] border border-white/[0.08] rounded-md text-[11px] font-medium text-zinc-300"
-                    >
-                      {k}
-                    </span>
-                  ))}
-                </div>
               )}
             </div>
 
-            {/* Right: Quick Action Modals */}
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => setIsFocusMode((prev) => !prev)}
-                className="px-3 py-1 bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.08] text-xs font-medium text-zinc-300 hover:text-white rounded-xl transition flex items-center gap-1.5 cursor-pointer"
-                title="Toggle Focus / Theater Mode (F)"
-              >
-                <Maximize2 size={13} className="text-indigo-400" />
-                <span className="hidden sm:inline">{isFocusMode ? 'Normal View' : 'Focus Mode'}</span>
-              </button>
+            {/* Right: Quick actions like competitive profile & quick retry */}
+            <div className="flex items-center gap-1.5 sm:gap-2">
+              {competitiveInfo && isRankedMode && (
+                <div className="flex items-center gap-1 px-2 py-0.5 sm:px-3 sm:py-1 bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 rounded-lg text-[9px] xs:text-[10px] sm:text-xs font-semibold select-none">
+                  <Shield size={10} className="text-emerald-400 animate-pulse" />
+                  <span className="font-mono">{competitiveInfo.rating}<span className="hidden xs:inline"> pts</span></span>
+                </div>
+              )}
 
               <button
-                onClick={() => setIsTutorialOpen(true)}
-                className="px-3 py-1 bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.08] text-xs font-medium text-zinc-300 hover:text-white rounded-xl transition flex items-center gap-1.5 cursor-pointer"
+                onClick={handleRestart}
+                className="px-2 py-0.5 sm:px-3.5 sm:py-1 bg-indigo-600 hover:bg-indigo-500 border border-indigo-500/25 text-white rounded-lg text-[9px] xs:text-[10px] sm:text-xs font-bold flex items-center gap-1 transition-all cursor-pointer active:scale-95 select-none"
               >
-                <HelpCircle size={13} className="text-indigo-400" />
-                <span>Cara Bermain</span>
-              </button>
-
-              <button
-                onClick={() => setShowNavDrawer((prev) => !prev)}
-                className="px-3 py-1 bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.08] text-xs font-medium text-zinc-300 hover:text-white rounded-xl transition flex items-center gap-1.5 cursor-pointer"
-              >
-                <Navigation size={13} className="text-amber-400" />
-                <span>{showNavDrawer ? 'Tutup' : 'Ganti Game'}</span>
+                <RefreshCw size={10} />
+                <span>RETRY</span>
               </button>
             </div>
           </div>
@@ -538,9 +573,6 @@ export default function GamePage({ games, profile, dailyMissions, onScoreUpdate,
               </div>
             </div>
           )}
-
-          {/* Virtual Touch Controller Deck for Mobile */}
-          <MobileTouchControls visible={mobileTab === 'game'} controlType={controls.controlType} />
         </div>
 
         {/* Right Community & Leaderboard Sidebar (Drawer toggleable) */}

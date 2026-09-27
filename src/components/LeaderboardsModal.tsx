@@ -3,6 +3,7 @@ import { Trophy, X, Crown, Calendar, CheckCircle, ShieldCheck, Users, Sparkles, 
 import { GameStats, LeaderboardCategory, RivalryInsight } from '../types';
 import { motion } from 'motion/react';
 import { audio } from '../utils/audio';
+import { logger } from '../utils/logger';
 
 interface LeaderboardsModalProps {
   games: GameStats[];
@@ -32,7 +33,7 @@ export default function LeaderboardsModal({ games, currentUsername, onClose }: L
           setRivalryInsight(data.rivalryInsight || null);
         }
       } catch (e) {
-        console.error('Failed to fetch leaderboard:', e);
+        logger.error('Failed to fetch leaderboard', { error: e as Error });
       }
       setLoading(false);
     };

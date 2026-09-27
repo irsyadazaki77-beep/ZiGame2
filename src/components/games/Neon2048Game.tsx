@@ -41,7 +41,8 @@ export default function Neon2048Game({ onScoreUpdate, onGameOver, highScore }: G
     updateScore,
     triggerGameOver,
     startWithCountdown,
-    countdown
+    countdown,
+    resumeGame,
   } = useGameEngine({
     gameId: 'neon-2048',
     onGameOver,
@@ -331,6 +332,7 @@ export default function Neon2048Game({ onScoreUpdate, onGameOver, highScore }: G
           countdown={countdown}
           onStart={startGame}
           onRestart={startGame}
+          onResume={resumeGame}
           instructions="Gabungkan kotak berangka sama untuk mencapai 2048! Geser layar atau gunakan tombol panah WASD."
         />
       </div>

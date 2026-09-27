@@ -15,18 +15,29 @@ type MazeCell = 'wall' | 'path' | 'start' | 'goal';
 
 const GRID_SIZE = 7; // Odd size works perfectly for standard recursive division maze generation
 
+import { useGameEngine } from '../../hooks/useGameEngine';
+
 export default function MazeRunnerGame({ onGameOver, onScoreUpdate, highScore }: GameProps) {
-  const scoreRef = useRef(0);
-  const [isPlaying, setIsPlaying] = useState(false);
+  const {
+    gameState,
+    score,
+    addScore,
+    startWithCountdown,
+    countdown,
+    triggerGameOver,
+    pauseGame,
+    resumeGame,
+    gameStateRef,
+    scoreRef,
+  } = useGameEngine({
+    gameId: 'mazerunner',
+    onGameOver,
+    onScoreUpdate,
+  });
+
   const [grid, setGrid] = useState<MazeCell[][]>([]);
   const [playerPos, setPlayerPos] = useState<{ r: number; c: number }>({ r: 1, c: 1 });
-  const [score, setScore] = useState(0);
   const [timeLeft, setTimeLeft] = useState(40);
-
-  useEffect(() => {
-    scoreRef.current = score;
-    onScoreUpdate(score);
-  }, [score, onScoreUpdate]);
 
   // Procedural 7x7 Neon Maze Generator
   const generateMaze = (): MazeCell[][] => {
@@ -57,16 +68,15 @@ export default function MazeRunnerGame({ onGameOver, onScoreUpdate, highScore }:
   };
 
   const startNewGame = () => {
-    audio.playCoin();
-    setScore(0);
-    setTimeLeft(40);
-    setPlayerPos({ r: 1, c: 1 });
-    setGrid(generateMaze());
-    setIsPlaying(true);
+    startWithCountdown(() => {
+      setTimeLeft(40);
+      setPlayerPos({ r: 1, c: 1 });
+      setGrid(generateMaze());
+    });
   };
 
   const movePlayer = (dr: number, dc: number) => {
-    if (!isPlaying) return;
+    if (gameState !== 'playing') return;
     const nr = playerPos.r + dr;
     const nc = playerPos.c + dc;
 
@@ -78,7 +88,7 @@ export default function MazeRunnerGame({ onGameOver, onScoreUpdate, highScore }:
         // Check Goal
         if (grid[nr][nc] === 'goal') {
           audio.playLevelUp();
-          setScore(prev => prev + 100);
+          addScore(100);
           setTimeLeft(prev => Math.min(prev + 12, 60)); // Gain bonus time
           setPlayerPos({ r: 1, c: 1 });
           setGrid(generateMaze());
@@ -92,7 +102,7 @@ export default function MazeRunnerGame({ onGameOver, onScoreUpdate, highScore }:
   // Keyboard navigation
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (!isPlaying) return;
+      if (gameState !== 'playing') return;
       if (e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W') {
         e.preventDefault();
         movePlayer(-1, 0);
@@ -110,12 +120,12 @@ export default function MazeRunnerGame({ onGameOver, onScoreUpdate, highScore }:
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isPlaying, playerPos]);
+  }, [gameState, playerPos]);
 
   // Timer Countdown
   useEffect(() => {
     let timer: NodeJS.Timeout;
-    if (isPlaying) {
+    if (gameState === 'playing') {
       timer = setInterval(() => {
         setTimeLeft(prev => {
           if (prev <= 1) {
@@ -127,23 +137,15 @@ export default function MazeRunnerGame({ onGameOver, onScoreUpdate, highScore }:
       }, 1000);
     }
     return () => clearInterval(timer);
-  }, [isPlaying]);
+  }, [gameState]);
 
   const endGame = () => {
-    setIsPlaying(false);
-    audio.playGameOver();
-    onGameOver(score);
-  };
-
-  const getGameState = () => {
-    if (!isPlaying && score === 0 && timeLeft === 40) return 'ready';
-    if (!isPlaying) return 'gameover';
-    return 'playing';
+    triggerGameOver(score);
   };
 
   return (
     <GameContainer aspect="portrait" maxWidth="sm">
-      {isPlaying && (
+      {(gameState === 'playing' || gameState === 'paused') && (
         <GameHUD 
           stats={[
             { id: 'time', label: 'SISA WAKTU', value: `${timeLeft} DETIK`, emphasized: timeLeft < 10 },
@@ -153,10 +155,13 @@ export default function MazeRunnerGame({ onGameOver, onScoreUpdate, highScore }:
       )}
 
       <GameOverlay
-        gameState={getGameState()}
+        gameState={gameState}
         score={score}
+        highScore={highScore}
         onStart={startNewGame}
         onRestart={startNewGame}
+        onResume={resumeGame}
+        countdown={countdown}
         instructions="Arahkan kapsul siber melewati labirin acak menuju portal keluar berwarna ungu neon. Selesaikan secepatnya untuk mendapatkan bonus waktu!"
       />
 
@@ -184,7 +189,7 @@ export default function MazeRunnerGame({ onGameOver, onScoreUpdate, highScore }:
         )}
       </div>
 
-      {isPlaying && (
+      {(gameState === 'playing' || gameState === 'paused') && (
         <MobileControls
           onUp={() => movePlayer(-1, 0)}
           onDown={() => movePlayer(1, 0)}

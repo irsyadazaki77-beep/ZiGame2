@@ -29,10 +29,26 @@ const CARDS_SYMBOLS = [
   { symbol: '🕹️', color: 'text-green-500' },    // Joystick
 ];
 
+import { useGameEngine } from '../../hooks/useGameEngine';
+
 export default function MemoryGridGame({ onGameOver, onScoreUpdate, highScore }: MemoryGridProps) {
-  const scoreRef = useRef(0);
-  // State variables
-  const [isPlaying, setIsPlaying] = useState(false);
+  const {
+    gameState,
+    score,
+    addScore,
+    startWithCountdown,
+    countdown,
+    triggerGameOver,
+    pauseGame,
+    resumeGame,
+    gameStateRef,
+    scoreRef,
+  } = useGameEngine({
+    gameId: 'memorygrid',
+    onGameOver,
+    onScoreUpdate,
+  });
+
   const [cards, setCards] = useState<Card[]>(() => {
     return [...CARDS_SYMBOLS, ...CARDS_SYMBOLS].map((item, idx) => ({
       id: idx,
@@ -43,31 +59,18 @@ export default function MemoryGridGame({ onGameOver, onScoreUpdate, highScore }:
     }));
   });
   const [selectedIndices, setSelectedIndices] = useState<number[]>([]);
-  const [score, setScore] = useState(0);
   const [moves, setMoves] = useState(0);
   const [combo, setCombo] = useState(1);
   const [timeLeft, setTimeLeft] = useState(90); // 1.5 minutes limit
-  const [gameOver, setGameOver] = useState(false);
-  const isPlayingRef = useRef(false);
-  const gameOverRef = useRef(false);
-
-
-  useEffect(() => {
-    isPlayingRef.current = isPlaying;
-    gameOverRef.current = gameOver;
-    scoreRef.current = score;
-  }, [isPlaying, gameOver, score]);
-  const [gameWon, setGameWon] = useState(false);
-  const [muted, setMuted] = useState(audio.getMuteState());
 
   // Countdown clock interval
   useEffect(() => {
     let timer: NodeJS.Timeout;
-    if (isPlaying && !gameOver && !gameWon) {
+    if (gameState === 'playing') {
       timer = setInterval(() => {
         setTimeLeft(prev => {
           if (prev <= 1) {
-            triggerGameOver();
+            triggerGameOver(scoreRef.current);
             return 0;
           }
           return prev - 1;
@@ -75,40 +78,36 @@ export default function MemoryGridGame({ onGameOver, onScoreUpdate, highScore }:
       }, 1000);
     }
     return () => clearInterval(timer);
-  }, [isPlaying, gameOver, gameWon]);
+  }, [gameState]);
 
   const initGame = () => {
-    audio.playCoin();
-    // Reset state
-    setScore(0);
-    setMoves(0);
-    setCombo(1);
-    setTimeLeft(90);
-    setGameOver(false);
-    setGameWon(false);
-    setSelectedIndices([]);
+    startWithCountdown(() => {
+      setMoves(0);
+      setCombo(1);
+      setTimeLeft(90);
+      setSelectedIndices([]);
 
-    // Double the symbols and shuffle them
-    const doubled = [...CARDS_SYMBOLS, ...CARDS_SYMBOLS].map((item, idx) => ({
-      id: idx,
-      symbol: item.symbol,
-      isFlipped: false,
-      isMatched: false,
-      color: item.color,
-    }));
+      // Double the symbols and shuffle them
+      const doubled = [...CARDS_SYMBOLS, ...CARDS_SYMBOLS].map((item, idx) => ({
+        id: idx,
+        symbol: item.symbol,
+        isFlipped: false,
+        isMatched: false,
+        color: item.color,
+      }));
 
-    // Knuth shuffle algorithm
-    for (let i = doubled.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [doubled[i], doubled[j]] = [doubled[j], doubled[i]];
-    }
+      // Knuth shuffle algorithm
+      for (let i = doubled.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [doubled[i], doubled[j]] = [doubled[j], doubled[i]];
+      }
 
-    setCards(doubled);
-    setIsPlaying(true);
+      setCards(doubled);
+    });
   };
 
   const handleCardClick = (idx: number) => {
-    if (!isPlaying || cards[idx].isFlipped || cards[idx].isMatched || selectedIndices.length >= 2) return;
+    if (gameState !== 'playing' || cards[idx].isFlipped || cards[idx].isMatched || selectedIndices.length >= 2) return;
 
     audio.playHit();
     const updated = [...cards];
@@ -140,11 +139,7 @@ export default function MemoryGridGame({ onGameOver, onScoreUpdate, highScore }:
 
       // Score = combo reward
       const matchPoints = 15 * combo;
-      setScore(prev => {
-        const next = prev + matchPoints;
-        onScoreUpdate(next);
-        return next;
-      });
+      addScore(matchPoints);
 
       // Increase combo
       setCombo(prev => Math.min(5, prev + 1));
@@ -167,27 +162,11 @@ export default function MemoryGridGame({ onGameOver, onScoreUpdate, highScore }:
     }
   };
 
-  const triggerGameOver = () => {
-    setIsPlaying(false);
-    setGameOver(true);
-    audio.playGameOver();
-    onGameOver(score);
-  };
-
   const triggerGameWon = () => {
-    setIsPlaying(false);
-    setGameWon(true);
     audio.playLevelUp();
     // Time remaining bonus
     const finalBonus = Math.floor(timeLeft * 1.5);
-    const finalScore = score + finalBonus;
-    setScore(finalScore);
-    onGameOver(finalScore);
-  };
-
-  const toggleSound = () => {
-    audio.toggleMute();
-    setMuted(audio.getMuteState());
+    triggerGameOver(scoreRef.current + finalBonus);
   };
 
   // Convert seconds to digital clock output
@@ -197,29 +176,25 @@ export default function MemoryGridGame({ onGameOver, onScoreUpdate, highScore }:
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
-  const getGameState = () => {
-    if (!isPlaying && score === 0 && !gameOver && !gameWon) return 'ready';
-    if (!isPlaying) return 'gameover'; // Game won is also gameover
-    return 'playing';
-  };
-
   return (
     <div className="relative flex flex-col h-full w-full min-h-0 items-center justify-center overflow-hidden p-2 bg-zinc-950">
       {/* HUD Bar inside the flex layout to prevent overlap */}
-      <div className="w-full flex-none flex justify-between items-center mb-2 px-2 font-mono text-xs">
-        <div className="text-purple-400 font-bold uppercase tracking-wider">
-          WAKTU: <span className={timeLeft < 20 ? "text-red-500 animate-pulse font-bold" : "text-white"}>{formatTime(timeLeft)}</span>
+      {(gameState === 'playing' || gameState === 'paused') && (
+        <div className="w-full flex-none flex justify-between items-center mb-2 px-2 font-mono text-xs">
+          <div className="text-purple-400 font-bold uppercase tracking-wider">
+            WAKTU: <span className={timeLeft < 20 ? "text-red-500 animate-pulse font-bold" : "text-white"}>{formatTime(timeLeft)}</span>
+          </div>
+          <div className="text-zinc-400 font-bold uppercase tracking-wider">
+            LANGKAH: <span className="text-white">{moves}</span>
+          </div>
+          <div className="text-emerald-400 font-bold uppercase tracking-wider">
+            COMBO: <span className="text-white">x{combo}</span>
+          </div>
+          <div className="text-yellow-400 font-bold uppercase tracking-wider">
+            SKOR: <span className="text-white">{score}</span>
+          </div>
         </div>
-        <div className="text-zinc-400 font-bold uppercase tracking-wider">
-          LANGKAH: <span className="text-white">{moves}</span>
-        </div>
-        <div className="text-emerald-400 font-bold uppercase tracking-wider">
-          COMBO: <span className="text-white">x{combo}</span>
-        </div>
-        <div className="text-yellow-400 font-bold uppercase tracking-wider">
-          SKOR: <span className="text-white">{score}</span>
-        </div>
-      </div>
+      )}
 
       {/* Board Wrapper */}
       <div className="relative flex-1 min-h-0 w-full flex items-center justify-center bg-black rounded-xl border border-zinc-800 shadow-[0_0_20px_rgba(0,0,0,0.5)] p-4 overflow-hidden">
@@ -263,10 +238,13 @@ export default function MemoryGridGame({ onGameOver, onScoreUpdate, highScore }:
         </div>
 
         <GameOverlay
-          gameState={getGameState()}
+          gameState={gameState}
           score={score}
+          highScore={highScore}
           onStart={initGame}
           onRestart={initGame}
+          onResume={resumeGame}
+          countdown={countdown}
           instructions="Temukan pasangan kartu hologram retro yang sama dalam batas waktu. Selesaikan secara beruntun untuk melipatgandakan combo skor Anda!"
         />
       </div>

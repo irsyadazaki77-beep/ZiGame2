@@ -137,7 +137,7 @@ class AnalyticsService {
 
       localStorage.setItem(this.METRICS_STORAGE_KEY, JSON.stringify(metrics));
     } catch (err) {
-      console.warn('Metrics aggregation error', err);
+      logger.warn('Metrics aggregation error', { error: err as Error });
     }
   }
 

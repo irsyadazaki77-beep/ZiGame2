@@ -1,3 +1,4 @@
+import { logger } from '../utils/logger';
 import { useToast } from '../utils/ToastContext';
 import React, { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
@@ -55,7 +56,7 @@ export default function Quests({ dailyMissions, profile, onUpdateProfile, totalP
     try {
       localStorage.setItem('arcade_claimed_pass_tiers', JSON.stringify(claimedTiers));
     } catch (e) {
-      console.error(e);
+      logger.error('Failed to set claimed pass tiers', { error: e as Error });
     }
   }, [claimedTiers]);
 
@@ -125,7 +126,7 @@ export default function Quests({ dailyMissions, profile, onUpdateProfile, totalP
                 localStorage.setItem('arcade_unlocked_avatars', JSON.stringify(unlockedAvs));
               }
             } catch (e) {
-              console.error(e);
+              logger.error('Failed to update unlocked avatars', { error: e as Error });
             }
             next.avatar = tier.rewardValue;
           }

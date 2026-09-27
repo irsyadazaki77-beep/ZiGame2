@@ -5,6 +5,7 @@ import { Button } from '../components/UI';
 import { formatNumber } from '../utils/format';
 import { isFirebaseReady, auth } from '../services/firebase';
 import { useToast } from '../utils/ToastContext';
+import { logger } from '../utils/logger';
 
 interface AdminStats {
   dau: number;
@@ -47,7 +48,7 @@ export default function AdminDashboard() {
         const token = await auth.currentUser.getIdToken();
         if (token) headers['Authorization'] = `Bearer ${token}`;
       } catch (e) {
-        console.warn('Failed to get token for admin call:', e);
+        logger.warn('Failed to get token for admin call', { error: e as Error });
       }
     }
     return headers;
@@ -72,7 +73,7 @@ export default function AdminDashboard() {
         }
       }
     } catch (e) {
-      console.error('Failed to load admin stats:', e);
+      logger.error('Failed to load admin stats', { error: e as Error });
     } finally {
       setLoading(false);
     }

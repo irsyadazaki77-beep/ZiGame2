@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { GameStats, LeaderboardCategory, RivalryInsight } from '../types';
 import { audio } from '../utils/audio';
+import { logger } from '../utils/logger';
 import { Trophy, Calendar, Sparkles, CheckCircle, ChevronLeft, ChevronRight, ShieldCheck, Gamepad2 } from "lucide-react";
 import { Button } from '../components/UI';
 
@@ -49,7 +50,7 @@ export default function LeaderboardPage({ games, currentUsername }: LeaderboardP
           setRivalryInsight(data.rivalryInsight || null);
         }
       } catch (e) {
-        console.error('Failed to fetch leaderboard:', e);
+        logger.error('Failed to fetch leaderboard', { error: e as Error });
       }
       setLoading(false);
     };

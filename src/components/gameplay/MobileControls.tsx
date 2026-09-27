@@ -28,8 +28,8 @@ export const MobileControlButton: React.FC<MobileControlButtonProps> = ({
   };
 
   const variantStyles = variant === 'action'
-    ? 'bg-indigo-600/90 hover:bg-indigo-500 active:bg-indigo-400 text-white border-indigo-400/30 shadow-md shadow-indigo-950/50 active:scale-95'
-    : 'bg-[#141824]/90 hover:bg-[#1a2030] active:bg-[#222a40] text-zinc-300 active:text-white border-white/[0.08] active:scale-95';
+    ? 'bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-white border border-indigo-500/20 shadow-lg shadow-indigo-600/10'
+    : 'bg-zinc-900/90 hover:bg-zinc-850 active:scale-95 text-zinc-200 border border-white/[0.06] backdrop-blur-md shadow-lg shadow-black/20';
 
   return (
     <button
@@ -39,10 +39,10 @@ export const MobileControlButton: React.FC<MobileControlButtonProps> = ({
       onMouseUp={handleEnd}
       onMouseLeave={handleEnd}
       aria-label={label || 'Game Control'}
-      className={`flex flex-col items-center justify-center gap-0.5 border rounded-2xl select-none cursor-pointer transition-all duration-100 touch-manipulation min-w-[44px] min-h-[44px] ${variantStyles} ${className}`}
+      className={`flex flex-col items-center justify-center gap-0.5 rounded-xl select-none cursor-pointer transition-all duration-150 ease-out touch-none active:scale-[0.95] active:brightness-110 min-w-[48px] min-h-[48px] ${variantStyles} ${className}`}
     >
       {icon}
-      {label && <span className="text-[9px] font-mono font-bold tracking-wider uppercase leading-none">{label}</span>}
+      {label && <span className="text-[10px] font-sans font-semibold tracking-wider uppercase leading-none">{label}</span>}
     </button>
   );
 };
@@ -54,33 +54,33 @@ export interface MobileDpadProps {
 
 export const MobileDpad: React.FC<MobileDpadProps> = ({ onDirection, className = '' }) => {
   return (
-    <div className={`grid grid-cols-3 gap-1.5 w-32 h-32 sm:w-36 sm:h-36 shrink-0 opacity-70 hover:opacity-100 pointer-events-auto ${className}`}>
+    <div className={`grid grid-cols-3 gap-2 w-32 h-32 sm:w-36 sm:h-36 shrink-0 opacity-80 hover:opacity-100 pointer-events-auto ${className}`}>
       <div />
       <MobileControlButton 
-        icon={<ArrowUp size={20} />} 
+        icon={<ArrowUp size={18} />} 
         onPress={() => onDirection('up', true)} 
         onRelease={() => onDirection('up', false)} 
         label="UP"
       />
       <div />
       <MobileControlButton 
-        icon={<ArrowLeft size={20} />} 
+        icon={<ArrowLeft size={18} />} 
         onPress={() => onDirection('left', true)} 
         onRelease={() => onDirection('left', false)} 
         label="LEFT"
       />
-      <div className="flex items-center justify-center bg-[#0e121a]/60 rounded-xl border border-white/[0.04]">
-        <CircleDot size={14} className="text-zinc-600" />
+      <div className="flex items-center justify-center bg-zinc-950/60 rounded-xl border border-white/[0.04] backdrop-blur-sm">
+        <CircleDot size={12} className="text-zinc-600" />
       </div>
       <MobileControlButton 
-        icon={<ArrowRight size={20} />} 
+        icon={<ArrowRight size={18} />} 
         onPress={() => onDirection('right', true)} 
         onRelease={() => onDirection('right', false)} 
         label="RIGHT"
       />
       <div />
       <MobileControlButton 
-        icon={<ArrowDown size={20} />} 
+        icon={<ArrowDown size={18} />} 
         onPress={() => onDirection('down', true)} 
         onRelease={() => onDirection('down', false)} 
         label="DOWN"
@@ -129,7 +129,7 @@ export const MobileControls: React.FC<MobileControlsProps> = ({
   const resolvedActionLabel = actionLabel || labelA || 'ACTION';
 
   return (
-    <div className={`absolute bottom-4 left-0 right-0 w-full max-w-lg mx-auto flex lg:hidden items-end justify-between gap-3 px-4 pb-[env(safe-area-inset-bottom,16px)] z-50 select-none pointer-events-none ${className}`}>
+    <div className={`absolute bottom-4 left-0 right-0 w-full max-w-lg mx-auto flex lg:hidden items-end justify-between gap-3 px-4 pb-[env(safe-area-inset-bottom,16px)] z-50 select-none touch-none pointer-events-none ${className}`}>
       {(onDirection || onLeft || onRight || onUp || onDown) && (
         <MobileDpad className="pointer-events-auto" onDirection={(dir, active) => {
           if (onDirection && active) {

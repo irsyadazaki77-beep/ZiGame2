@@ -34,7 +34,7 @@ export const DesktopSidebar: React.FC<DesktopSidebarProps> = ({
 
   return (
     <aside 
-      className={`hidden md:flex flex-col h-screen fixed left-0 top-0 bg-[#090b10]/95 backdrop-blur-xl border-r border-white/[0.06] z-50 transition-all duration-200 ease-in-out ${
+      className={`hidden md:flex flex-col h-screen fixed left-0 top-0 bg-surface-base/95 backdrop-blur-xl border-r border-border-subtle z-50 transition-all duration-200 ease-in-out ${
         collapsed ? 'w-[72px]' : 'w-[208px]'
       }`}
       aria-label="Sidebar Navigasi"
@@ -52,10 +52,10 @@ export const DesktopSidebar: React.FC<DesktopSidebarProps> = ({
             </div>
             {!collapsed && (
               <div className="overflow-hidden">
-                <div className="font-display font-black tracking-wider text-sm text-white leading-none">
+                <div className="font-display font-black tracking-wider text-sm text-text-primary leading-none">
                   ZIGAME
                 </div>
-                <span className="text-[8px] font-mono text-zinc-400 tracking-wider uppercase block mt-0.5">
+                <span className="text-[8px] font-mono text-text-muted tracking-wider uppercase block mt-0.5">
                   ARCADE v2
                 </span>
               </div>
@@ -65,7 +65,7 @@ export const DesktopSidebar: React.FC<DesktopSidebarProps> = ({
           {onToggleCollapse && !collapsed && (
             <button
               onClick={onToggleCollapse}
-              className="w-6 h-6 rounded-lg bg-white/[0.04] hover:bg-white/[0.08] text-zinc-400 hover:text-white flex items-center justify-center transition cursor-pointer"
+              className="w-6 h-6 rounded-lg bg-surface-subtle hover:bg-surface-hover text-text-secondary hover:text-text-primary flex items-center justify-center transition cursor-pointer"
               title="Kecilkan Sidebar ([)"
               aria-label="Kecilkan Sidebar"
             >
@@ -87,15 +87,15 @@ export const DesktopSidebar: React.FC<DesktopSidebarProps> = ({
                 className={`w-full flex items-center ${collapsed ? 'justify-center px-0' : 'gap-3 px-3'} py-2.5 rounded-xl text-xs font-semibold tracking-normal transition-all duration-150 cursor-pointer group relative ${
                   isActive 
                     ? 'bg-indigo-600 text-white font-bold shadow-md shadow-indigo-600/20' 
-                    : 'text-zinc-400 hover:text-zinc-100 hover:bg-white/[0.04]'
+                    : 'text-text-secondary hover:text-text-primary hover:bg-surface-hover'
                 }`}
               >
-                <Icon className={`w-4 h-4 shrink-0 transition-transform group-hover:scale-110 ${isActive ? 'text-white' : 'text-zinc-400'}`} />
+                <Icon className={`w-4 h-4 shrink-0 transition-transform group-hover:scale-110 ${isActive ? 'text-white' : 'text-text-secondary'}`} />
                 {!collapsed && <span className="truncate">{item.label}</span>}
 
                 {/* Floating Tooltip in Collapsed Mode */}
                 {collapsed && (
-                  <div className="absolute left-full ml-2.5 px-2.5 py-1 bg-[#181c2b] text-white text-xs rounded-lg shadow-xl border border-white/[0.08] opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto transition-opacity z-50 whitespace-nowrap">
+                  <div className="absolute left-full ml-2.5 px-2.5 py-1 bg-surface-elevated text-text-primary text-xs rounded-lg shadow-xl border border-border-medium opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto transition-opacity z-50 whitespace-nowrap">
                     {item.label}
                   </div>
                 )}
@@ -109,7 +109,7 @@ export const DesktopSidebar: React.FC<DesktopSidebarProps> = ({
           <div className="my-2 flex justify-center">
             <button
               onClick={onToggleCollapse}
-              className="w-8 h-8 rounded-lg bg-white/[0.04] hover:bg-white/[0.08] text-zinc-400 hover:text-white flex items-center justify-center transition cursor-pointer"
+              className="w-8 h-8 rounded-lg bg-surface-subtle hover:bg-surface-hover text-text-secondary hover:text-text-primary flex items-center justify-center transition cursor-pointer"
               title="Perluas Sidebar ([)"
               aria-label="Perluas Sidebar"
             >
@@ -123,17 +123,17 @@ export const DesktopSidebar: React.FC<DesktopSidebarProps> = ({
           {/* Level Progress Widget */}
           <div 
             onClick={() => navigate('/profile')}
-            className={`bg-[#121622] hover:bg-[#161c2c] border border-white/[0.06] rounded-xl transition-colors cursor-pointer group ${
+            className={`bg-surface-card hover:bg-surface-card-hover border border-border-subtle rounded-xl transition-colors cursor-pointer group ${
               collapsed ? 'p-2 flex flex-col items-center' : 'p-2.5'
             }`}
             title={`Level ${profile.level || 1} • ${profile.xp || 0} XP`}
           >
             {collapsed ? (
               <div className="text-center">
-                <span className="text-[10px] font-mono font-bold text-indigo-400 block">
+                <span className="text-[10px] font-mono font-bold text-indigo-500 block">
                   L{profile.level || 1}
                 </span>
-                <div className="w-8 h-1 bg-black/40 rounded-full mt-1 overflow-hidden">
+                <div className="w-8 h-1 bg-surface-sunken rounded-full mt-1 overflow-hidden">
                   <div 
                     className="h-full bg-indigo-500 rounded-full"
                     style={{ width: `${Math.min(100, (((profile.xp || 0) % 100) / 100) * 100)}%` }}
@@ -143,14 +143,14 @@ export const DesktopSidebar: React.FC<DesktopSidebarProps> = ({
             ) : (
               <>
                 <div className="flex items-center justify-between mb-1.5">
-                  <span className="text-[10px] font-mono font-bold text-zinc-300 group-hover:text-white">
+                  <span className="text-[10px] font-mono font-bold text-text-primary group-hover:text-indigo-500">
                     LVL {profile.level || 1}
                   </span>
-                  <span className="text-[9px] font-mono text-indigo-400 font-semibold">
+                  <span className="text-[9px] font-mono text-indigo-500 font-semibold">
                     {profile.xp || 0} XP
                   </span>
                 </div>
-                <div className="w-full h-1.5 bg-black/40 rounded-full overflow-hidden">
+                <div className="w-full h-1.5 bg-surface-sunken rounded-full overflow-hidden">
                   <div 
                     className="h-full bg-indigo-500 rounded-full transition-all duration-300"
                     style={{ width: `${Math.min(100, (((profile.xp || 0) % 100) / 100) * 100)}%` }}
@@ -162,7 +162,7 @@ export const DesktopSidebar: React.FC<DesktopSidebarProps> = ({
 
           {/* Version & Security Tag */}
           {!collapsed ? (
-            <div className="flex items-center justify-between px-1 text-[9px] font-mono text-zinc-400">
+            <div className="flex items-center justify-between px-1 text-[9px] font-mono text-text-muted">
               <span className="flex items-center gap-1">
                 <Shield size={10} className="text-emerald-500 shrink-0" />
                 Anti-Cheat
@@ -170,7 +170,7 @@ export const DesktopSidebar: React.FC<DesktopSidebarProps> = ({
               <span>v{APP_VERSION}</span>
             </div>
           ) : (
-            <div className="flex justify-center text-zinc-400" title={`Anti-Cheat v2 • v${APP_VERSION}`}>
+            <div className="flex justify-center text-text-muted" title={`Anti-Cheat v2 • v${APP_VERSION}`}>
               <Shield size={12} className="text-emerald-500" />
             </div>
           )}

@@ -17,11 +17,18 @@ export function MainLayout({ children }: { children: React.ReactNode }) {
     try {
       const saved = localStorage.getItem('zigame_sidebar_collapsed');
       if (saved !== null) return saved === 'true';
-      return window.innerWidth < 1280;
-    } catch {
-      return false;
-    }
+    } catch {}
+    return false; // Safe fallback, resolved on mount
   });
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem('zigame_sidebar_collapsed');
+      if (saved === null) {
+        setIsSidebarCollapsed(window.innerWidth < 1280);
+      }
+    } catch {}
+  }, []);
 
   const toggleSidebar = useCallback(() => {
     setIsSidebarCollapsed(prev => {
@@ -72,7 +79,7 @@ export function MainLayout({ children }: { children: React.ReactNode }) {
         className={`flex-1 flex flex-col min-h-0 h-[100dvh] relative transition-all duration-200 ease-in-out ${
           isGamePage 
             ? 'pl-0 pb-0' 
-            : `${isSidebarCollapsed ? 'md:pl-[72px]' : 'md:pl-[208px]'} pb-[calc(3.5rem+env(safe-area-inset-bottom,0px))] md:pb-0`
+            : `${isSidebarCollapsed ? 'md:pl-[72px]' : 'md:pl-[208px]'} pb-[calc(3.75rem+env(safe-area-inset-bottom,0px))] md:pb-0`
         }`}
       >
         {/* Top Navbar */}

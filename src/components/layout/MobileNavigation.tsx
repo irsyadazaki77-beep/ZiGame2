@@ -24,7 +24,7 @@ export const MobileNavigation: React.FC = () => {
   return (
     <nav 
       aria-label="Navigasi Bawah Mobile"
-      className="md:hidden fixed bottom-0 left-0 right-0 h-[calc(3.5rem+env(safe-area-inset-bottom,0px))] pb-[env(safe-area-inset-bottom,0px)] bg-[#090b10]/95 backdrop-blur-xl border-t border-white/[0.06] z-50 px-1 flex items-center justify-around safe-landscape-inset"
+      className="md:hidden fixed bottom-0 left-0 right-0 h-[calc(3.75rem+env(safe-area-inset-bottom,0px))] pb-[env(safe-area-inset-bottom,0px)] bg-surface-base/90 backdrop-blur-md border-t border-border-subtle z-50 px-2 flex items-center justify-around shadow-[0_-4px_16px_rgba(0,0,0,0.03)]"
     >
       {MOBILE_NAV_ITEMS.map((item) => {
         const isActive = location.pathname === item.path || (item.path !== '/' && location.pathname.startsWith(item.path));
@@ -33,25 +33,21 @@ export const MobileNavigation: React.FC = () => {
           <button
             key={item.path}
             onClick={() => navigate(item.path)}
-            className="relative flex flex-col items-center justify-center flex-1 h-full py-1 cursor-pointer min-w-0 select-none active:scale-95 transition-transform"
+            className="relative flex flex-col items-center justify-center flex-1 h-full py-1 cursor-pointer min-w-0 select-none active:scale-95 transition-all"
             aria-label={item.label}
           >
-            <div className={`relative flex items-center justify-center transition-all duration-150 ${isActive ? '-translate-y-0.5' : ''}`}>
-              <Icon className={`w-4 h-4 transition-colors duration-150 shrink-0 ${
-                isActive ? 'text-indigo-400' : 'text-zinc-400'
-              }`} />
-            </div>
-            <span className={`text-[10px] font-medium tracking-tight mt-0.5 transition-colors duration-150 truncate max-w-full px-0.5 leading-none ${
-              isActive ? 'text-indigo-300 font-bold' : 'text-zinc-400'
+            <div className={`relative flex flex-col items-center justify-center px-2 py-1 rounded-xl transition-all duration-150 ${
+              isActive ? 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 font-bold' : 'text-text-muted hover:text-text-primary'
             }`}>
-              {item.label}
-            </span>
-            {isActive && (
-              <motion.div 
-                layoutId="mobile-nav-indicator"
-                className="absolute bottom-1 w-1 h-1 rounded-full bg-indigo-400" 
-              />
-            )}
+              <Icon className={`w-4 h-4 transition-colors duration-150 shrink-0 ${
+                isActive ? 'text-indigo-600 dark:text-indigo-400' : 'text-text-muted'
+              }`} />
+              <span className={`text-[10px] font-medium tracking-tight mt-0.5 transition-colors duration-150 truncate max-w-full leading-none ${
+                isActive ? 'text-indigo-600 dark:text-indigo-400 font-bold' : 'text-text-muted'
+              }`}>
+                {item.label}
+              </span>
+            </div>
           </button>
         );
       })}

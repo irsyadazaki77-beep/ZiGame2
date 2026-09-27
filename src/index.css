@@ -8,36 +8,38 @@
   --font-arcade: "Press Start 2P", monospace;
 
   /* Design System Color Tokens */
-  --color-bg-base: #080a0f;
-  --color-surface-base: #0d1017;
-  --color-surface-subtle: #11151f;
-  --color-surface-raised: #141824;
-  --color-surface-card: #141824;
-  --color-surface-card-hover: #191f2e;
-  --color-surface-hover: #191f2e;
-  --color-surface-elevated: #1e2436;
-  --color-surface-overlay: #252c42;
-  --color-surface-sunken: #05070a;
+  --color-bg-base: var(--bg-base);
+  --color-surface-base: var(--surface-base);
+  --color-surface-subtle: var(--surface-subtle);
+  --color-surface-raised: var(--surface-raised);
+  --color-surface-card: var(--surface-card);
+  --color-surface-card-hover: var(--surface-card-hover);
+  --color-surface-hover: var(--surface-hover);
+  --color-surface-elevated: var(--surface-elevated);
+  --color-surface-overlay: var(--surface-overlay);
+  --color-surface-sunken: var(--surface-sunken);
 
-  --color-text-primary: #f3f4f6;
-  --color-text-secondary: #9ca3af;
-  --color-text-muted: #6b7280;
+  --color-text-primary: var(--text-primary);
+  --color-text-secondary: var(--text-secondary);
+  --color-text-muted: var(--text-muted);
 
-  --color-border-subtle: rgba(255, 255, 255, 0.06);
-  --color-border-medium: rgba(255, 255, 255, 0.12);
-  --color-border-strong: rgba(255, 255, 255, 0.22);
+  --color-border-subtle: var(--border-subtle);
+  --color-border-medium: var(--border-medium);
+  --color-border-strong: var(--border-strong);
   
-  --color-accent-primary: #6366f1;
-  --color-accent-primary-hover: #4f46e5;
+  --color-accent-primary: var(--accent-primary);
+  --color-accent-primary-hover: var(--accent-primary-hover);
   --color-accent-amber: #f59e0b;
   --color-accent-emerald: #10b981;
   --color-accent-rose: #f43f5e;
 }
 
 :root {
-  --surface-base: #080a0f;
-  --surface-subtle: #0d1017;
-  --surface-raised: #11151f;
+  /* Dark Theme (Default premium retro-cyber) */
+  --bg-base: #080a0f;
+  --surface-base: #0d1017;
+  --surface-subtle: #11151f;
+  --surface-raised: #141824;
   --surface-card: #141824;
   --surface-card-hover: #191f2e;
   --surface-hover: #191f2e;
@@ -55,6 +57,12 @@
   --border-focus: #6366f1;
 
   --accent-primary: #6366f1;
+  --accent-primary-hover: #4f46e5;
+  
+  --grid-color: rgba(255, 255, 255, 0.02);
+  --scroll-track: #080a0f;
+  --scroll-thumb: #27272a;
+  --scroll-thumb-hover: #3f3f46;
 
   --radius-sm: 8px;
   --radius-md: 12px;
@@ -62,13 +70,45 @@
   --radius-xl: 20px;
 }
 
+:root[data-theme="light"] {
+  /* Light Theme (Aesthetic premium neutral light with ZiGame purple accents) */
+  --bg-base: #f5f6fa;
+  --surface-base: #ffffff;
+  --surface-subtle: #f1f3f8;
+  --surface-raised: #ffffff;
+  --surface-card: #ffffff;
+  --surface-card-hover: #f8fafc;
+  --surface-hover: #f1f5f9;
+  --surface-elevated: #ffffff;
+  --surface-overlay: #ffffff;
+  --surface-sunken: #eef2f7;
+
+  --text-primary: #0f172a;       /* slate-900 */
+  --text-secondary: #475569;     /* slate-600 */
+  --text-muted: #64748b;         /* slate-500 */
+
+  --border-subtle: rgba(15, 23, 42, 0.08);
+  --border-medium: rgba(15, 23, 42, 0.14);
+  --border-strong: rgba(15, 23, 42, 0.24);
+  --border-focus: #6366f1;
+
+  --accent-primary: #6366f1;     /* indigo-600 */
+  --accent-primary-hover: #4f46e5;
+  
+  --grid-color: rgba(15, 23, 42, 0.03);
+  --scroll-track: #f5f6fa;
+  --scroll-thumb: #cbd5e1;
+  --scroll-thumb-hover: #94a3b8;
+}
+
 /* Global Mobile & Surface Optimization Rules */
 html, body {
-  background-color: #080a0f;
-  color: #f3f4f6;
+  background-color: var(--bg-base);
+  color: var(--text-primary);
   overscroll-behavior-y: none;
   -webkit-tap-highlight-color: transparent;
   padding-bottom: env(safe-area-inset-bottom, 0px);
+  transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
 }
 
 /* Explicit select-none for controls, buttons, and canvas */
@@ -113,21 +153,21 @@ input, textarea {
 }
 
 ::-webkit-scrollbar-track {
-  background: #080a0f;
+  background: var(--scroll-track);
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #27272a;
+  background: var(--scroll-thumb);
   border-radius: 9999px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #3f3f46;
+  background: var(--scroll-thumb-hover);
 }
 
 /* Selection styles */
 ::selection {
-  background: #6366f1;
+  background: var(--accent-primary);
   color: #ffffff;
 }
 
@@ -147,8 +187,8 @@ input, textarea {
 /* Clean background grid pattern */
 .bg-grid-subtle {
   background-image: 
-    linear-gradient(to right, rgba(255, 255, 255, 0.02) 1px, transparent 1px),
-    linear-gradient(to bottom, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
+    linear-gradient(to right, var(--grid-color) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--grid-color) 1px, transparent 1px);
   background-size: 32px 32px;
 }
 
@@ -185,20 +225,23 @@ input, textarea {
 
 /* Clean Surfaces & Panels */
 .surface-card {
-  background-color: #0f131c;
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  background-color: var(--surface-card);
+  border: 1px solid var(--border-subtle);
+  transition: background-color 0.15s ease, border-color 0.15s ease;
 }
 
 .surface-elevated {
-  background-color: #151a26;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background-color: var(--surface-elevated);
+  border: 1px solid var(--border-medium);
+  transition: background-color 0.15s ease, border-color 0.15s ease;
 }
 
 .glass-panel {
-  background: rgba(15, 19, 28, 0.8);
+  background: var(--surface-base);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--border-subtle);
+  transition: background-color 0.15s ease, border-color 0.15s ease;
 }
 
 /* Interactive button press */
@@ -208,7 +251,7 @@ input, textarea {
 
 /* Accessibility focus ring */
 *:focus-visible {
-  outline: 2px solid #818cf8;
+  outline: 2px solid var(--accent-primary);
   outline-offset: 2px;
 }
 
@@ -229,7 +272,7 @@ input, textarea {
   filter: none !important;
 }
 .disable-expensive-blur .glass-panel {
-  background: rgba(15, 19, 28, 0.95); /* darker solid fallback */
+  background: var(--surface-sunken); /* solid sunken fallback */
 }
 .disable-glow {
   box-shadow: none !important;
