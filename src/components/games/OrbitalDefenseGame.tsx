@@ -681,35 +681,45 @@ export default function OrbitalDefenseGame({ onGameOver, onScoreUpdate, highScor
           }
         });
 
-        projectilesRef.current = projectilesRef.current.filter((p) => p.lifetime > 0);
+        // In-place projectile update (zero-allocation)
+        let pWriteIdx = 0;
+        for (let i = 0; i < projectilesRef.current.length; i++) {
+          if (projectilesRef.current[i].lifetime > 0) {
+            projectilesRef.current[pWriteIdx++] = projectilesRef.current[i];
+          }
+        }
+        projectilesRef.current.length = pWriteIdx;
 
-        // Update Particles
-        particlesRef.current = particlesRef.current.filter((p) => {
+        // In-place particle update (zero-allocation)
+        let partWriteIdx = 0;
+        for (let i = 0; i < particlesRef.current.length; i++) {
+          const p = particlesRef.current[i];
           p.x += p.vx;
           p.y += p.vy;
           p.alpha -= 0.025;
-          return p.alpha > 0;
-        });
+          if (p.alpha > 0) {
+            particlesRef.current[partWriteIdx++] = p;
+          }
+        }
+        particlesRef.current.length = partWriteIdx;
 
       // RENDER PHASE
       ctx.fillStyle = '#07090e';
       ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
 
-      // Orbital Grid Background
+      // Orbital Grid Background (batched into single draw call)
       ctx.strokeStyle = 'rgba(255, 255, 255, 0.03)';
       ctx.lineWidth = 1;
+      ctx.beginPath();
       for (let x = 0; x < CANVAS_WIDTH; x += 40) {
-        ctx.beginPath();
         ctx.moveTo(x, 0);
         ctx.lineTo(x, CANVAS_HEIGHT);
-        ctx.stroke();
       }
       for (let y = 0; y < CANVAS_HEIGHT; y += 40) {
-        ctx.beginPath();
         ctx.moveTo(0, y);
         ctx.lineTo(CANVAS_WIDTH, y);
-        ctx.stroke();
       }
+      ctx.stroke();
 
       // Path Track
       ctx.strokeStyle = 'rgba(6, 182, 212, 0.18)';

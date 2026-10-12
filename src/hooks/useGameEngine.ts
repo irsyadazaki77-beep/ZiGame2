@@ -1,7 +1,7 @@
-import { useState, useRef, useEffect, useCallback } from 'react';
-import { GameLifecycleState } from '../types';
-import { performanceService } from '../services/performanceService';
-import { audio } from '../utils/audio';
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import { GameLifecycleState, PerformanceSettings } from '../types';
+import { createGameRuntimeContext } from '../sdk/runtimeContext';
+import { GameRuntimeContext } from '../types/gameSdk';
 
 export type GameEngineState = GameLifecycleState;
 
@@ -16,6 +16,7 @@ export interface UseGameEngineOptions {
 }
 
 export function useGameEngine({
+  gameId = 'arcade-game',
   onScoreUpdate,
   onGameOver,
   onPause,
@@ -23,243 +24,124 @@ export function useGameEngine({
   onRestart,
   maxDpr
 }: UseGameEngineOptions = {}) {
-  const [gameState, setGameState] = useState<GameEngineState>('ready');
+  // Stable refs for event callbacks
+  const onScoreUpdateRef = useRef(onScoreUpdate);
+  const onGameOverRef = useRef(onGameOver);
+  const onPauseRef = useRef(onPause);
+  const onResumeRef = useRef(onResume);
+  const onRestartRef = useRef(onRestart);
+
+  useEffect(() => {
+    onScoreUpdateRef.current = onScoreUpdate;
+    onGameOverRef.current = onGameOver;
+    onPauseRef.current = onPause;
+    onResumeRef.current = onResume;
+    onRestartRef.current = onRestart;
+  });
+
+  // Create authoritative runtime context
+  const ctx = useMemo<GameRuntimeContext>(() => {
+    return createGameRuntimeContext({
+      gameId,
+      onScoreUpdate: (s) => onScoreUpdateRef.current?.(s),
+      onGameOver: (s) => onGameOverRef.current?.(s),
+      onPause: () => onPauseRef.current?.(),
+      onResume: () => onResumeRef.current?.(),
+      onRestart: () => onRestartRef.current?.()
+    });
+  }, [gameId]);
+
+  // React State Mirrors
+  const [gameState, setGameStateInternal] = useState<GameEngineState>(() => ctx.lifecycle.getState() as GameEngineState);
   const [countdown, setCountdown] = useState<number>(3);
-  const [score, setScore] = useState<number>(0);
-  const scoreRef = useRef<number>(0);
-  const [perfSettings, setPerfSettings] = useState(() => performanceService.getSettings());
+  const [score, setScoreInternal] = useState<number>(() => ctx.score.get());
+  const [perfSettings, setPerfSettings] = useState<PerformanceSettings>(() => ctx.performance.getSettings());
 
   const gameStateRef = useRef<GameEngineState>(gameState);
+  const scoreRef = useRef<number>(score);
   const animFrameRef = useRef<number | null>(null);
-  const lastTimestampRef = useRef<number>(0);
-  const loopCallbackRef = useRef<((timestamp: number, deltaTime: number) => void) | null>(null);
 
-  // Sync performance settings
+  // Sync state subscriptions
   useEffect(() => {
-    return performanceService.subscribe((settings) => {
-      setPerfSettings(settings);
+    const unsubLifecycle = ctx.lifecycle.subscribe((state) => {
+      const mapped = state as GameEngineState;
+      gameStateRef.current = mapped;
+      setGameStateInternal(mapped);
     });
-  }, []);
 
-  // Keep ref updated
-  useEffect(() => {
-    gameStateRef.current = gameState;
-  }, [gameState]);
+    const unsubScore = ctx.score.subscribe((s) => {
+      scoreRef.current = s;
+      setScoreInternal(s);
+    });
 
-  // Tab visibility auto-pause
-  useEffect(() => {
-    const handleVisibilityChange = () => {
-      if (document.hidden && gameStateRef.current === 'playing') {
-        setGameState('paused');
-        if (onPause) onPause();
-      }
-    };
-
-    const handleBlur = () => {
-      if (gameStateRef.current === 'playing') {
-        setGameState('paused');
-        if (onPause) onPause();
-      }
-    };
-
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    window.addEventListener('blur', handleBlur);
+    const unsubPerf = ctx.performance.subscribe((p) => {
+      setPerfSettings(p);
+    });
 
     return () => {
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-      window.removeEventListener('blur', handleBlur);
+      unsubLifecycle();
+      unsubScore();
+      unsubPerf();
+      ctx.lifecycle.destroy();
     };
-  }, [onPause]);
+  }, [ctx]);
 
-  // Safe requestAnimationFrame loop manager
+  // Loop control
   const stopLoop = useCallback(() => {
-    if (animFrameRef.current !== null) {
-      cancelAnimationFrame(animFrameRef.current);
-      animFrameRef.current = null;
-      performanceService.registerRafEnd();
-    }
-  }, []);
+    ctx.loop.stop();
+  }, [ctx]);
 
   const startLoop = useCallback((callback: (timestamp: number, deltaTime: number) => void) => {
-    stopLoop();
-    loopCallbackRef.current = callback;
-    lastTimestampRef.current = performance.now();
-    let frameCounter = 0;
-    let fpsTimer = performance.now();
+    ctx.loop.start(callback);
+  }, [ctx]);
 
-    performanceService.registerRafStart();
-
-    const loop = (timestamp: number) => {
-      if (gameStateRef.current !== 'playing') {
-        stopLoop();
-        return;
-      }
-
-      const rawDelta = timestamp - lastTimestampRef.current;
-      lastTimestampRef.current = timestamp;
-      
-      // Cap delta time to prevent physics explosions after background tab sleep (50ms cap)
-      const safeDelta = Math.min(Math.max(rawDelta, 1), 50);
-
-      // Track FPS for performanceService
-      frameCounter++;
-      if (timestamp - fpsTimer >= 1000) {
-        performanceService.recordFramePerformance(frameCounter);
-        frameCounter = 0;
-        fpsTimer = timestamp;
-      }
-
-      callback(timestamp, safeDelta);
-
-      if (gameStateRef.current === 'playing') {
-        animFrameRef.current = requestAnimationFrame(loop);
-      } else {
-        stopLoop();
-      }
-    };
-
-    animFrameRef.current = requestAnimationFrame(loop);
-  }, [stopLoop]);
-
-  // Clean up animation frames when state changes
-  useEffect(() => {
-    if (gameState !== 'playing') {
-      stopLoop();
-    }
-  }, [gameState, stopLoop]);
-
-  // Auto clean up on unmount
-  useEffect(() => {
-    return () => {
-      stopLoop();
-    };
-  }, [stopLoop]);
-
-  // Score management helper
+  // Score handlers
   const updateScore = useCallback((newScore: number) => {
-    setScore(newScore);
-    scoreRef.current = newScore;
-    if (onScoreUpdate) {
-      onScoreUpdate(newScore);
-    }
-  }, [onScoreUpdate]);
+    ctx.score.set(newScore);
+  }, [ctx]);
 
   const addScore = useCallback((points: number) => {
-    setScore(prev => {
-      const next = prev + points;
-      scoreRef.current = next;
-      if (onScoreUpdate) onScoreUpdate(next);
-      return next;
-    });
-  }, [onScoreUpdate]);
+    ctx.score.add(points);
+  }, [ctx]);
 
+  const setScore = useCallback((newScore: number) => {
+    ctx.score.set(newScore);
+  }, [ctx]);
+
+  // Lifecycle transitions
   const pauseGame = useCallback(() => {
-    if (gameStateRef.current === 'playing') {
-      setGameState('paused');
-      gameStateRef.current = 'paused';
-      stopLoop();
-      if (onPause) onPause();
-    }
-  }, [onPause, stopLoop]);
+    ctx.lifecycle.pauseGame();
+  }, [ctx]);
 
   const resumeGame = useCallback(() => {
-    if (gameStateRef.current === 'paused') {
-      setGameState('playing');
-      gameStateRef.current = 'playing';
-      lastTimestampRef.current = performance.now();
-      if (onResume) onResume();
-      if (loopCallbackRef.current) {
-        startLoop(loopCallbackRef.current);
-      }
-    }
-  }, [onResume, startLoop]);
+    ctx.lifecycle.resumeGame();
+  }, [ctx]);
 
   const togglePause = useCallback(() => {
-    if (gameStateRef.current === 'playing') {
-      pauseGame();
-    } else if (gameStateRef.current === 'paused') {
-      resumeGame();
-    }
-  }, [pauseGame, resumeGame]);
+    ctx.lifecycle.togglePause();
+  }, [ctx]);
 
-  // Game over trigger helper
   const triggerGameOver = useCallback((finalScore?: number) => {
-    stopLoop();
-    setGameState('gameover');
-    gameStateRef.current = 'gameover';
-    const s = finalScore !== undefined ? finalScore : scoreRef.current;
-    if (onGameOver) {
-      onGameOver(s);
-    }
-  }, [onGameOver, stopLoop]);
+    ctx.lifecycle.triggerGameOver(finalScore);
+  }, [ctx]);
 
-  // Restart trigger
   const triggerRestart = useCallback(() => {
-    stopLoop();
-    setScore(0);
-    scoreRef.current = 0;
-    setGameState('ready');
-    gameStateRef.current = 'ready';
-    if (onRestart) onRestart();
-  }, [onRestart, stopLoop]);
+    ctx.lifecycle.triggerRestart();
+  }, [ctx]);
 
-  const countdownTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const setGameState = useCallback((state: GameEngineState) => {
+    ctx.lifecycle.setState(state as any);
+  }, [ctx]);
 
-  // Start with countdown
   const startWithCountdown = useCallback((onCountdownEnd?: () => void) => {
-    if (countdownTimerRef.current) {
-      clearInterval(countdownTimerRef.current);
-      countdownTimerRef.current = null;
-    }
-    setGameState('countdown');
-    gameStateRef.current = 'countdown';
     setCountdown(3);
-    setScore(0);
-    scoreRef.current = 0;
-    audio.playCountdownTick();
-    let current = 3;
-    countdownTimerRef.current = setInterval(() => {
-      current--;
-      if (current > 0) {
-        setCountdown(current);
-        audio.playCountdownTick();
-      } else {
-        if (countdownTimerRef.current) {
-          clearInterval(countdownTimerRef.current);
-          countdownTimerRef.current = null;
-        }
-        audio.playCountdownGo();
-        setGameState('playing');
-        gameStateRef.current = 'playing';
-        if (onCountdownEnd) onCountdownEnd();
-      }
-    }, 800);
-  }, []);
+    ctx.lifecycle.startWithCountdown(onCountdownEnd);
+  }, [ctx]);
 
-  useEffect(() => {
-    return () => {
-      if (countdownTimerRef.current) {
-        clearInterval(countdownTimerRef.current);
-        countdownTimerRef.current = null;
-      }
-    };
-  }, []);
-
-  // DPR capping canvas initializer with adaptive performance profile
+  // Viewport / canvas helper with DPR capping
   const setupCanvasContext = useCallback((canvas: HTMLCanvasElement | null, width: number, height: number) => {
-    if (!canvas) return null;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return null;
-
-    const targetCap = maxDpr !== undefined ? maxDpr : perfSettings.dprCap;
-    const dpr = Math.min(window.devicePixelRatio || 1, targetCap);
-    canvas.width = Math.floor(width * dpr);
-    canvas.height = Math.floor(height * dpr);
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.scale(dpr, dpr);
-
-    return ctx;
-  }, [maxDpr, perfSettings.dprCap]);
+    return ctx.viewport.setupCanvas(canvas, width, height, maxDpr);
+  }, [ctx, maxDpr]);
 
   return {
     gameState,
@@ -281,6 +163,7 @@ export function useGameEngine({
     scoreRef,
     gameLoopRef: animFrameRef,
     setupCanvasContext,
-    perfSettings
+    perfSettings,
+    ctx
   };
 }

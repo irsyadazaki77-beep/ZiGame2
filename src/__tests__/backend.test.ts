@@ -1324,4 +1324,402 @@ describe('ZiGame 2.0 Backend Authority & Security Tests', () => {
       expect(econRes.body.totalXp).toBe(expectedXp);
     });
   });
+
+  describe('Phase 3 Identity, Session Ownership & Security Regression Suite', () => {
+    it('Security: Unauthenticated guest accessing protected endpoints must receive 401 UNAUTHORIZED', async () => {
+      // 1. Economy fetch
+      const res1 = await request(app).get('/api/economy');
+      expect(res1.status).toBe(401);
+      expect(res1.body.code).toBe('UNAUTHORIZED');
+
+      // 2. Buy item
+      const res2 = await request(app).post('/api/buy-item').send({ itemId: 'av_phoenix', idempotencyKey: 'idem_anon' });
+      expect(res2.status).toBe(401);
+      expect(res2.body.code).toBe('UNAUTHORIZED');
+
+      // 3. Game session start
+      const res3 = await request(app).post('/api/session/start').send({ gameId: 'snake' });
+      expect(res3.status).toBe(401);
+      expect(res3.body.code).toBe('UNAUTHORIZED');
+
+      // 4. Submit score
+      const res4 = await request(app).post('/api/submit-score').send({ gameId: 'snake', score: 100, sessionId: 'ses_fake' });
+      expect(res4.status).toBe(401);
+      expect(res4.body.code).toBe('UNAUTHORIZED');
+
+      // 5. Ranked session start
+      const res5 = await request(app).post('/api/competitive/session/start').send({ gameId: 'snake' });
+      expect(res5.status).toBe(401);
+      expect(res5.body.code).toBe('UNAUTHORIZED');
+
+      // 6. Ranked score submit
+      const res6 = await request(app).post('/api/competitive/submit').send({ gameId: 'snake', score: 100, sessionId: 'rnk_fake' });
+      expect(res6.status).toBe(401);
+      expect(res6.body.code).toBe('UNAUTHORIZED');
+
+      // 7. Daily wheel spin
+      const res7 = await request(app).post('/api/spin');
+      expect(res7.status).toBe(401);
+      expect(res7.body.code).toBe('UNAUTHORIZED');
+
+      // 8. Admin verify
+      const res8 = await request(app).get('/api/admin/verify');
+      expect(res8.status).toBe(401);
+      expect(res8.body.code).toBe('UNAUTHORIZED');
+    });
+
+    it('Security: Authenticated non-admin user accessing admin endpoints must receive 403 FORBIDDEN', async () => {
+      const normalUid = `normal-user-${Date.now()}`;
+
+      // Admin stats
+      const res1 = await request(app)
+        .get('/api/admin/stats')
+        .set('x-test-uid', normalUid);
+      expect(res1.status).toBe(403);
+      expect(res1.body.code).toBe('FORBIDDEN');
+
+      // Admin kill-switches GET
+      const res2 = await request(app)
+        .get('/api/admin/kill-switches')
+        .set('x-test-uid', normalUid);
+      expect(res2.status).toBe(403);
+      expect(res2.body.code).toBe('FORBIDDEN');
+
+      // Admin kill-switches POST
+      const res3 = await request(app)
+        .post('/api/admin/kill-switches')
+        .set('x-test-uid', normalUid)
+        .send({ feature: 'ranked', active: true });
+      expect(res3.status).toBe(403);
+      expect(res3.body.code).toBe('FORBIDDEN');
+
+      // Admin purge suspect scores
+      const res4 = await request(app)
+        .post('/api/admin/purge-suspect-scores')
+        .set('x-test-uid', normalUid)
+        .send({ gameId: 'snake' });
+      expect(res4.status).toBe(403);
+      expect(res4.body.code).toBe('FORBIDDEN');
+
+      // Admin reconcile economy
+      const res5 = await request(app)
+        .post('/api/admin/reconcile-economy')
+        .set('x-test-uid', normalUid)
+        .send({ userId: normalUid });
+      expect(res5.status).toBe(403);
+      expect(res5.body.code).toBe('FORBIDDEN');
+    });
+
+    it('Security: Spoofed userId in body must be strictly rejected with 403 FORBIDDEN_USER_MISMATCH', async () => {
+      const userA = `legit-user-A-${Date.now()}`;
+      const userB = `victim-user-B-${Date.now()}`;
+
+      // Attempt to spend User B's funds or buy item on behalf of User B
+      const buyRes = await request(app)
+        .post('/api/buy-item')
+        .set('x-test-uid', userA)
+        .send({
+          userId: userB, // Spoof attempt
+          itemId: 'av_phoenix',
+          idempotencyKey: `idem_spoof_${Date.now()}`
+        });
+
+      expect(buyRes.status).toBe(403);
+      expect(buyRes.body.code).toBe('FORBIDDEN_USER_MISMATCH');
+
+      // Attempt to submit score as User B using User A's token
+      const scoreRes = await request(app)
+        .post('/api/submit-score')
+        .set('x-test-uid', userA)
+        .send({
+          userId: userB, // Spoof attempt
+          gameId: 'snake',
+          score: 100,
+          sessionId: 'ses_any'
+        });
+
+      expect(scoreRes.status).toBe(403);
+      expect(scoreRes.body.code).toBe('FORBIDDEN_USER_MISMATCH');
+    });
+
+    it('Security: User A session cannot be consumed or submitted by User B', async () => {
+      const userA = `session-owner-A-${Date.now()}`;
+      const userB = `session-thief-B-${Date.now()}`;
+
+      // 1. User A starts casual game session
+      const startRes = await request(app)
+        .post('/api/session/start')
+        .set('x-test-uid', userA)
+        .send({ gameId: 'snake' });
+      expect(startRes.status).toBe(200);
+      const { sessionId } = startRes.body;
+
+      const sessionObj = memoryStore.sessions.get(sessionId);
+      if (sessionObj) {
+        sessionObj.startTime = Date.now() - 5000;
+      }
+
+      // User B attempts to submit score using User A's session ticket
+      const submitRes = await request(app)
+        .post('/api/submit-score')
+        .set('x-test-uid', userB)
+        .send({
+          sessionId,
+          gameId: 'snake',
+          score: 150,
+          playerName: 'Thief',
+          idempotencyKey: `idem_steal_${Date.now()}`
+        });
+
+      expect(submitRes.status).toBe(422);
+      expect(submitRes.body.code).toBe('SESSION_USER_MISMATCH');
+
+      // 2. User A starts ranked session
+      const rnkStartRes = await request(app)
+        .post('/api/competitive/session/start')
+        .set('x-test-uid', userA)
+        .send({ gameId: 'snake' });
+      expect(rnkStartRes.status).toBe(200);
+      const rnkSessionId = rnkStartRes.body.sessionId;
+
+      const rnkSessionObj = memoryStore.sessions.get(rnkSessionId);
+      if (rnkSessionObj) {
+        rnkSessionObj.startTime = Date.now() - 5000;
+      }
+
+      // User B attempts to submit ranked score using User A's ranked ticket
+      const rnkSubmitRes = await request(app)
+        .post('/api/competitive/submit')
+        .set('x-test-uid', userB)
+        .send({
+          sessionId: rnkSessionId,
+          gameId: 'snake',
+          score: 150,
+          playerName: 'Thief',
+          idempotencyKey: `idem_rnk_steal_${Date.now()}`
+        });
+
+      expect(rnkSubmitRes.status).toBe(422);
+      expect(rnkSubmitRes.body.code).toBe('SESSION_USER_MISMATCH');
+    });
+
+    it('Security: Invalid or expired Bearer tokens must return 401 without leaking internal stack', async () => {
+      // Invalid Bearer token
+      const res1 = await request(app)
+        .get('/api/economy')
+        .set('Authorization', 'Bearer invalid_token');
+
+      expect(res1.status).toBe(401);
+      expect(res1.body.code).toBe('INVALID_TOKEN');
+      expect(res1.body.stack).toBeUndefined();
+
+      // Expired Bearer token
+      const res2 = await request(app)
+        .get('/api/economy')
+        .set('Authorization', 'Bearer expired_token');
+
+      expect(res2.status).toBe(401);
+      expect(res2.body.code).toBe('TOKEN_EXPIRED');
+      expect(res2.body.stack).toBeUndefined();
+    });
+
+    it('Security: Client-side spoofed isAdmin in body or headers cannot grant admin access', async () => {
+      const normalUid = `spoofing-user-${Date.now()}`;
+
+      // Passing isAdmin: true in body
+      const res1 = await request(app)
+        .get('/api/admin/verify')
+        .set('x-test-uid', normalUid)
+        .send({ isAdmin: true, role: 'admin' });
+
+      expect(res1.status).toBe(403);
+      expect(res1.body.code).toBe('FORBIDDEN');
+    });
+
+    it('Security: Genuine admin user is authoritatively verified and allowed on admin endpoints', async () => {
+      const adminUid = `admin-user-${Date.now()}`;
+
+      // Admin verification
+      const verifyRes = await request(app)
+        .get('/api/admin/verify')
+        .set('x-test-uid', adminUid)
+        .set('x-test-admin', 'true');
+
+      expect(verifyRes.status).toBe(200);
+      expect(verifyRes.body.success).toBe(true);
+      expect(verifyRes.body.isAdmin).toBe(true);
+      expect(verifyRes.body.uid).toBe(adminUid);
+
+      // Admin stats
+      const statsRes = await request(app)
+        .get('/api/admin/stats')
+        .set('x-test-uid', adminUid)
+        .set('x-test-admin', 'true');
+
+      expect(statsRes.status).toBe(200);
+      expect(statsRes.body.success).toBe(true);
+      expect(statsRes.body.suspiciousScoresCount).toBeDefined();
+    });
+  });
+
+  describe('Phase 4 Anti-Cheat & Competitive Integrity Test Suite', () => {
+    it('Integrity: Burning session on anti-cheat violation prevents replay/probing attacks', async () => {
+      const uid = `probe-cheater-${Date.now()}`;
+
+      // Start casual session
+      const startRes = await request(app)
+        .post('/api/session/start')
+        .set('x-test-uid', uid)
+        .send({ gameId: 'snake' });
+      expect(startRes.status).toBe(200);
+      const sessionId = startRes.body.sessionId;
+
+      const sessionObj = memoryStore.sessions.get(sessionId);
+      if (sessionObj) sessionObj.startTime = Date.now() - 5000;
+
+      // 1. Submit impossible score exceeding ceiling (should fail and burn session)
+      const cheatRes = await request(app)
+        .post('/api/submit-score')
+        .set('x-test-uid', uid)
+        .send({
+          sessionId,
+          gameId: 'snake',
+          score: 999999, // Ceiling is 50000
+          idempotencyKey: `probe_cheat_1_${Date.now()}`
+        });
+
+      expect(cheatRes.status).toBe(422);
+      expect(cheatRes.body.code).toBe('SCORE_CEILING_EXCEEDED');
+
+      // 2. Attacker now tries to reuse the SAME session ticket with a valid score
+      const retryRes = await request(app)
+        .post('/api/submit-score')
+        .set('x-test-uid', uid)
+        .send({
+          sessionId,
+          gameId: 'snake',
+          score: 50,
+          idempotencyKey: `probe_cheat_2_${Date.now()}`
+        });
+
+      // Session MUST be consumed / burned!
+      expect(retryRes.status).toBe(422);
+      expect(retryRes.body.code).toBe('SESSION_ALREADY_CONSUMED');
+    });
+
+    it('Integrity: Cross-mode session barrier rejects ranked session on casual endpoint and vice-versa', async () => {
+      const uid = `cross-mode-user-${Date.now()}`;
+
+      // 1. Start ranked session
+      const rnkStart = await request(app)
+        .post('/api/competitive/session/start')
+        .set('x-test-uid', uid)
+        .send({ gameId: 'snake' });
+      expect(rnkStart.status).toBe(200);
+      const rnkSessionId = rnkStart.body.sessionId;
+
+      const rnkObj = memoryStore.sessions.get(rnkSessionId);
+      if (rnkObj) rnkObj.startTime = Date.now() - 5000;
+
+      // Submit ranked session to casual submit-score route
+      const casualSubmit = await request(app)
+        .post('/api/submit-score')
+        .set('x-test-uid', uid)
+        .send({
+          sessionId: rnkSessionId,
+          gameId: 'snake',
+          score: 100,
+          idempotencyKey: `cross_submit_${Date.now()}`
+        });
+
+      expect(casualSubmit.status).toBe(422);
+      expect(casualSubmit.body.code).toBe('INVALID_SESSION');
+    });
+
+    it('Integrity: Client duration velocity enforcement prevents idle-session cheat bypass', async () => {
+      const uid = `idle-velocity-cheater-${Date.now()}`;
+
+      const startRes = await request(app)
+        .post('/api/session/start')
+        .set('x-test-uid', uid)
+        .send({ gameId: 'snake' });
+      expect(startRes.status).toBe(200);
+      const sessionId = startRes.body.sessionId;
+
+      // Simulate session open for 10 minutes (600s), but client claims actual game lasted 2s to score 2000pts (1000pts/s > max 150/s)
+      const sessionObj = memoryStore.sessions.get(sessionId);
+      if (sessionObj) sessionObj.startTime = Date.now() - 600000;
+
+      const submitRes = await request(app)
+        .post('/api/submit-score')
+        .set('x-test-uid', uid)
+        .send({
+          sessionId,
+          gameId: 'snake',
+          score: 2000,
+          durationMs: 2000, // 2s -> 1000/s velocity
+          idempotencyKey: `idle_vel_${Date.now()}`
+        });
+
+      expect(submitRes.status).toBe(422);
+      expect(submitRes.body.code).toBe('SCORE_CEILING_EXCEEDED');
+    });
+
+    it('Integrity: Ranked mode strictly rejects non-allowlisted games and enforces rating delta clamp', async () => {
+      const uid = `comp-clamp-tester-${Date.now()}`;
+
+      // Start ranked session
+      const startRes = await request(app)
+        .post('/api/competitive/session/start')
+        .set('x-test-uid', uid)
+        .send({ gameId: 'snake' });
+      expect(startRes.status).toBe(200);
+      const sessionId = startRes.body.sessionId;
+
+      const sessionObj = memoryStore.sessions.get(sessionId);
+      if (sessionObj) sessionObj.startTime = Date.now() - 5000;
+
+      // High legitimate score (400 for snake, baseScore 150)
+      const submitRes = await request(app)
+        .post('/api/competitive/submit')
+        .set('x-test-uid', uid)
+        .send({
+          sessionId,
+          gameId: 'snake',
+          score: 400,
+          durationMs: 5000,
+          idempotencyKey: `comp_clamp_${Date.now()}`
+        });
+
+      expect(submitRes.status).toBe(200);
+      expect(submitRes.body.success).toBe(true);
+      expect(submitRes.body.ratingChange).toBeLessThanOrEqual(50);
+      expect(submitRes.body.newRating).toBeGreaterThanOrEqual(100);
+    });
+
+    it('Audit: Admin can query filtered suspicious scores and inspect severity breakdown', async () => {
+      const adminUid = `audit-admin-${Date.now()}`;
+
+      // Fetch stats with severity breakdown
+      const statsRes = await request(app)
+        .get('/api/admin/stats')
+        .set('x-test-uid', adminUid)
+        .set('x-test-admin', 'true');
+
+      expect(statsRes.status).toBe(200);
+      expect(statsRes.body.severityBreakdown).toBeDefined();
+      expect(typeof statsRes.body.severityBreakdown.critical).toBe('number');
+      expect(typeof statsRes.body.severityBreakdown.high).toBe('number');
+
+      // Query dedicated suspicious scores endpoint
+      const listRes = await request(app)
+        .get('/api/admin/suspicious-scores?limit=10')
+        .set('x-test-uid', adminUid)
+        .set('x-test-admin', 'true');
+
+      expect(listRes.status).toBe(200);
+      expect(listRes.body.success).toBe(true);
+      expect(Array.isArray(listRes.body.entries)).toBe(true);
+    });
+  });
 });

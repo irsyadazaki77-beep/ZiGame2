@@ -15,7 +15,9 @@ export type SecurityEventCategory =
   | 'FIREBASE_FAILURE'
   | 'SERVER_ERROR'
   | 'KILL_SWITCH_TOGGLE'
-  | 'ECONOMY_DISCREPANCY_FLAGGED';
+  | 'ECONOMY_DISCREPANCY_FLAGGED'
+  | 'IDENTITY_SPOOF_ATTEMPT'
+  | 'IDEMPOTENCY_CONFLICT';
 
 export interface StructuredLogEntry {
   level: ServerLogLevel;

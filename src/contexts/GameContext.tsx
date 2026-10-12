@@ -5,7 +5,7 @@ import { usePlayerProfile } from '../hooks/usePlayerProfile';
 import { useGameProgress } from '../hooks/useGameProgress';
 import { useProgressionManager } from '../hooks/useProgressionManager';
 import { GameMastery } from '../types';
-import { auth, onAuthStateChanged, isFirebaseReady } from '../services/firebase';
+import { useAuth } from './AuthContext';
 import { syncDataToCloud, fetchCloudData } from '../services/sync';
 import { INITIAL_GAMES } from '../data/games';
 import { INITIAL_ACHIEVEMENTS } from '../data/achievements';
@@ -91,46 +91,56 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     }
   }, [profile.settings?.reducedMotion]);
 
-  useEffect(() => {
-    if (!isFirebaseReady() || !auth) return;
-    const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      if (user) {
-        const cloudData = await fetchCloudData();
-        if (cloudData) {
-          if (cloudData.profile) setProfile(cloudData.profile);
-          if (cloudData.games) {
-            const mergedGames = INITIAL_GAMES.map(initialGame => {
-              const found = cloudData.games.find((g: GameStats) => g.id === initialGame.id);
-              return found ? { ...initialGame, plays: found.plays, highScore: found.highScore } : initialGame;
-            });
-            gameProgress.setGames(mergedGames);
-          }
-          if (cloudData.achievements) {
-            const mergedAchievements = INITIAL_ACHIEVEMENTS.map(initialAch => {
-              const found = cloudData.achievements.find((a: Achievement) => a.id === initialAch.id);
-              return found ? { ...initialAch, unlocked: found.unlocked, unlockedAt: found.unlockedAt } : initialAch;
-            });
-            gameProgress.setAchievements(mergedAchievements);
-          }
-          if (cloudData.missions) gameProgress.setDailyMissions(cloudData.missions);
-          if (cloudData.recentlyPlayed) gameProgress.setRecentlyPlayed(cloudData.recentlyPlayed);
-          showToast('Sinkronisasi Sukses', 'Data berhasil dimuat dari cloud.', 'success', '☁️');
-        } else {
-          syncDataToCloud(profile, gameProgress.games, gameProgress.achievements, gameProgress.dailyMissions, gameProgress.recentlyPlayed);
-        }
-      }
-    });
-    return () => unsubscribe();
-  }, []);
+  const { user, isFirebaseUser } = useAuth();
 
   useEffect(() => {
-    if (isFirebaseReady() && auth?.currentUser) {
+    if (!isFirebaseUser || !user?.uid) return;
+
+    let isCancelled = false;
+
+    async function syncOnAuth() {
+      const cloudData = await fetchCloudData();
+      if (isCancelled) return;
+
+      if (cloudData) {
+        if (cloudData.profile) setProfile(cloudData.profile);
+        if (cloudData.games) {
+          const mergedGames = INITIAL_GAMES.map(initialGame => {
+            const found = cloudData.games.find((g: GameStats) => g.id === initialGame.id);
+            return found ? { ...initialGame, plays: found.plays, highScore: found.highScore } : initialGame;
+          });
+          gameProgress.setGames(mergedGames);
+        }
+        if (cloudData.achievements) {
+          const mergedAchievements = INITIAL_ACHIEVEMENTS.map(initialAch => {
+            const found = cloudData.achievements.find((a: Achievement) => a.id === initialAch.id);
+            return found ? { ...initialAch, unlocked: found.unlocked, unlockedAt: found.unlockedAt } : initialAch;
+          });
+          gameProgress.setAchievements(mergedAchievements);
+        }
+        if (cloudData.missions) gameProgress.setDailyMissions(cloudData.missions);
+        if (cloudData.recentlyPlayed) gameProgress.setRecentlyPlayed(cloudData.recentlyPlayed);
+        showToast('Sinkronisasi Sukses', 'Data profil cloud berhasil dimuat.', 'success', '☁️');
+      } else {
+        syncDataToCloud(profile, gameProgress.games, gameProgress.achievements, gameProgress.dailyMissions, gameProgress.recentlyPlayed);
+      }
+    }
+
+    syncOnAuth();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [isFirebaseUser, user?.uid]);
+
+  useEffect(() => {
+    if (isFirebaseUser && user?.uid) {
       const timer = setTimeout(() => {
         syncDataToCloud(profile, gameProgress.games, gameProgress.achievements, gameProgress.dailyMissions, gameProgress.recentlyPlayed);
       }, 3000);
       return () => clearTimeout(timer);
     }
-  }, [profile, gameProgress.games, gameProgress.achievements, gameProgress.dailyMissions, gameProgress.recentlyPlayed]);
+  }, [isFirebaseUser, user?.uid, profile, gameProgress.games, gameProgress.achievements, gameProgress.dailyMissions, gameProgress.recentlyPlayed]);
 
   return (
     <GameContext.Provider value={{ profile, setProfile, handleUpdateProfile, masteries, theme, toggleTheme, ...gameProgress }}>

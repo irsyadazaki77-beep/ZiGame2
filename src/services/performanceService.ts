@@ -2,6 +2,20 @@ import { PerformanceSettings, PerformanceTier } from '../types';
 
 const STORAGE_KEY = 'zigame_performance_settings_v1';
 
+export interface PerformanceSnapshot {
+  gameId: string;
+  fps: number;
+  frameTimeAvg: number;
+  frameTimeP50: number;
+  frameTimeP95: number;
+  frameTimeP99: number;
+  droppedFrames: number;
+  jankCount: number;
+  devicePixelRatio: number;
+  performanceTier: PerformanceTier;
+  timestamp: number;
+}
+
 const TIER_PRESETS: Record<PerformanceTier, Omit<PerformanceSettings, 'tier' | 'autoDetect'>> = {
   low: {
     targetFps: 30,
@@ -35,12 +49,21 @@ const TIER_PRESETS: Record<PerformanceTier, Omit<PerformanceSettings, 'tier' | '
 class PerformanceService {
   private settings: PerformanceSettings;
   private listeners: Array<(settings: PerformanceSettings) => void> = [];
+  
+  // Adaptive tier metrics & hysteresis
   private lowFpsStreak = 0;
   private highFpsStreak = 0;
-  private lastDowngradeTime = 0;
+  private lastTierChangeTime = 0;
   private activeRafCount = 0;
   private currentFps = 60;
   private activeEntityCount = 0;
+
+  // Real Frame-Time Profiling Buffer (last 180 frames ≈ 3s at 60fps)
+  private frameTimesBuffer: number[] = [];
+  private maxFrameBufferSize = 180;
+  private droppedFramesCounter = 0;
+  private jankFramesCounter = 0;
+  private isTabVisible = true;
 
   constructor() {
     this.settings = this.loadOrDetect();
@@ -54,34 +77,100 @@ class PerformanceService {
     return Math.min(rawDpr, this.settings.dprCap || 1.0);
   }
 
+  /**
+   * Records a single frame duration for sub-millisecond frame-time profiling
+   */
+  public recordFrameTime(durationMs: number): void {
+    if (!this.isTabVisible) return;
+
+    if (this.frameTimesBuffer.length >= this.maxFrameBufferSize) {
+      this.frameTimesBuffer.shift();
+    }
+    this.frameTimesBuffer.push(durationMs);
+
+    // Jank threshold: frame taking longer than 25ms (> 1.5x of 16.67ms)
+    if (durationMs > 25) {
+      this.jankFramesCounter++;
+    }
+    // Dropped frame threshold: frame taking longer than 33.3ms (< 30 FPS)
+    if (durationMs > 33.33) {
+      this.droppedFramesCounter++;
+    }
+  }
+
+  /**
+   * Evaluates FPS and adjusts quality with hysteresis (prevents rapid toggling)
+   */
   public recordFramePerformance(fps: number): void {
     this.currentFps = Math.round(fps);
-    if (!this.settings.autoDetect) return;
+    if (!this.settings.autoDetect || !this.isTabVisible) return;
 
     const now = Date.now();
-    // Cooldown 10s between tier changes
-    if (now - this.lastDowngradeTime < 10000) return;
+    // Cooldown 12s between tier downgrades, 20s between upgrades
+    const elapsedSinceLastChange = now - this.lastTierChangeTime;
 
     if (fps < 32) {
       this.lowFpsStreak++;
       this.highFpsStreak = 0;
-      // If FPS is below 32 for ~3 seconds (at ~1 check/sec)
-      if (this.lowFpsStreak >= 3) {
+      // Sustained low FPS for ~3 consecutive seconds
+      if (this.lowFpsStreak >= 3 && elapsedSinceLastChange >= 12000) {
         if (this.settings.tier === 'high') {
           this.setTier('medium', true);
         } else if (this.settings.tier === 'medium') {
           this.setTier('low', true);
         }
         this.lowFpsStreak = 0;
-        this.lastDowngradeTime = now;
+        this.lastTierChangeTime = now;
       }
-    } else if (fps > 55) {
+    } else if (fps >= 58) {
       this.highFpsStreak++;
       this.lowFpsStreak = 0;
+      // Sustained healthy FPS for ~8 consecutive seconds before cautious recovery
+      if (this.highFpsStreak >= 8 && elapsedSinceLastChange >= 20000) {
+        if (this.settings.tier === 'low') {
+          this.setTier('medium', true);
+        } else if (this.settings.tier === 'medium') {
+          this.setTier('high', true);
+        }
+        this.highFpsStreak = 0;
+        this.lastTierChangeTime = now;
+      }
     } else {
       this.lowFpsStreak = 0;
       this.highFpsStreak = 0;
     }
+  }
+
+  /**
+   * Generates a statistically accurate snapshot of frame time distribution
+   */
+  public getPerformanceSnapshot(gameId: string = 'global'): PerformanceSnapshot {
+    const sorted = [...this.frameTimesBuffer].sort((a, b) => a - b);
+    const count = sorted.length;
+
+    const getPercentile = (p: number): number => {
+      if (count === 0) return 16.67;
+      const index = Math.min(count - 1, Math.floor((p / 100) * count));
+      return Number(sorted[index].toFixed(2));
+    };
+
+    const avg = count > 0 
+      ? Number((sorted.reduce((acc, curr) => acc + curr, 0) / count).toFixed(2))
+      : 16.67;
+
+    return {
+      gameId,
+      fps: this.currentFps,
+      frameTimeAvg: avg,
+      frameTimeP50: getPercentile(50),
+      frameTimeP95: getPercentile(95),
+      frameTimeP99: getPercentile(99),
+      droppedFrames: this.droppedFramesCounter,
+      jankCount: this.jankFramesCounter,
+      devicePixelRatio: this.getAdaptiveDPR(),
+      performanceTier: this.settings.tier,
+      timestamp: Date.now()
+    };
   }
 
   public registerRafStart(): void {
@@ -97,12 +186,17 @@ class PerformanceService {
   }
 
   public getDebugMetrics() {
+    const snapshot = this.getPerformanceSnapshot();
     return {
       fps: this.currentFps,
+      frameTimeAvg: snapshot.frameTimeAvg,
+      frameTimeP95: snapshot.frameTimeP95,
       tier: this.settings.tier,
       dprCap: this.settings.dprCap,
       activeRafCount: this.activeRafCount,
       activeEntityCount: this.activeEntityCount,
+      droppedFrames: this.droppedFramesCounter,
+      jankCount: this.jankFramesCounter,
       batterySaver: this.settings.batterySaver,
     };
   }
@@ -110,8 +204,8 @@ class PerformanceService {
   private setupVisibilityListener(): void {
     if (typeof document === 'undefined') return;
     document.addEventListener('visibilitychange', () => {
+      this.isTabVisible = !document.hidden;
       if (document.hidden) {
-        // Tab hidden - reduce DOM overhead
         document.documentElement.classList.add('app-is-hidden');
       } else {
         document.documentElement.classList.remove('app-is-hidden');
@@ -123,11 +217,8 @@ class PerformanceService {
     if (typeof window === 'undefined') return 'medium';
 
     try {
-      // Check for low memory or hardware concurrency
       const concurrency = navigator.hardwareConcurrency || 4;
       const deviceMemory = (navigator as any).deviceMemory || 4;
-
-      // Mobile or low core count device
       const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
 
       if (concurrency <= 2 || deviceMemory <= 2) {
@@ -188,6 +279,7 @@ class PerformanceService {
         particlesMultiplier: 0.25,
         enableGlow: false,
         enableBlur: false,
+        enableShadows: false,
         dprCap: 1.0
       };
     } else {
@@ -232,6 +324,12 @@ class PerformanceService {
       root.classList.add('disable-glow');
     } else {
       root.classList.remove('disable-glow');
+    }
+
+    if (!this.settings.enableShadows) {
+      root.classList.add('disable-heavy-shadows');
+    } else {
+      root.classList.remove('disable-heavy-shadows');
     }
   }
 

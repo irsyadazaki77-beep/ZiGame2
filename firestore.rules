@@ -2,17 +2,25 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     
-    // Default Deny-All Rule
+    // Default Deny-All Catch-all Safety Net
     match /{document=**} {
       allow read, write: if false;
     }
 
-    // Primitive Helpers
+    // Primitive Helpers & Hardened Guards
     function isValidId(id) { return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); }
     function incoming() { return request.resource.data; }
     function existing() { return resource.data; }
     function isSignedIn() { return request.auth != null; }
-    function isAdmin() { return isSignedIn() && (request.auth.token.admin == true || exists(/databases/$(database)/documents/admins/$(request.auth.uid))); }
+    
+    // Unified Canonical Admin Authority: Custom Claims primary with emergency admins document lookup
+    function isAdmin() { 
+      return isSignedIn() && (
+        request.auth.token.admin == true || 
+        request.auth.token.role == 'admin' || 
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      ); 
+    }
 
     function isValidUser(data) {
       return data.keys().hasAll(['profile'])
@@ -23,7 +31,13 @@ service cloud.firestore {
         && data.profile.name.size() <= 30;
     }
 
-    // User Profile and Sync State
+    // Admins Collection (Read: Server Admin Only, Write: Server Admin SDK Only)
+    match /admins/{adminId} {
+      allow read: if isAdmin() && isValidId(adminId);
+      allow write: if false;
+    }
+
+    // User Profile and Sync State (Canonical Identity: Firebase UID)
     match /users/{userId} {
       allow read: if isSignedIn() && request.auth.uid == userId && isValidId(userId);
       

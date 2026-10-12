@@ -38,6 +38,16 @@ class RetroAudio {
         this.masterGain = this.ctx.createGain();
         this.masterGain.gain.setValueAtTime(this.isMuted ? 0 : 1, this.ctx.currentTime);
         this.masterGain.connect(this.ctx.destination);
+
+        if (typeof document !== 'undefined') {
+          document.addEventListener('visibilitychange', () => {
+            if (document.hidden && this.ctx && this.ctx.state === 'running') {
+              this.ctx.suspend().catch(() => {});
+            } else if (!document.hidden && this.ctx && this.ctx.state === 'suspended' && !this.isMuted) {
+              this.ctx.resume().catch(() => {});
+            }
+          });
+        }
       }
     }
     if (this.ctx && this.ctx.state === 'suspended') {
@@ -45,14 +55,22 @@ class RetroAudio {
     }
   }
 
-  private registerNode(node: AudioNode, stopTime?: number) {
+  public registerNode(node: AudioNode, stopTime?: number) {
     this.activeNodes.add(node);
-    if (stopTime !== undefined) {
-      setTimeout(() => {
+    if ('onended' in node) {
+      (node as any).onended = () => {
         try {
+          node.disconnect();
           this.activeNodes.delete(node);
         } catch {}
-      }, (stopTime + 0.1) * 1000);
+      };
+    } else if (stopTime !== undefined) {
+      setTimeout(() => {
+        try {
+          node.disconnect();
+          this.activeNodes.delete(node);
+        } catch {}
+      }, (stopTime + 0.05) * 1000);
     }
   }
 

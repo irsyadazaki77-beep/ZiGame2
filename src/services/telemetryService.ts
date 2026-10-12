@@ -1,13 +1,14 @@
-import { performanceService } from './performanceService';
+import { performanceService, PerformanceSnapshot } from './performanceService';
 
 export interface TelemetrySessionEvent {
   gameId: string;
-  eventType: 'start' | 'gameover' | 'quit' | 'restart' | 'tutorial_view' | 'tutorial_complete' | 'crash';
+  eventType: 'start' | 'gameover' | 'quit' | 'restart' | 'tutorial_view' | 'tutorial_complete' | 'crash' | 'performance_snapshot';
   durationMs?: number;
   score?: number;
-  failurePoint?: string; // e.g. "wall_collision", "speed_wall", "alien_projectile"
+  failurePoint?: string;
   fpsTier: string;
   inputSource: string;
+  performanceSnapshot?: PerformanceSnapshot;
   timestamp: number;
 }
 
@@ -17,6 +18,7 @@ class TelemetryService {
   private events: TelemetrySessionEvent[] = [];
   private activeSessionStart: number | null = null;
   private activeGameId: string | null = null;
+  private saveTimer: any = null;
 
   constructor() {
     this.loadEvents();
@@ -33,9 +35,28 @@ class TelemetryService {
     }
   }
 
-  private saveEvents() {
+  /**
+   * Debounced save to prevent synchronous localStorage disk I/O from janking the render loop
+   */
+  private scheduleSave() {
+    if (this.saveTimer) return;
+
+    this.saveTimer = setTimeout(() => {
+      this.saveTimer = null;
+      try {
+        // Keep last 300 telemetry events to stay compact
+        const pruned = this.events.slice(-300);
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(pruned));
+      } catch {}
+    }, 1000);
+  }
+
+  public flush(): void {
+    if (this.saveTimer) {
+      clearTimeout(this.saveTimer);
+      this.saveTimer = null;
+    }
     try {
-      // Keep last 300 telemetry events to stay compact
       const pruned = this.events.slice(-300);
       localStorage.setItem(STORAGE_KEY, JSON.stringify(pruned));
     } catch {}
@@ -54,7 +75,7 @@ class TelemetryService {
     };
 
     this.events.push(event);
-    this.saveEvents();
+    this.scheduleSave();
   }
 
   public recordGameOver(
@@ -67,6 +88,8 @@ class TelemetryService {
     this.activeSessionStart = null;
     this.activeGameId = null;
 
+    const perfSnapshot = performanceService.getPerformanceSnapshot(gameId);
+
     const event: TelemetrySessionEvent = {
       gameId,
       eventType: 'gameover',
@@ -75,11 +98,27 @@ class TelemetryService {
       failurePoint,
       fpsTier: performanceService.getSettings().tier,
       inputSource,
+      performanceSnapshot: perfSnapshot,
       timestamp: Date.now()
     };
 
     this.events.push(event);
-    this.saveEvents();
+    this.scheduleSave();
+  }
+
+  public recordPerformanceSnapshot(gameId: string): void {
+    const snapshot = performanceService.getPerformanceSnapshot(gameId);
+    const event: TelemetrySessionEvent = {
+      gameId,
+      eventType: 'performance_snapshot',
+      fpsTier: performanceService.getSettings().tier,
+      inputSource: 'engine',
+      performanceSnapshot: snapshot,
+      timestamp: Date.now()
+    };
+
+    this.events.push(event);
+    this.scheduleSave();
   }
 
   public recordQuit(gameId: string, score: number = 0): void {
@@ -98,7 +137,7 @@ class TelemetryService {
     };
 
     this.events.push(event);
-    this.saveEvents();
+    this.scheduleSave();
   }
 
   public recordCrash(gameId: string, errorMsg: string): void {
@@ -112,7 +151,7 @@ class TelemetryService {
     };
 
     this.events.push(event);
-    this.saveEvents();
+    this.flush();
   }
 
   public recordTutorialEvent(gameId: string, completed: boolean): void {
@@ -125,7 +164,7 @@ class TelemetryService {
     };
 
     this.events.push(event);
-    this.saveEvents();
+    this.scheduleSave();
   }
 
   public getEvents(): TelemetrySessionEvent[] {
@@ -134,6 +173,10 @@ class TelemetryService {
 
   public clearTelemetry(): void {
     this.events = [];
+    if (this.saveTimer) {
+      clearTimeout(this.saveTimer);
+      this.saveTimer = null;
+    }
     try {
       localStorage.removeItem(STORAGE_KEY);
     } catch {}

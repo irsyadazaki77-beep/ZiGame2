@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.0.0] - 2026-09-27
+
+### Added
+- **Centralized Economy Balancing**: Introduced `ECONOMY_BALANCE_CONFIG` as the single source of truth for Virtual Economy variables (starting coins, gacha prices, gamble bounds, game caps, etc.).
+- **Gacha Duplicate Conversion Rule**: Added server-side cosmetic duplicate handling where users pulling an already-owned item from Gacha receive a 25-coin refund (50% value).
+- **Daily Game Reward Cap**: Implemented a hard, server-authoritative 2,500 coins/day limit to protect the economy against infinite score submission exploits and inflation.
+- **Interactive Economy Simulator**: Created a deterministic, seeded pseudo-random economy simulator (`scripts/economy-simulator.ts`) that verifies system balance across Casual, Active, Hardcore, Lucky, and Gamble-heavy player profiles.
+
+### Security & Hardening
+- **Strict Numeric Safety**: Added robust validation checking that all betting, purchase, and score transactions are finite integers, preventing NaN/Infinity and fractional float exploits.
+- **Negative Balance Protection**: Hardened state transitions to atomically reject debits if the user's materialized coin balance would fall below zero.
+- **Automatic Reconciliation Fixes**: Extended `reconcileUserEconomy` with auto-alignment capabilities to automatically correct and log account discrepancies back to their ledger values.
+
+---
+
 ## [2.0.0-RC1] - 2026-09-09
 
 ### Added

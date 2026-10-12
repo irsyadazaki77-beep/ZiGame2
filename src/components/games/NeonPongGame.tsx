@@ -373,22 +373,30 @@ export default function NeonPongGame({ onGameOver, onScoreUpdate, highScore }: N
       }
     }
 
-    // Update Particles
-    for (let i = particlesRef.current.length - 1; i >= 0; i--) {
+    // Update Particles (zero-allocation in-place update)
+    let partIdx = 0;
+    for (let i = 0; i < particlesRef.current.length; i++) {
       const p = particlesRef.current[i];
       p.x += p.vx;
       p.y += p.vy;
       p.alpha -= p.decay;
-      if (p.alpha <= 0) particlesRef.current.splice(i, 1);
+      if (p.alpha > 0) {
+        particlesRef.current[partIdx++] = p;
+      }
     }
+    particlesRef.current.length = partIdx;
 
-    // Update Floating Texts
-    for (let i = floatingTextsRef.current.length - 1; i >= 0; i--) {
+    // Update Floating Texts (zero-allocation in-place update)
+    let textIdx = 0;
+    for (let i = 0; i < floatingTextsRef.current.length; i++) {
       const t = floatingTextsRef.current[i];
       t.y += t.vy;
       t.alpha -= 0.025;
-      if (t.alpha <= 0) floatingTextsRef.current.splice(i, 1);
+      if (t.alpha > 0) {
+        floatingTextsRef.current[textIdx++] = t;
+      }
     }
+    floatingTextsRef.current.length = textIdx;
   };
 
   const handleMatchEnd = (playerWon: boolean) => {

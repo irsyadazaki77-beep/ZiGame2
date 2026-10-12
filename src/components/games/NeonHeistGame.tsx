@@ -24,6 +24,7 @@ export default function NeonHeistGame({ onGameOver, onScoreUpdate, highScore }: 
     gameState, setGameState, gameStateRef, countdown, score, updateScore, triggerGameOver,
     startWithCountdown, startLoop, stopLoop, setupCanvasContext, perfSettings
   } = useGameEngine({
+    gameId: 'neon-heist',
     onScoreUpdate, onGameOver
   });
   const [currentLevelIndex, setCurrentLevelIndex] = useState(0);
@@ -528,42 +529,50 @@ export default function NeonHeistGame({ onGameOver, onScoreUpdate, highScore }: 
           }
         }
 
-        // Distractions pulse
-        distractionsRef.current = distractionsRef.current.filter((d) => {
+        // In-place distractions update (zero-allocation)
+        let dWriteIdx = 0;
+        for (let i = 0; i < distractionsRef.current.length; i++) {
+          const d = distractionsRef.current[i];
           d.radius += 2.5;
           d.alpha = Math.max(0, 1 - d.radius / d.maxRadius);
           d.lifetime--;
-          return d.lifetime > 0;
-        });
+          if (d.lifetime > 0) {
+            distractionsRef.current[dWriteIdx++] = d;
+          }
+        }
+        distractionsRef.current.length = dWriteIdx;
 
-        // Particles
-        particlesRef.current = particlesRef.current.filter((p) => {
+        // In-place particles update (zero-allocation)
+        let partWriteIdx = 0;
+        for (let i = 0; i < particlesRef.current.length; i++) {
+          const p = particlesRef.current[i];
           p.x += p.vx;
           p.y += p.vy;
           p.alpha -= 0.02;
-          return p.alpha > 0;
-        });
+          if (p.alpha > 0) {
+            particlesRef.current[partWriteIdx++] = p;
+          }
+        }
+        particlesRef.current.length = partWriteIdx;
       }
 
       // RENDER PHASE
       ctx.fillStyle = '#090b10';
       ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
 
-      // Floor Grid
+      // Floor Grid (batched into single draw call)
       ctx.strokeStyle = 'rgba(255, 255, 255, 0.03)';
       ctx.lineWidth = 1;
+      ctx.beginPath();
       for (let x = 0; x < CANVAS_WIDTH; x += 40) {
-        ctx.beginPath();
         ctx.moveTo(x, 0);
         ctx.lineTo(x, CANVAS_HEIGHT);
-        ctx.stroke();
       }
       for (let y = 0; y < CANVAS_HEIGHT; y += 40) {
-        ctx.beginPath();
         ctx.moveTo(0, y);
         ctx.lineTo(CANVAS_WIDTH, y);
-        ctx.stroke();
       }
+      ctx.stroke();
 
       // Obstacles
       lvl.obstacles.forEach((obs) => {

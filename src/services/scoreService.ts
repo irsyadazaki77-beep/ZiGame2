@@ -43,6 +43,10 @@ export const scoreService = {
   startSession: async (gameId: string, nonce?: string): Promise<{ sessionId?: string; nonce?: string; startTime?: number }> => {
     try {
       const headers = await getAuthHeaders();
+      if (!headers['Authorization']) {
+        // Offline / unauthenticated guest plays locally without server session
+        return {};
+      }
       const res = await fetch('/api/session/start', {
         method: 'POST',
         headers,

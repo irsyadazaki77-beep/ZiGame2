@@ -90,7 +90,7 @@ export default function BrickBreakerGame({ onGameOver, onScoreUpdate, highScore 
     startWithCountdown,
     countdown,
   } = useGameEngine({
-    gameId: 'brickbreaker',
+    gameId: 'brick-breaker',
     onGameOver,
     onScoreUpdate,
   });

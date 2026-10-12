@@ -278,6 +278,14 @@ input, textarea {
   box-shadow: none !important;
   text-shadow: none !important;
 }
+.disable-heavy-shadows * {
+  box-shadow: none !important;
+  text-shadow: none !important;
+  filter: none !important;
+}
+.app-is-hidden * {
+  animation-play-state: paused !important;
+}
 
 body.reduced-motion *, body.reduced-motion ::before, body.reduced-motion ::after {
   animation-duration: 0.01ms !important;

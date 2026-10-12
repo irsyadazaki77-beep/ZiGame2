@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { Navigate } from 'react-router-dom';
-import { isFirebaseReady, auth } from '../services/firebase';
-import { ShieldAlert, Lock } from 'lucide-react';
+import { useAuth } from '../contexts/AuthContext';
+import { Lock } from 'lucide-react';
 import { Button } from './UI';
 
 interface AdminRouteProps {
@@ -9,26 +8,35 @@ interface AdminRouteProps {
 }
 
 export function AdminRoute({ children }: AdminRouteProps) {
-  const [isAdmin, setIsAdmin] = useState<boolean | null>(null);
-  const [loading, setLoading] = useState(true);
+  const { user, loading: authLoading, getIdToken } = useAuth();
+  const [isServerAdmin, setIsServerAdmin] = useState<boolean | null>(null);
+  const [verifying, setVerifying] = useState(true);
 
   useEffect(() => {
-    async function checkAdminStatus() {
+    let isCancelled = false;
+
+    async function checkServerAdmin() {
+      if (authLoading) return;
+
+      // Unauthenticated or offline guest accounts can never be server admins
+      if (!user || !user.isFirebase) {
+        if (!isCancelled) {
+          setIsServerAdmin(false);
+          setVerifying(false);
+        }
+        return;
+      }
+
       try {
-        if (!isFirebaseReady() || !auth?.currentUser) {
-          // Check if dev bypass token header exists or test mode
-          const res = await fetch('/api/admin/verify');
-          if (res.ok) {
-            const data = await res.json();
-            setIsAdmin(!!data.isAdmin);
-          } else {
-            setIsAdmin(false);
+        const token = await getIdToken();
+        if (!token) {
+          if (!isCancelled) {
+            setIsServerAdmin(false);
+            setVerifying(false);
           }
-          setLoading(false);
           return;
         }
 
-        const token = await auth.currentUser.getIdToken();
         const res = await fetch('/api/admin/verify', {
           headers: {
             'Authorization': `Bearer ${token}`
@@ -37,21 +45,33 @@ export function AdminRoute({ children }: AdminRouteProps) {
 
         if (res.ok) {
           const data = await res.json();
-          setIsAdmin(!!data.isAdmin);
+          if (!isCancelled) {
+            setIsServerAdmin(Boolean(data.isAdmin));
+          }
         } else {
-          setIsAdmin(false);
+          if (!isCancelled) {
+            setIsServerAdmin(false);
+          }
         }
-      } catch (e) {
-        setIsAdmin(false);
+      } catch {
+        if (!isCancelled) {
+          setIsServerAdmin(false);
+        }
       } finally {
-        setLoading(false);
+        if (!isCancelled) {
+          setVerifying(false);
+        }
       }
     }
 
-    checkAdminStatus();
-  }, []);
+    checkServerAdmin();
 
-  if (loading) {
+    return () => {
+      isCancelled = true;
+    };
+  }, [user, authLoading, getIdToken]);
+
+  if (authLoading || verifying) {
     return (
       <div className="flex h-full w-full items-center justify-center min-h-[60vh]">
         <div className="w-8 h-8 border-4 border-fuchsia-500 border-t-transparent rounded-full animate-spin"></div>
@@ -59,7 +79,7 @@ export function AdminRoute({ children }: AdminRouteProps) {
     );
   }
 
-  if (!isAdmin) {
+  if (!isServerAdmin) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[60vh] p-6 text-center">
         <div className="w-16 h-16 rounded-2xl bg-red-500/10 border border-red-500/20 flex items-center justify-center text-red-400 mb-4 shadow-[0_0_30px_rgba(239,68,68,0.2)]">
@@ -69,7 +89,7 @@ export function AdminRoute({ children }: AdminRouteProps) {
           Akses Administrator Ditolak (403)
         </h1>
         <p className="text-zinc-400 text-sm max-w-md mb-6 leading-relaxed">
-          Area ini dibatasi khusus untuk akun administrator server ZiGame. Token otentikasi kamu tidak memiliki hak akses server-authoritative yang memadai.
+          Area ini dibatasi khusus untuk akun administrator server ZiGame. Token otentikasi kamu tidak memiliki klaim administrator server-authoritative yang valid.
         </p>
         <Button variant="outline" onClick={() => window.location.href = '/'}>
           Kembali ke Beranda

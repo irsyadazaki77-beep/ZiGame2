@@ -9,6 +9,8 @@ export type ApiErrorCode =
   | 'TOKEN_EXPIRED'
   | 'INVALID_TOKEN'
   | 'FORBIDDEN'
+  | 'FORBIDDEN_USER_MISMATCH'
+  | 'IDEMPOTENCY_CONFLICT'
   | 'INVALID_GAME_ID'
   | 'INVALID_SCORE'
   | 'SESSION_REQUIRED'
@@ -90,6 +92,10 @@ export class ApiError extends Error {
 
   static forbidden(message = 'Akses ditolak. Anda tidak memiliki izin untuk tindakan ini.', code: ApiErrorCode = 'FORBIDDEN'): ApiError {
     return new ApiError(403, code, message);
+  }
+
+  static conflict(message = 'Terjadi konflik integritas atau idempotensi pada parameter request.', code: ApiErrorCode = 'IDEMPOTENCY_CONFLICT', details?: Record<string, unknown>): ApiError {
+    return new ApiError(409, code, message, details);
   }
 
   static badRequest(message: string, code: ApiErrorCode = 'MALFORMED_PAYLOAD', details?: Record<string, unknown>): ApiError {

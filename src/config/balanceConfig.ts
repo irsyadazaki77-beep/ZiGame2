@@ -146,3 +146,23 @@ export const CHALLENGE_CONFIG = {
   maxActiveDailyChallenges: 3,
   maxActiveWeeklyChallenges: 3
 };
+
+export const ECONOMY_BALANCE_CONFIG = {
+  starterCoins: 100,
+  gachaCost: 50,
+  gachaDuplicateRefund: 25,
+  spinCooldownDays: 1,
+  gamble: {
+    minBet: 10,
+    maxBet: 500,
+    winProbability: 0.48, // 48% win probability on coin flips
+    validBets: [10, 20, 50, 100, 500]
+  },
+  caps: {
+    maxDailyGameRewardCoins: 2500, // Anti-botting and inflation control
+    maxSingleGameRewardCoins: 250,
+    maxSingleClaimRewardCoins: 500,
+    maxInventoryQuantity: 99
+  }
+};
+

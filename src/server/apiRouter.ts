@@ -8,7 +8,7 @@
 
 import { Router, Request, Response } from 'express';
 import crypto from 'crypto';
-import { authenticateToken, requireAuth, requireAdmin } from './authMiddleware';
+import { authenticateToken, requireAuth, requireAdmin, enforceUserOwnership } from './authMiddleware';
 import { rateLimit } from './rateLimiter';
 import { serverLogger } from './logger';
 import { sendApiError, handleServerException } from './requestContext';
@@ -30,6 +30,7 @@ import {
   executeClaimReward,
   getLeaderboardEntries,
   getRealAdminStats,
+  getSuspiciousScores,
   purgeSuspectScores,
   isValidIdempotencyKey,
   getCompetitiveProfile,
@@ -120,7 +121,7 @@ apiRouter.get('/balance-config', handleBalanceConfig);
  * POST /api/session/start
  * Authoritatively issues a cryptographically secure session ticket for gameplay.
  */
-apiRouter.post('/session/start', requireAuth, rateLimit(30, 60000, 'session_start'), async (req: Request, res: Response) => {
+apiRouter.post('/session/start', requireAuth, enforceUserOwnership, rateLimit(30, 60000, 'session_start'), async (req: Request, res: Response) => {
   try {
     const userId = req.user!.uid;
     const { gameId } = req.body;
@@ -163,6 +164,7 @@ const handleSubmitScore = async (req: Request, res: Response) => {
       playerName,
       playerAvatar,
       sessionId,
+      durationMs,
       masteryLevel,
       idempotencyKey
     } = req.body;
@@ -207,8 +209,11 @@ const handleSubmitScore = async (req: Request, res: Response) => {
       score: Math.floor(score),
       playerName: name,
       playerAvatar: avatar,
+      durationMs: typeof durationMs === 'number' ? durationMs : undefined,
       masteryLevel: typeof masteryLevel === 'number' ? Math.max(1, Math.min(100, masteryLevel)) : 1,
-      idempotencyKey: resolvedIdempotencyKey
+      idempotencyKey: resolvedIdempotencyKey,
+      requestId: req.id,
+      clientIp: req.ip
     });
 
 
@@ -225,8 +230,8 @@ const handleSubmitScore = async (req: Request, res: Response) => {
   }
 };
 
-apiRouter.post('/submit-score', requireAuth, rateLimit(20, 60000, 'score_submit'), handleSubmitScore);
-apiRouter.post('/score/submit', requireAuth, rateLimit(20, 60000, 'score_submit'), handleSubmitScore);
+apiRouter.post('/submit-score', requireAuth, enforceUserOwnership, rateLimit(20, 60000, 'score_submit'), handleSubmitScore);
+apiRouter.post('/score/submit', requireAuth, enforceUserOwnership, rateLimit(20, 60000, 'score_submit'), handleSubmitScore);
 
 // ----------------------------------------------------
 // 3 & 4. SERVER-AUTHORITATIVE ECONOMY & PURCHASES
@@ -281,7 +286,7 @@ apiRouter.get('/spin-status', requireAuth, rateLimit(60, 60000, 'spin_status'), 
  * Client sends ONLY: itemId and idempotencyKey.
  * Cost, itemType, and value are strictly dictated by the backend catalog.
  */
-apiRouter.post('/buy-item', requireAuth, rateLimit(20, 60000, 'shop_purchase'), async (req: Request, res: Response) => {
+apiRouter.post('/buy-item', requireAuth, enforceUserOwnership, rateLimit(20, 60000, 'shop_purchase'), async (req: Request, res: Response) => {
   try {
     if (isKillSwitchActive('economy')) {
       return sendApiError(res, 503, 'ECONOMY_MAINTENANCE', 'Sistem transaksi ekonomi sedang dalam pemeliharaan sementara.');
@@ -316,7 +321,7 @@ apiRouter.post('/buy-item', requireAuth, rateLimit(20, 60000, 'shop_purchase'), 
  * 5 & 6. POST /api/spin
  * Daily Wheel Spin with atomic transaction, daily cooldown enforcement, and crypto.randomInt RNG
  */
-apiRouter.post('/spin', requireAuth, rateLimit(10, 60000, 'daily_spin'), async (req: Request, res: Response) => {
+apiRouter.post('/spin', requireAuth, enforceUserOwnership, rateLimit(10, 60000, 'daily_spin'), async (req: Request, res: Response) => {
   try {
     if (isKillSwitchActive('economy')) {
       return sendApiError(res, 503, 'ECONOMY_MAINTENANCE', 'Sistem transaksi ekonomi sedang dalam pemeliharaan sementara.');
@@ -341,7 +346,7 @@ apiRouter.post('/spin', requireAuth, rateLimit(10, 60000, 'daily_spin'), async (
  * POST /api/economy/gamble
  * Server-Authoritative 50/50 double-or-nothing coin flip with secure RNG
  */
-apiRouter.post('/economy/gamble', requireAuth, rateLimit(30, 60000, 'gamble'), async (req: Request, res: Response) => {
+apiRouter.post('/economy/gamble', requireAuth, enforceUserOwnership, rateLimit(30, 60000, 'gamble'), async (req: Request, res: Response) => {
   try {
     if (isKillSwitchActive('economy')) {
       return sendApiError(res, 503, 'ECONOMY_MAINTENANCE', 'Sistem transaksi ekonomi sedang dalam pemeliharaan sementara.');
@@ -382,7 +387,7 @@ apiRouter.post('/economy/gamble', requireAuth, rateLimit(30, 60000, 'gamble'), a
  * POST /api/economy/gacha
  * Server-Authoritative gacha lucky pull with secure RNG
  */
-apiRouter.post('/economy/gacha', requireAuth, rateLimit(20, 60000, 'gacha'), async (req: Request, res: Response) => {
+apiRouter.post('/economy/gacha', requireAuth, enforceUserOwnership, rateLimit(20, 60000, 'gacha'), async (req: Request, res: Response) => {
   try {
     if (isKillSwitchActive('economy')) {
       return sendApiError(res, 503, 'ECONOMY_MAINTENANCE', 'Sistem transaksi ekonomi sedang dalam pemeliharaan sementara.');
@@ -450,8 +455,8 @@ const handleClaimReward = async (req: Request, res: Response) => {
   }
 };
 
-apiRouter.post('/economy/claim', requireAuth, rateLimit(30, 60000, 'reward_claim'), handleClaimReward);
-apiRouter.post('/economy/claim-reward', requireAuth, rateLimit(30, 60000, 'reward_claim'), handleClaimReward);
+apiRouter.post('/economy/claim', requireAuth, enforceUserOwnership, rateLimit(30, 60000, 'reward_claim'), handleClaimReward);
+apiRouter.post('/economy/claim-reward', requireAuth, enforceUserOwnership, rateLimit(30, 60000, 'reward_claim'), handleClaimReward);
 
 // ----------------------------------------------------
 // COMPETITIVE SYSTEM & RANKED PLAY
@@ -461,7 +466,7 @@ apiRouter.post('/economy/claim-reward', requireAuth, rateLimit(30, 60000, 'rewar
  * GET /api/competitive/profile
  * Returns authenticated user's authoritative competitive profile (rating, tier, matches)
  */
-apiRouter.get('/competitive/profile', requireAuth, rateLimit(60, 60000, 'comp_profile'), async (req: Request, res: Response) => {
+apiRouter.get('/competitive/profile', requireAuth, enforceUserOwnership, rateLimit(60, 60000, 'comp_profile'), async (req: Request, res: Response) => {
   try {
     const userId = req.user!.uid;
     const profile = await getCompetitiveProfile(userId);
@@ -476,7 +481,7 @@ apiRouter.get('/competitive/profile', requireAuth, rateLimit(60, 60000, 'comp_pr
  * POST /api/competitive/session/start
  * Authoritatively issues a ranked session ticket.
  */
-apiRouter.post('/competitive/session/start', requireAuth, rateLimit(30, 60000, 'comp_session_start'), async (req: Request, res: Response) => {
+apiRouter.post('/competitive/session/start', requireAuth, enforceUserOwnership, rateLimit(30, 60000, 'comp_session_start'), async (req: Request, res: Response) => {
   try {
     if (isKillSwitchActive('ranked')) {
       return sendApiError(res, 503, 'RANKED_MAINTENANCE', 'Mode Ranked sedang dalam pemeliharaan sementara.');
@@ -511,7 +516,7 @@ apiRouter.post('/competitive/session/start', requireAuth, rateLimit(30, 60000, '
  * POST /api/competitive/submit
  * Server-authoritative ranked score submission and rating update.
  */
-apiRouter.post('/competitive/submit', requireAuth, rateLimit(10, 60000, 'comp_submit'), async (req: Request, res: Response) => {
+apiRouter.post('/competitive/submit', requireAuth, enforceUserOwnership, rateLimit(10, 60000, 'comp_submit'), async (req: Request, res: Response) => {
   try {
     if (isKillSwitchActive('ranked')) {
       return sendApiError(res, 503, 'RANKED_MAINTENANCE', 'Mode Ranked sedang dalam pemeliharaan sementara.');
@@ -523,6 +528,7 @@ apiRouter.post('/competitive/submit', requireAuth, rateLimit(10, 60000, 'comp_su
       playerName,
       playerAvatar,
       sessionId,
+      durationMs,
       masteryLevel,
       idempotencyKey
     } = req.body;
@@ -541,8 +547,11 @@ apiRouter.post('/competitive/submit', requireAuth, rateLimit(10, 60000, 'comp_su
       score: Math.floor(score),
       playerName: playerName || 'Player',
       playerAvatar: playerAvatar || '👾',
+      durationMs: typeof durationMs === 'number' ? durationMs : undefined,
       masteryLevel: masteryLevel || 1,
-      idempotencyKey
+      idempotencyKey,
+      requestId: req.id,
+      clientIp: req.ip
     });
 
     serverLogger.info('RANKED_SCORE_ACCEPTED', `Ranked score ${score} accepted for ${result.gameId}. New Rating: ${result.newRating}`, {
@@ -635,6 +644,25 @@ apiRouter.get('/admin/stats', requireAdmin, async (req: Request, res: Response) 
   } catch (err: any) {
     serverLogger.error('ADMIN_STATS_ERROR', 'Failed to get admin stats', err, undefined, req.user?.uid, req.ip, req.id);
     return sendApiError(res, 500, 'INTERNAL_ERROR', 'Gagal memuat statistik admin.');
+  }
+});
+
+apiRouter.get('/admin/suspicious-scores', requireAdmin, async (req: Request, res: Response) => {
+  try {
+    const gameId = typeof req.query.gameId === 'string' ? req.query.gameId : undefined;
+    const userId = typeof req.query.userId === 'string' ? req.query.userId : undefined;
+    const severity = typeof req.query.severity === 'string' ? (req.query.severity as any) : undefined;
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit as string) || 50));
+
+    const entries = await getSuspiciousScores({ gameId, userId, severity, limit });
+    return res.json({
+      success: true,
+      entries,
+      count: entries.length
+    });
+  } catch (err: any) {
+    serverLogger.error('ADMIN_SUSPICIOUS_FETCH_ERROR', 'Failed to fetch suspicious scores', err, undefined, req.user?.uid, req.ip, req.id);
+    return sendApiError(res, 500, 'INTERNAL_ERROR', 'Gagal memuat daftar skor mencurigakan.');
   }
 });
 
@@ -735,7 +763,7 @@ apiRouter.post('/admin/reconcile-competitive', requireAdmin, async (req: Request
 // ----------------------------------------------------
 // USER SELF-RECONCILIATION
 // ----------------------------------------------------
-apiRouter.get('/user/reconcile-economy', requireAuth, rateLimit(10, 60000, 'user_reconcile'), async (req: Request, res: Response) => {
+apiRouter.get('/user/reconcile-economy', requireAuth, enforceUserOwnership, rateLimit(10, 60000, 'user_reconcile'), async (req: Request, res: Response) => {
   try {
     const userId = req.user!.uid;
     const report = await reconcileUserEconomy(userId);

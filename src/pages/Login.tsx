@@ -5,6 +5,7 @@ import { PlayerProfile, GameStats, Achievement, RecentlyPlayedEntry } from '../t
 import { Lock, User, KeyRound, Palette, UserPlus, LogIn, Sparkles, AlertCircle, CheckCircle2, RefreshCw, Clock, ArrowUpRight, Play, Globe } from 'lucide-react';
 import { authService } from '../services/authService';
 import { isFirebaseReady } from '../services/firebase';
+import { useAuth } from '../contexts/AuthContext';
 
 interface LoginProps {
   onLoginSuccess: (
@@ -58,12 +59,15 @@ export default function Login({
     { value: '#10b981', label: 'NEON HIJAU' }
   ];
 
+  const { user, isFirebaseUser, logout: authLogout } = useAuth();
+
   useEffect(() => {
-    const active = localStorage.getItem('zigame_active_user');
-    if (active) {
-      setLoggedInUser(active);
+    if (user) {
+      setLoggedInUser(isFirebaseUser ? (user.displayName || user.email || user.uid) : (user.displayName || user.uid.replace('local_', '')));
+    } else {
+      setLoggedInUser(null);
     }
-  }, []);
+  }, [user, isFirebaseUser]);
 
   useEffect(() => {
     const checkCooldown = () => {
@@ -243,7 +247,7 @@ export default function Login({
 
   const handleLogoutClick = async () => {
     audio.playCoin();
-    await authService.logout();
+    await authLogout();
     setLoggedInUser(null);
     setUsername('');
     setPassword('');

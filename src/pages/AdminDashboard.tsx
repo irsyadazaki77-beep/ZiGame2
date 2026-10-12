@@ -8,10 +8,18 @@ import { useToast } from '../utils/ToastContext';
 import { logger } from '../utils/logger';
 
 interface AdminStats {
-  dau: number;
-  totalRevenue: number;
-  totalGamesPlayed: number;
+  dau?: number;
+  totalRevenue?: number;
+  totalGamesPlayed?: number;
   suspiciousScoresCount: number;
+  totalLedgerTransactions?: number;
+  activeSessionsCount?: number;
+  severityBreakdown?: {
+    critical: number;
+    high: number;
+    medium: number;
+    low: number;
+  };
   recentSuspicious?: Array<{
     id: string;
     gameId: string;
@@ -20,9 +28,11 @@ interface AdminStats {
     durationMs: number;
     velocity: number;
     reason: string;
+    severity?: string;
+    flaggedOnly?: boolean;
     timestamp: string;
   }>;
-  activeEvents: number;
+  activeEvents?: number;
   serverTime: string;
 }
 
@@ -327,6 +337,7 @@ export default function AdminDashboard() {
                   <th className="py-2">Waktu</th>
                   <th className="py-2">Game</th>
                   <th className="py-2">User ID</th>
+                  <th className="py-2">Tingkat</th>
                   <th className="py-2">Skor</th>
                   <th className="py-2">Durasi</th>
                   <th className="py-2">Alasan</th>
@@ -338,9 +349,22 @@ export default function AdminDashboard() {
                     <td className="py-2 text-zinc-500">{new Date(item.timestamp).toLocaleTimeString()}</td>
                     <td className="py-2 text-indigo-300">{item.gameId}</td>
                     <td className="py-2 text-zinc-400 truncate max-w-[120px]">{item.userId}</td>
+                    <td className="py-2">
+                      <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                        item.severity === 'CRITICAL' ? 'bg-red-950 text-red-400 border border-red-800' :
+                        item.severity === 'HIGH' ? 'bg-amber-950 text-amber-400 border border-amber-800' :
+                        item.severity === 'MEDIUM' ? 'bg-blue-950 text-blue-400 border border-blue-800' :
+                        'bg-zinc-800 text-zinc-400 border border-zinc-700'
+                      }`}>
+                        {item.severity || 'HIGH'}
+                      </span>
+                    </td>
                     <td className="py-2 text-amber-300 font-bold">{item.score}</td>
                     <td className="py-2">{(item.durationMs / 1000).toFixed(1)}s</td>
-                    <td className="py-2 text-red-400">{item.reason}</td>
+                    <td className="py-2 text-red-400">
+                      {item.reason}
+                      {item.flaggedOnly && <span className="text-[10px] text-amber-400 ml-1 font-semibold">[Flag Only]</span>}
+                    </td>
                   </tr>
                 ))}
               </tbody>

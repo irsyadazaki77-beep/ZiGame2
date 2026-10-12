@@ -70,6 +70,7 @@ class CompetitiveService {
     sessionId: string;
     playerName?: string;
     playerAvatar?: string;
+    durationMs?: number;
     masteryLevel?: number;
     idempotencyKey?: string;
   }): Promise<RankedSubmissionResult | null> {

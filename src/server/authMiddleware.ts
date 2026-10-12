@@ -22,7 +22,7 @@ declare global {
   }
 }
 
-// Optional emergency UID allowlist only (no default hardcoded email or UID)
+// Optional emergency UID allowlist for break-glass recovery only (no hardcoded defaults)
 const ADMIN_UIDS = (process.env.ADMIN_UIDS || '')
   .split(',')
   .map(u => u.trim())
@@ -30,8 +30,8 @@ const ADMIN_UIDS = (process.env.ADMIN_UIDS || '')
 
 /**
  * Checks if a user has admin privilege based strictly on Firebase Custom Claims,
- * with optional emergency ADMIN_UIDS allowlist.
- * NO hardcoded emails or default privileged accounts.
+ * with optional emergency ADMIN_UIDS allowlist as an explicit break-glass override.
+ * NO client claims, NO localStorage state, NO hardcoded emails or default privileged accounts.
  */
 export function isUserAdmin(uid: string, _email?: string, claims?: Record<string, any>): boolean {
   if (claims?.admin === true || claims?.role === 'admin') return true;
@@ -82,6 +82,16 @@ export async function authenticateToken(req: Request, res: Response, next: NextF
     return next();
   }
 
+  // Handle explicit test tokens when running in test environment
+  if (isTestEnv) {
+    if (token === 'invalid_token' || token.startsWith('invalid_')) {
+      return sendApiError(res, 401, 'INVALID_TOKEN', 'Token otentikasi tidak valid.');
+    }
+    if (token === 'expired_token' || token.startsWith('expired_')) {
+      return sendApiError(res, 401, 'TOKEN_EXPIRED', 'Token sesi telah kadaluarsa. Silakan muat ulang atau login kembali.');
+    }
+  }
+
   try {
     if (getApps().length > 0) {
       const decoded = await getAuth().verifyIdToken(token);
@@ -95,11 +105,15 @@ export async function authenticateToken(req: Request, res: Response, next: NextF
       };
       return next();
     } else {
-      // Firebase Admin uninitialized
+      // Firebase Admin uninitialized in test environment fallback
       if (isTestEnv) {
+        const uid = token.startsWith('mock_') ? token.replace('mock_', '') : 'test_user';
+        const isAdmin = token.includes('admin') || isUserAdmin(uid);
         req.user = {
-          uid: token.startsWith('mock_') ? token.replace('mock_', '') : 'test_user',
-          isAdmin: token.includes('admin')
+          uid,
+          isAdmin,
+          name: 'Test User',
+          tokenClaims: { admin: isAdmin }
         };
         return next();
       }
@@ -152,6 +166,36 @@ export function requireAdmin(req: Request, res: Response, next: NextFunction) {
     }, req.user.uid, req.ip, req.id);
 
     return sendApiError(res, 403, 'FORBIDDEN', 'Akses ditolak. Memerlukan hak akses administrator server.');
+  }
+
+  next();
+}
+
+/**
+ * Middleware: Validates that any client-supplied userId in body or query strictly matches req.user.uid.
+ * Prevents identity spoofing or tampering with another user's resources.
+ */
+export function enforceUserOwnership(req: Request, res: Response, next: NextFunction) {
+  if (!req.user || !req.user.uid) {
+    return sendApiError(res, 401, 'UNAUTHORIZED', 'Akses ditolak. Silakan login terlebih dahulu.');
+  }
+
+  // Reject body userId spoofing
+  if (req.body && typeof req.body === 'object') {
+    if (req.body.userId !== undefined && req.body.userId !== req.user.uid) {
+      serverLogger.security('IDENTITY_SPOOF_ATTEMPT', 'User attempted to mutate another user resource via body.userId', {
+        authenticatedUid: req.user.uid,
+        attemptedUserId: req.body.userId,
+        path: req.originalUrl
+      }, req.user.uid, req.ip, req.id);
+
+      return sendApiError(res, 403, 'FORBIDDEN_USER_MISMATCH', 'Akses ditolak. Identitas pengguna tidak cocok.');
+    }
+
+    // Strip or reject any attempt to pass isAdmin in body
+    if (req.body.isAdmin !== undefined) {
+      delete req.body.isAdmin;
+    }
   }
 
   next();

@@ -8,6 +8,13 @@ import {
 import { GameStats } from '../../types';
 import { audio } from '../../utils/audio';
 
+export interface BackgroundAmbient {
+  id: string;
+  name: string;
+  class: string;
+  color: string;
+}
+
 interface GamePageHeaderProps {
   activeGame: GameStats;
   onRestart: () => void;

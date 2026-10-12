@@ -145,7 +145,7 @@ export const useGameProgress = (
       });
 
       if (!result.success) {
-        logger.warn('Score rejected by server:', { message: result.message });
+        logger.warn('Score rejected by server:', { context: { message: result.message } });
         showToast('Skor Ditolak', result.message || 'Gagal memvalidasi sesi', 'error');
         return; // Don't save if server rejects
       }
