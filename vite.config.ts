@@ -16,6 +16,15 @@ const logErrorPlugin = () => ({
         res.end('ok');
       });
     });
+  },
+  transform(code: string, id: string) {
+    if (id.includes('vite/dist/client/client.mjs')) {
+      return code.replace(
+        'const createWebSocketModuleRunnerTransport = (options) => {',
+        'const createWebSocketModuleRunnerTransport = () => ({ connect() {}, disconnect() {}, send() {} }); const _origCreateWS = (options) => {'
+      );
+    }
+    return null;
   }
 });
 
@@ -49,28 +58,73 @@ export default defineConfig(() => {
       logErrorPlugin(),
       VitePWA({
         registerType: 'autoUpdate',
-        includeAssets: ['favicon.svg', 'robots.txt', 'apple-touch-icon.png'],
+        includeAssets: ['favicon.svg', 'apple-touch-icon.png', 'icon.svg', 'pwa-192x192.png', 'pwa-512x512.png'],
         manifest: {
-          name: 'ZIGAME',
+          id: '/',
+          name: 'ZIGAME - Retro Cyber Arcade',
           short_name: 'ZIGAME',
-          description: 'Kumpulan game arkade retro-cyber modern',
-          theme_color: '#09090b',
-          background_color: '#09090b',
+          description: 'Kumpulan game arkade retro-cyber modern dengan mode offline penuh.',
+          theme_color: '#080a0f',
+          background_color: '#080a0f',
           display: 'standalone',
+          start_url: '/',
+          scope: '/',
           icons: [
             {
-              src: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%2309090b'/%3E%3Cpath d='M25 80 L35 25 L65 25 L75 80 Z' fill='none' stroke='%23ef4444' stroke-width='6' stroke-linejoin='round'/%3E%3Cpath d='M15 70 L85 70' stroke='%2306b6d4' stroke-width='5' stroke-linecap='round'/%3E%3Ccircle cx='50' cy='40' r='10' fill='%23ef4444'/%3E%3Cline x1='50' y1='40' x2='50' y2='70' stroke='%2306b6d4' stroke-width='6' stroke-linecap='round'/%3E%3C/svg%3E",
+              src: '/pwa-192x192.png',
               sizes: '192x192',
-              type: 'image/svg+xml'
+              type: 'image/png',
+              purpose: 'any'
+            },
+            {
+              src: '/pwa-512x512.png',
+              sizes: '512x512',
+              type: 'image/png',
+              purpose: 'any'
+            },
+            {
+              src: '/pwa-maskable-512x512.png',
+              sizes: '512x512',
+              type: 'image/png',
+              purpose: 'maskable'
             }
           ]
         },
         workbox: {
           navigateFallbackDenylist: [/^\/api\//],
+          globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2}'],
           runtimeCaching: [
             {
               urlPattern: /^\/api\//,
               handler: 'NetworkOnly',
+            },
+            {
+              urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i,
+              handler: 'CacheFirst',
+              options: {
+                cacheName: 'google-fonts-cache',
+                expiration: {
+                  maxEntries: 10,
+                  maxAgeSeconds: 60 * 60 * 24 * 365,
+                },
+                cacheableResponse: {
+                  statuses: [0, 200],
+                },
+              },
+            },
+            {
+              urlPattern: /^https:\/\/fonts\.gstatic\.com\/.*/i,
+              handler: 'CacheFirst',
+              options: {
+                cacheName: 'gstatic-fonts-cache',
+                expiration: {
+                  maxEntries: 10,
+                  maxAgeSeconds: 60 * 60 * 24 * 365,
+                },
+                cacheableResponse: {
+                  statuses: [0, 200],
+                },
+              },
             },
             {
               urlPattern: /^https:\/\/images\.unsplash\.com\/.*/i,
@@ -78,8 +132,8 @@ export default defineConfig(() => {
               options: {
                 cacheName: 'unsplash-artwork-cache',
                 expiration: {
-                  maxEntries: 50,
-                  maxAgeSeconds: 7 * 24 * 60 * 60, // 1 week
+                  maxEntries: 60,
+                  maxAgeSeconds: 14 * 24 * 60 * 60,
                 },
                 cacheableResponse: {
                   statuses: [0, 200],
@@ -87,6 +141,10 @@ export default defineConfig(() => {
               },
             }
           ]
+        },
+        devOptions: {
+          enabled: true,
+          type: 'module',
         }
       })
     ],
@@ -96,7 +154,7 @@ export default defineConfig(() => {
       },
     },
     server: {
-      hmr: process.env.DISABLE_HMR !== 'true',
+      hmr: false,
       watch: process.env.DISABLE_HMR === 'true' ? null : {},
     },
   };

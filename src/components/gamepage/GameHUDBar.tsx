@@ -1,5 +1,5 @@
 import React from 'react';
-import { Trophy, Shield, RefreshCw } from 'lucide-react';
+import { Trophy, Shield, RefreshCw, Swords } from 'lucide-react';
 import { GameStats, CompetitiveRating } from '../../types';
 import { audio } from '../../utils/audio';
 import { RANKED_GAME_ALLOWLIST } from '../../config/competitiveConfig';
@@ -10,6 +10,7 @@ interface GameHUDBarProps {
   setIsRankedMode: (val: boolean) => void;
   competitiveInfo: CompetitiveRating | undefined;
   onRestart: () => void;
+  onOpenChallengeModal?: () => void;
 }
 
 export const GameHUDBar: React.FC<GameHUDBarProps> = ({
@@ -17,7 +18,8 @@ export const GameHUDBar: React.FC<GameHUDBarProps> = ({
   isRankedMode,
   setIsRankedMode,
   competitiveInfo,
-  onRestart
+  onRestart,
+  onOpenChallengeModal
 }) => {
   const isRankedEligible = RANKED_GAME_ALLOWLIST.includes(activeGame.id as any);
 
@@ -56,6 +58,17 @@ export const GameHUDBar: React.FC<GameHUDBarProps> = ({
             <Shield size={10} className="text-emerald-400 animate-pulse" />
             <span className="font-mono">{competitiveInfo.rating}<span className="hidden xs:inline"> pts</span></span>
           </div>
+        )}
+
+        {onOpenChallengeModal && (
+          <button
+            onClick={onOpenChallengeModal}
+            className="px-2 py-0.5 sm:px-3 sm:py-1 bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.08] hover:border-indigo-500/40 text-zinc-300 hover:text-white rounded-lg text-[9px] xs:text-[10px] sm:text-xs font-bold flex items-center gap-1 transition-all cursor-pointer active:scale-95 select-none"
+            title="Tantang Teman"
+          >
+            <Swords size={11} className="text-indigo-400" />
+            <span className="hidden xs:inline">TANTANG</span>
+          </button>
         )}
 
         <button

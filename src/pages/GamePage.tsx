@@ -1,14 +1,20 @@
-import React, { useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { GameStats, PlayerProfile, DailyMission } from '../types';
 
 import { GAME_LAYOUTS, DEFAULT_GAME_LAYOUT } from '../config/gameLayouts';
 import { GAME_REGISTRY } from '../config/gameRegistry';
 import { competitiveService } from '../services/competitiveService';
+import { friendChallengeService, FriendChallenge } from '../services/friendChallengeService';
+import { economyService } from '../services/economyService';
 
 import { useGameAudio } from '../hooks/useGameAudio';
 import { useGameDisplayMode } from '../hooks/useGameDisplayMode';
 import { useGameSession } from '../hooks/useGameSession';
+import { useToast } from '../utils/ToastContext';
+import { audio } from '../utils/audio';
+import { screenShake } from '../utils/screenShake';
+import { haptics } from '../utils/haptics';
 
 import { GamePageHeader } from '../components/gamepage/GamePageHeader';
 import { GamePageRightSidebar } from '../components/gamepage/GamePageRightSidebar';
@@ -21,6 +27,10 @@ import { QuickArcadeSettings } from '../components/gamepage/QuickArcadeSettings'
 import { GameHeroCanvas } from '../components/gamepage/GameHeroCanvas';
 import { GameHUDBar } from '../components/gamepage/GameHUDBar';
 import { GameNotFound } from '../components/gamepage/GameNotFound';
+import { FriendChallengeBanner } from '../components/gamepage/FriendChallengeBanner';
+import { CreateFriendChallengeModal } from '../components/gamepage/CreateFriendChallengeModal';
+import { ChallengeReceivedModal } from '../components/gamepage/ChallengeReceivedModal';
+import { ChallengeResultModal } from '../components/gamepage/ChallengeResultModal';
 import { X } from 'lucide-react';
 
 interface GamePageProps {
@@ -41,7 +51,9 @@ const BACKGROUND_AMBIENTS = [
 
 export default function GamePage({ games, profile, dailyMissions, onScoreUpdate, onGameOver }: GamePageProps) {
   const { gameId } = useParams<{ gameId: string }>();
+  const [searchParams] = useSearchParams();
   const navigate = useNavigate();
+  const { showToast } = useToast();
 
   const activeGame = games.find((g) => g.id === gameId);
   const registryItem = gameId ? GAME_REGISTRY[gameId] : null;
@@ -66,6 +78,43 @@ export default function GamePage({ games, profile, dailyMissions, onScoreUpdate,
     handleToggleMute
   } = useGameAudio(isBossMode);
 
+  // Challenge System States
+  const [incomingChallenge, setIncomingChallenge] = useState<FriendChallenge | null>(() => {
+    return friendChallengeService.parseChallengeFromUrl(searchParams);
+  });
+  const [activeChallenge, setActiveChallenge] = useState<FriendChallenge | null>(null);
+  const [isCreateChallengeOpen, setIsCreateChallengeOpen] = useState(false);
+  const [challengeResultData, setChallengeResultData] = useState<{ challenge: FriendChallenge; finalScore: number } | null>(null);
+  const [sessionScore, setSessionScore] = useState(0);
+  const targetBeatenRef = useRef(false);
+
+  // Wrapped Score Update with Challenge milestone detector
+  const handleScoreUpdateProxy = useCallback((gid: string, score: number) => {
+    setSessionScore(score);
+    onScoreUpdate(gid, score);
+
+    if (activeChallenge && score >= activeChallenge.targetScore && !targetBeatenRef.current) {
+      targetBeatenRef.current = true;
+      audio.playPowerup();
+      screenShake.trigger('subtle');
+      haptics.trigger('success');
+      showToast('🎯 Target Terlewati!', `Kamu berhasil mengalahkan target skor ${activeChallenge.targetScore.toLocaleString()}!`, 'success', '🏆');
+    }
+  }, [activeChallenge, onScoreUpdate, showToast]);
+
+  // Wrapped Game Over with Challenge result check
+  const handleGameOverProxy = useCallback((gid: string, score: number, sessionId?: string, sessionDuration?: number) => {
+    onGameOver(gid, score, sessionId, sessionDuration);
+
+    if (activeChallenge) {
+      friendChallengeService.recordChallengeAttempt(activeChallenge.id, score);
+      setChallengeResultData({
+        challenge: activeChallenge,
+        finalScore: score
+      });
+    }
+  }, [activeChallenge, onGameOver]);
+
   const {
     key,
     isRankedMode,
@@ -79,10 +128,37 @@ export default function GamePage({ games, profile, dailyMissions, onScoreUpdate,
     isTutorialOpen,
     setIsTutorialOpen,
     recentlyPlayed,
-    handleRestart,
+    handleRestart: baseRestart,
     handleScoreUpdate,
     handleWrappedGameOver
-  } = useGameSession(activeGame, profile, onScoreUpdate, onGameOver);
+  } = useGameSession(activeGame, profile, handleScoreUpdateProxy, handleGameOverProxy);
+
+  const handleRestart = useCallback(() => {
+    targetBeatenRef.current = false;
+    setSessionScore(0);
+    setChallengeResultData(null);
+    baseRestart();
+  }, [baseRestart]);
+
+  // Handle incoming challenge accept
+  const handleAcceptChallenge = () => {
+    if (!incomingChallenge) return;
+    friendChallengeService.saveIncomingChallenge(incomingChallenge);
+    setActiveChallenge(incomingChallenge);
+    setIncomingChallenge(null);
+    targetBeatenRef.current = false;
+    setSessionScore(0);
+    handleRestart();
+    showToast('Tantangan Diterima!', `Kalahkan skor ${incomingChallenge.targetScore.toLocaleString()} dari ${incomingChallenge.challengerName}`, 'info', '⚔️');
+  };
+
+  // Handle claim bounty
+  const handleClaimChallengeBounty = async () => {
+    if (!challengeResultData) return;
+    const { challenge } = challengeResultData;
+    await economyService.claimReward(challenge.id, 'challenge');
+    showToast('Bounty Diklaim!', `+${challenge.bountyCoins} Koin & +${challenge.bountyXp} XP berhasil ditambahkan!`, 'success', '💰');
+  };
 
   // Page State
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -104,7 +180,7 @@ export default function GamePage({ games, profile, dailyMissions, onScoreUpdate,
   const currentAmbient = BACKGROUND_AMBIENTS.find(b => b.id === bgAmbient) || BACKGROUND_AMBIENTS[0];
   const controls = {
     keys: registryItem?.controls.split(' ') || ['⬆️', '⬇️', '⬅️', '➡️', 'SPASI'],
-    tips: registryItem?.description || 'Gunakan tombol arah panah dan spasi untuk mengontrol permainan.',
+    tips: registryItem?.description || 'Gunakan tombol kontrol virtual atau keyboard untuk mengontrol permainan.',
     controlType: registryItem?.controlType || 'actiononly'
   };
 
@@ -126,15 +202,48 @@ export default function GamePage({ games, profile, dailyMissions, onScoreUpdate,
         <UnifiedTutorialModal
           game={activeGame}
           onClose={() => setIsTutorialOpen(false)}
-          onStartGame={handleRestart}
+          onStartGame={() => setIsTutorialOpen(false)}
         />
       )}
 
-      {/* Shareable Result Card Modal */}
-      {shareResultData && (
+      {/* Shareable Result Card Modal (when not in challenge mode) */}
+      {shareResultData && !challengeResultData && (
         <ShareResultModal
           data={shareResultData}
           onClose={() => setShareResultData(null)}
+        />
+      )}
+
+      {/* Friend Challenge Modals */}
+      {incomingChallenge && (
+        <ChallengeReceivedModal
+          challenge={incomingChallenge}
+          onAccept={handleAcceptChallenge}
+          onDecline={() => setIncomingChallenge(null)}
+        />
+      )}
+
+      {isCreateChallengeOpen && (
+        <CreateFriendChallengeModal
+          isOpen={isCreateChallengeOpen}
+          onClose={() => setIsCreateChallengeOpen(false)}
+          activeGame={activeGame}
+          profile={profile}
+          lastScore={sessionScore}
+        />
+      )}
+
+      {challengeResultData && (
+        <ChallengeResultModal
+          challenge={challengeResultData.challenge}
+          finalScore={challengeResultData.finalScore}
+          onRetry={handleRestart}
+          onCounterChallenge={() => {
+            setChallengeResultData(null);
+            setIsCreateChallengeOpen(true);
+          }}
+          onClaimBounty={handleClaimChallengeBounty}
+          onClose={() => setChallengeResultData(null)}
         />
       )}
 
@@ -159,6 +268,7 @@ export default function GamePage({ games, profile, dailyMissions, onScoreUpdate,
         recentlyPlayedIds={recentlyPlayed}
         onSelectGame={(id) => navigate(`/game/${id}`)}
         onOpenTutorial={() => setIsTutorialOpen(true)}
+        onOpenChallengeModal={() => setIsCreateChallengeOpen(true)}
         isMuted={isMuted}
         onToggleMute={handleToggleMute}
         isBgmOn={isBgmOn}
@@ -183,6 +293,14 @@ export default function GamePage({ games, profile, dailyMissions, onScoreUpdate,
           }`}
           id="center-game-viewport"
         >
+          {/* Active Friend Challenge HUD Banner */}
+          {activeChallenge && (
+            <FriendChallengeBanner
+              challenge={activeChallenge}
+              currentScore={sessionScore}
+            />
+          )}
+
           {/* Main Game Stage & Overlays */}
           <GameHeroCanvas
             activeGame={activeGame}
@@ -212,6 +330,7 @@ export default function GamePage({ games, profile, dailyMissions, onScoreUpdate,
             setIsRankedMode={setIsRankedMode}
             competitiveInfo={competitiveInfo}
             onRestart={handleRestart}
+            onOpenChallengeModal={() => setIsCreateChallengeOpen(true)}
           />
 
           {/* Inter-Game Navigation Drawer */}

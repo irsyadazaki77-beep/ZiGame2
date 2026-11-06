@@ -7,6 +7,9 @@ import { competitiveService } from '../services/competitiveService';
 import { telemetryService } from '../services/telemetryService';
 import { inputManager } from '../services/inputService';
 
+import { screenShake } from '../utils/screenShake';
+import { haptics } from '../utils/haptics';
+
 export function useGameSession(
   activeGame: GameStats | undefined,
   profile: PlayerProfile,
@@ -93,13 +96,7 @@ export function useGameSession(
     });
 
     setHasExistingSave(saveStateService.hasSaveState(gameId));
-
-    try {
-      const isDisabled = localStorage.getItem(`tutorial_disabled_${gameId}`) === 'true';
-      setIsTutorialOpen(!isDisabled);
-    } catch {
-      setIsTutorialOpen(true);
-    }
+    setIsTutorialOpen(false);
   }, [activeGame?.id]);
 
   const handleRestart = useCallback(() => {
@@ -117,6 +114,8 @@ export function useGameSession(
   const handleWrappedGameOver = useCallback(async (score: number) => {
     if (!activeGame) return;
     audio.playGameOver();
+    screenShake.trigger('medium');
+    haptics.trigger('error');
     telemetryService.recordGameOver(activeGame.id, score, undefined, inputManager.getActiveSource());
     
     let competitiveRatingChange = 0;

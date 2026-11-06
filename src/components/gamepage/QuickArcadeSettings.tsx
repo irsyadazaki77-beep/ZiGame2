@@ -6,17 +6,20 @@ import {
   Music, 
   Tv, 
   Maximize, 
-  Minimize, 
   HelpCircle, 
   Compass, 
   Eye, 
   EyeOff, 
-  Trophy,
   Gamepad2,
-  ChevronRight
+  ChevronRight,
+  Vibrate,
+  Activity,
+  Swords
 } from 'lucide-react';
 import { GameStats } from '../../types';
 import { audio } from '../../utils/audio';
+import { screenShake } from '../../utils/screenShake';
+import { haptics } from '../../utils/haptics';
 
 export interface BackgroundAmbient {
   id: string;
@@ -33,6 +36,7 @@ interface QuickArcadeSettingsProps {
   recentlyPlayedIds: string[];
   onSelectGame: (id: string) => void;
   onOpenTutorial: () => void;
+  onOpenChallengeModal?: () => void;
   isMuted: boolean;
   onToggleMute: () => void;
   isBgmOn: boolean;
@@ -56,6 +60,7 @@ export const QuickArcadeSettings: React.FC<QuickArcadeSettingsProps> = React.mem
   recentlyPlayedIds,
   onSelectGame,
   onOpenTutorial,
+  onOpenChallengeModal,
   isMuted,
   onToggleMute,
   isBgmOn,
@@ -70,6 +75,9 @@ export const QuickArcadeSettings: React.FC<QuickArcadeSettingsProps> = React.mem
   isFocusMode,
   setIsFocusMode,
 }) => {
+  const [isShakeEnabled, setIsShakeEnabled] = React.useState(() => screenShake.getEnabled());
+  const [isHapticEnabled, setIsHapticEnabled] = React.useState(() => haptics.isEnabled());
+
   if (!isOpen) return null;
 
   // Filter out current game from game lists
@@ -171,6 +179,64 @@ export const QuickArcadeSettings: React.FC<QuickArcadeSettingsProps> = React.mem
                 </button>
               </div>
 
+              {/* Screen Shake Toggle */}
+              <div className="flex items-center justify-between p-3 bg-white/[0.02] border border-white/[0.06] rounded-xl">
+                <div className="flex items-center gap-2.5">
+                  <Activity size={16} className="text-amber-400" />
+                  <div className="flex flex-col">
+                    <span className="text-xs font-medium text-zinc-200">Screen Shake Kinetik</span>
+                    <span className="text-[10px] text-zinc-500">Getaran kanvas saat benturan</span>
+                  </div>
+                </div>
+                <button
+                  onClick={() => {
+                    audio.playCoin();
+                    const next = !isShakeEnabled;
+                    setIsShakeEnabled(next);
+                    screenShake.setEnabled(next);
+                    if (next) screenShake.trigger('medium');
+                  }}
+                  className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-hidden ${
+                    isShakeEnabled ? 'bg-indigo-600' : 'bg-zinc-800'
+                  }`}
+                >
+                  <span
+                    className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-sm ring-0 transition duration-200 ease-in-out ${
+                      isShakeEnabled ? 'translate-x-4' : 'translate-x-0'
+                    }`}
+                  />
+                </button>
+              </div>
+
+              {/* Haptic Feedback Toggle */}
+              <div className="flex items-center justify-between p-3 bg-white/[0.02] border border-white/[0.06] rounded-xl">
+                <div className="flex items-center gap-2.5">
+                  <Vibrate size={16} className="text-emerald-400" />
+                  <div className="flex flex-col">
+                    <span className="text-xs font-medium text-zinc-200">Getaran Haptic Mobile</span>
+                    <span className="text-[10px] text-zinc-500">Umpan balik sentuhan HP</span>
+                  </div>
+                </div>
+                <button
+                  onClick={() => {
+                    audio.playCoin();
+                    const next = !isHapticEnabled;
+                    setIsHapticEnabled(next);
+                    haptics.setEnabled(next);
+                    if (next) haptics.trigger('medium');
+                  }}
+                  className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-hidden ${
+                    isHapticEnabled ? 'bg-indigo-600' : 'bg-zinc-800'
+                  }`}
+                >
+                  <span
+                    className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-sm ring-0 transition duration-200 ease-in-out ${
+                      isHapticEnabled ? 'translate-x-4' : 'translate-x-0'
+                    }`}
+                  />
+                </button>
+              </div>
+
               {/* Theater Mode Toggle */}
               <div className="flex items-center justify-between p-3 bg-white/[0.02] border border-white/[0.06] rounded-xl">
                 <div className="flex items-center gap-2.5">
@@ -246,6 +312,24 @@ export const QuickArcadeSettings: React.FC<QuickArcadeSettingsProps> = React.mem
 
             </div>
           </div>
+
+          {/* Social Challenges */}
+          {onOpenChallengeModal && (
+            <div className="space-y-2">
+              <h3 className="text-[10px] font-bold font-mono text-zinc-500 uppercase tracking-widest">KOMPETISI TEMAN</h3>
+              <button
+                onClick={() => {
+                  audio.playCoin();
+                  onClose();
+                  onOpenChallengeModal();
+                }}
+                className="w-full p-3 bg-gradient-to-r from-indigo-900/30 to-purple-900/30 hover:from-indigo-900/45 hover:to-purple-900/45 border border-indigo-500/30 rounded-xl text-xs font-bold text-white flex items-center justify-center gap-2 shadow-sm transition-all cursor-pointer"
+              >
+                <Swords size={15} className="text-indigo-400" />
+                <span>Tantang Teman di {activeGame.title}</span>
+              </button>
+            </div>
+          )}
 
           {/* Play Guide */}
           <div className="space-y-2">

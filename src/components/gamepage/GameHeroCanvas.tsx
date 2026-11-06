@@ -4,6 +4,8 @@ import { GameStats } from '../../types';
 import { GameErrorBoundary } from '../gameplay/GameErrorBoundary';
 import { saveStateService } from '../../services/saveStateService';
 
+import { GameViewportEffects } from './GameViewportEffects';
+
 interface MemoizedGameFrameProps {
   GameComponent: React.ComponentType<any>;
   gameKey: number;
@@ -92,11 +94,6 @@ export const GameHeroCanvas: React.FC<GameHeroCanvasProps> = ({
 }) => {
   return (
     <>
-      {/* CRT Screen Scanline Filter Layer */}
-      {isCrtFilter && (
-        <div className="absolute inset-0 bg-scanlines pointer-events-none z-30 opacity-20" />
-      )}
-
       {/* Floating Focus Mode Banner */}
       {isFocusMode && (
         <div className="w-full max-w-5xl flex items-center justify-between px-3 py-1.5 bg-zinc-950/80 border border-white/[0.08] rounded-xl mb-2 text-xs font-mono">
@@ -141,46 +138,49 @@ export const GameHeroCanvas: React.FC<GameHeroCanvasProps> = ({
         </div>
       )}
 
-      {/* Clean Focused Canvas Stage */}
+      {/* Clean Focused Canvas Stage with GameViewportEffects */}
       <div className="flex-1 w-full max-w-5xl flex items-center justify-center relative min-h-0 p-1 sm:p-4">
-        <div 
-          className="relative w-auto h-auto max-w-full max-h-full flex items-center justify-center bg-[#090b10] border border-white/[0.08] rounded-xl sm:rounded-2xl md:rounded-3xl shadow-2xl overflow-hidden transition-all duration-300"
-          style={{
-            boxShadow: `0 4px 24px rgba(0,0,0,0.6)`,
-            aspectRatio,
-          }}
-        >
-          {isStartingSession ? (
-            <div className="w-full h-full flex flex-col items-center justify-center p-8 text-center bg-[#090b10]">
-              <RefreshCw size={26} className="animate-spin text-indigo-400 mb-3" />
-              <span className="font-medium text-xs text-zinc-300">
-                {isRankedMode ? 'Memvalidasi Tiket Ranked...' : `Memuat ${activeGame.title}...`}
-              </span>
-            </div>
-          ) : sessionError ? (
-            <div className="w-full h-full flex flex-col items-center justify-center p-8 text-center bg-[#090b10]">
-              <div className="text-rose-500 mb-3 text-2xl">⚠️</div>
-              <span className="font-medium text-sm text-zinc-300 mb-4">{sessionError}</span>
-              <button onClick={onRestart} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 transition rounded-xl text-xs font-bold text-white cursor-pointer">Coba Lagi</button>
-            </div>
-          ) : GameComponent ? (
-            <MemoizedGameFrame
-              GameComponent={GameComponent}
-              gameKey={gameKey}
-              onGameOver={onGameOver}
-              onScoreUpdate={onScoreUpdate}
-              highScore={activeGame.highScore}
-              gameTitle={activeGame.title}
-              onReset={onRestart}
-            />
-          ) : (
-            <div className="text-center p-8">
-              <Sparkles size={32} className="text-amber-400 mx-auto mb-2" />
-              <h3 className="font-semibold text-sm text-white">Modul Game Sedang Dikembangkan</h3>
-            </div>
-          )}
-        </div>
+        <GameViewportEffects isCrtFilter={isCrtFilter}>
+          <div 
+            className="relative w-full h-full max-w-full max-h-full flex items-center justify-center bg-[#090b10] border border-white/[0.08] rounded-xl sm:rounded-2xl md:rounded-3xl shadow-2xl overflow-hidden transition-all duration-300"
+            style={{
+              boxShadow: `0 4px 24px rgba(0,0,0,0.6)`,
+              aspectRatio,
+            }}
+          >
+            {isStartingSession ? (
+              <div className="w-full h-full flex flex-col items-center justify-center p-8 text-center bg-[#090b10]">
+                <RefreshCw size={26} className="animate-spin text-indigo-400 mb-3" />
+                <span className="font-medium text-xs text-zinc-300">
+                  {isRankedMode ? 'Memvalidasi Tiket Ranked...' : `Memuat ${activeGame.title}...`}
+                </span>
+              </div>
+            ) : sessionError ? (
+              <div className="w-full h-full flex flex-col items-center justify-center p-8 text-center bg-[#090b10]">
+                <div className="text-rose-500 mb-3 text-2xl">⚠️</div>
+                <span className="font-medium text-sm text-zinc-300 mb-4">{sessionError}</span>
+                <button onClick={onRestart} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 transition rounded-xl text-xs font-bold text-white cursor-pointer">Coba Lagi</button>
+              </div>
+            ) : GameComponent ? (
+              <MemoizedGameFrame
+                GameComponent={GameComponent}
+                gameKey={gameKey}
+                onGameOver={onGameOver}
+                onScoreUpdate={onScoreUpdate}
+                highScore={activeGame.highScore}
+                gameTitle={activeGame.title}
+                onReset={onRestart}
+              />
+            ) : (
+              <div className="text-center p-8">
+                <Sparkles size={32} className="text-amber-400 mx-auto mb-2" />
+                <h3 className="font-semibold text-sm text-white">Modul Game Sedang Dikembangkan</h3>
+              </div>
+            )}
+          </div>
+        </GameViewportEffects>
       </div>
     </>
   );
 };
+

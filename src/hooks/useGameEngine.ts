@@ -69,6 +69,14 @@ export function useGameEngine({
       setGameStateInternal(mapped);
     });
 
+    if (ctx.lifecycle.getState() === 'destroyed') {
+      ctx.lifecycle.setState('ready');
+    } else {
+      const current = ctx.lifecycle.getState() as GameEngineState;
+      gameStateRef.current = current;
+      setGameStateInternal(current);
+    }
+
     const unsubScore = ctx.score.subscribe((s) => {
       scoreRef.current = s;
       setScoreInternal(s);
@@ -135,7 +143,9 @@ export function useGameEngine({
 
   const startWithCountdown = useCallback((onCountdownEnd?: () => void) => {
     setCountdown(3);
-    ctx.lifecycle.startWithCountdown(onCountdownEnd);
+    ctx.lifecycle.startWithCountdown(onCountdownEnd, (count) => {
+      setCountdown(count);
+    });
   }, [ctx]);
 
   // Viewport / canvas helper with DPR capping

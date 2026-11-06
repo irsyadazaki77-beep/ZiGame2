@@ -31,7 +31,9 @@ export const RANKED_GAME_ALLOWLIST: CanonicalGameId[] = [
   'cyber-tetris',
   'gravity-shift',
   'void-survivor',
-  'orbital-defense'
+  'orbital-defense',
+  'wizard-chess',
+  'desk-racer'
 ];
 
 export interface GameCompetitiveConfig {
@@ -48,7 +50,9 @@ export const GAME_COMPETITIVE_CONFIGS: Partial<Record<CanonicalGameId, GameCompe
   'cyber-tetris': { baseScore: 10000, volatility: 40 },
   'gravity-shift': { baseScore: 800, volatility: 40 },
   'void-survivor': { baseScore: 1200, volatility: 40 },
-  'orbital-defense': { baseScore: 1500, volatility: 40 }
+  'orbital-defense': { baseScore: 1500, volatility: 40 },
+  'wizard-chess': { baseScore: 1800, volatility: 40 },
+  'desk-racer': { baseScore: 2500, volatility: 40 }
 };
 
 export const INITIAL_RATING = 1000;

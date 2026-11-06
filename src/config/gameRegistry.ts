@@ -526,18 +526,19 @@ export const CANONICAL_GAME_REGISTRY: Record<CanonicalGameId, GameRegistryItem> 
   },
   'neon-drift': {
     id: 'neon-drift',
-    title: 'Neon Drift',
-    description: 'Bermanuver menghindari rintangan neon yang berjatuhan dari atas secepat kilat!',
-    genre: 'Action',
+    title: 'Neon Drift 3D',
+    description: 'Game balap 3D cyberpunk futuristik berkecepatan tinggi! Kuasai teknik drifting lateral, nyalakan nitro overdrive, dan hindari lalu lintas otonom di jalan tol neon.',
+    genre: '3D Racing / Cyberpunk',
     difficulty: 'Hard',
     thumbnail: 'https://images.unsplash.com/photo-1617814076367-b759c7d7e738?auto=format&fit=crop&w=600&q=80',
     layout: 'landscape',
     component: lazy(() => import('../components/games/NeonDriftGame')),
     themeColor: '#22d3ee',
-    accentShadow: 'shadow-[0_0_15px_rgba(34,211,238,0.15)]',
+    accentShadow: 'shadow-[0_0_15px_rgba(34,211,238,0.25)]',
     icon: '🏎️',
-    controls: 'Left / Right',
-    controlType: 'leftright',
+    controls: 'WASD / Arrows + Space (Nitro) + Shift (Drift) / Touch',
+    controlType: 'dpad',
+    supportedInputs: ['keyboard', 'touch', 'gamepad'],
     avgDuration: '2-5 mins'
   },
   'neon-heist': {
@@ -619,6 +620,40 @@ export const CANONICAL_GAME_REGISTRY: Record<CanonicalGameId, GameRegistryItem> 
     controls: 'Mouse / Click',
     controlType: 'actiononly',
     avgDuration: '5-12 mins'
+  },
+  'wizard-chess': {
+    id: 'wizard-chess',
+    title: 'Wizard Chess 3D',
+    description: 'Catur sihir katedral Gotik 3D interaktif dengan pahatan bidak batu, serangan jarak dekat sinematik, fisika kehancuran batu, dan AI pemain tunggal maupun 2 pemain lokal.',
+    genre: '3D Strategy / Chess',
+    difficulty: 'Medium',
+    thumbnail: '/src/assets/images/thumb_wizard_chess_3d_1793880932928.jpg',
+    layout: 'landscape',
+    component: lazy(() => import('../components/games/WizardChess3DGame')),
+    themeColor: '#f59e0b',
+    accentShadow: 'shadow-[0_0_15px_rgba(245,158,11,0.2)]',
+    icon: '♟️',
+    controls: 'Mouse / Touch + Orbit',
+    controlType: 'actiononly',
+    supportedInputs: ['mouse', 'touch', 'keyboard'],
+    avgDuration: '5-15 mins'
+  },
+  'desk-racer': {
+    id: 'desk-racer',
+    title: 'Desk Racer',
+    description: 'Game balap time-trial mobil formula miniatur 3D di atas sirkuit coaster meja kerja dengan rintangan keyboard mekanik RGB dan sistem Ghost Replay.',
+    genre: '3D Racing / Time-Trial',
+    difficulty: 'Medium',
+    thumbnail: '/src/assets/images/thumb_desk_racer_3d_1793880933767.jpg',
+    layout: 'landscape',
+    component: lazy(() => import('../components/games/DeskRacerGame')),
+    themeColor: '#ef4444',
+    accentShadow: 'shadow-[0_0_15px_rgba(239,68,68,0.2)]',
+    icon: '🏎️',
+    controls: 'WASD / Arrows + Space',
+    controlType: 'dpad',
+    supportedInputs: ['keyboard', 'touch', 'gamepad'],
+    avgDuration: '2-5 mins'
   }
 };
 

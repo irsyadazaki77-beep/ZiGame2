@@ -58,6 +58,8 @@ export const GAME_BALANCE_CONFIG: Record<string, GameBalanceConfig> = {
   'orbital-defense': { baseCoinMultiplier: 0.1, baseXpMultiplier: 0.2, maxScoreCeiling: 200000, maxScorePerSec: 300, minDurationMs: 4000, idealPlayDurationSec: 180, masteryDifficultyWeight: 1.2 },
   'gravity-shift': { baseCoinMultiplier: 0.2, baseXpMultiplier: 0.25, maxScoreCeiling: 60000, maxScorePerSec: 200, minDurationMs: 2000, idealPlayDurationSec: 90, masteryDifficultyWeight: 1.3 },
   'hex-dominion': { baseCoinMultiplier: 0.15, baseXpMultiplier: 0.25, maxScoreCeiling: 150000, maxScorePerSec: 250, minDurationMs: 5000, idealPlayDurationSec: 240, masteryDifficultyWeight: 1.3 },
+  'wizard-chess': { baseCoinMultiplier: 0.18, baseXpMultiplier: 0.28, maxScoreCeiling: 120000, maxScorePerSec: 300, minDurationMs: 4000, idealPlayDurationSec: 180, masteryDifficultyWeight: 1.35 },
+  'desk-racer': { baseCoinMultiplier: 0.16, baseXpMultiplier: 0.24, maxScoreCeiling: 150000, maxScorePerSec: 350, minDurationMs: 3000, idealPlayDurationSec: 90, masteryDifficultyWeight: 1.3 },
   'default': { baseCoinMultiplier: 0.1, baseXpMultiplier: 0.15, maxScoreCeiling: 250000, maxScorePerSec: 350, minDurationMs: 1500, idealPlayDurationSec: 60, masteryDifficultyWeight: 1.0 }
 };
 

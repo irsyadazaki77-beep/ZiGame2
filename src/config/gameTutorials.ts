@@ -293,6 +293,71 @@ export const GAME_TUTORIALS: Record<string, GameTutorialConfig> = {
       'Lindungi HQ utama Anda dengan menempatkan unit garda depan di celah sempit',
       'Fokuskan tembakan gabungan beberapa unit ke satu target terkuat musuh'
     ]
+  },
+  'wizard-chess': {
+    gameId: 'wizard-chess',
+    title: 'Wizard Chess 3D',
+    icon: '♟️',
+    objective: 'Pimpin pasukan catur batu sihir di Katedral Gotik 3D, hancurkan bidak lawan dengan serangan jarak dekat sinematik, dan skakmat Raja musuh.',
+    scoring: [
+      '+100 hingga +900 Poin per bidak musuh yang dihancurkan',
+      'Pengali skor hingga 2.0x pada mode AI Sulit',
+      '+1200 hingga +3000 Poin bonus kemenangan Skakmat'
+    ],
+    controls: {
+      keyboard: ['Klik Bidak & Petak Tujuan', 'Drag Mouse untuk Memutar Kamera 3D', 'Tombol H (Sembunyikan/Tampilkan Dock)'],
+      touch: ['Ketuk Bidak & Petak Tujuan', 'Geser 1 Jari untuk Orbit Kamera']
+    },
+    firstPlayHint: 'Klik salah satu bidak Putih untuk melihat petak langkah legal (lingkaran hijau) dan target serangan (cincin merah).',
+    advancedMechanic: 'Gunakan fitur Rokade (Castling) untuk mengamankan Raja sekaligus mengaktifkan Benteng ke jalur tengah.',
+    proTips: [
+      'Kuasai 4 petak pusat papan sejak awal permainan',
+      'Gunakan sudut kamera Atas 2D jika ingin melihat garis ancaman diagonal dengan jelas'
+    ]
+  },
+  'desk-racer': {
+    gameId: 'desk-racer',
+    title: 'Desk Racer',
+    icon: '🏎️',
+    objective: 'Pacu mobil formula miniatur melewati 3 putaran sirkuit coaster di atas meja kerja secepat mungkin dan kalahkan bayangan Ghost Replay Anda.',
+    scoring: [
+      'Poin kecepatan berkelanjutan saat melaju di lintasan bersih',
+      '+400 hingga +2200 Poin bonus penyelesaian tiap Lap berdasarkan catatan waktu',
+      'Bonus efisiensi waktu saat mencetak Best Lap baru'
+    ],
+    controls: {
+      keyboard: ['WASD / Arrow Keys (Gas, Rem, Kemudi)', 'Space / Shift (Nitro Boost)', 'R (Respawn / Mulai Ulang)'],
+      gamepad: ['Left Stick (Kemudi)', 'Tombol A (Gas)', 'Tombol B (Nitro Boost)'],
+      touch: ['Tombol Sentuh Kiri/Kanan + Tombol GAS di Layar']
+    },
+    firstPlayHint: 'Hemat energi Nitro Boost untuk trek lurus panjang di depan keyboard mekanik RGB agar kecepatan puncak maksimal.',
+    advancedMechanic: 'Catatan lap tercepat Anda otomatis direkam sebagai Ghost Car transparan untuk menjadi lawan tanding di putaran berikutnya.',
+    proTips: [
+      'Hindari menggesek pembatas kerb merah-putih terlalu dalam saat menikung tajam',
+      'Pantau posisi Anda dan Ghost di Minimap sudut kiri bawah'
+    ]
+  },
+  'neon-drift': {
+    gameId: 'neon-drift',
+    title: 'Neon Drift 3D',
+    icon: '🏎️',
+    objective: 'Melesat di jalan tol cyberpunk neon 3D, lakukan drift lateral di tikungan tajam, picu nitro overdrive, dan hindari kendaraan otonom.',
+    scoring: [
+      '+100 Poin per detik kecepatan penuh (berkelanjutan)',
+      '+250 Poin bonus Near-Miss saat menyalip tipis mobil lawan',
+      'Pengali Combo Multiplier 2x-5x saat memicu Nitro Overdrive dan menjaga streak bersih'
+    ],
+    controls: {
+      keyboard: ['A / D atau Arrow Keys (Kemudi)', 'Shift / S / Down (Drifting Lateral)', 'Space / Up (Nitro Boost)', 'C (Ganti Sudut Kamera 3D)'],
+      gamepad: ['Left Stick (Kemudi)', 'Tombol (B) / LT (Drift)', 'Tombol (A) / RT (Nitro)'],
+      touch: ['Tombol Belok Kiri / Kanan + Tombol DRIFT & NITRO di layar']
+    },
+    firstPlayHint: 'Tahan tombol Drift saat bermanuver tajam untuk mengisi tabung Nitro hingga 100%, lalu tekan Space untuk memicu lonjakan kecepatan hingga 340 km/h!',
+    advancedMechanic: 'Salip kendaraan traffic sedekat mungkin untuk memicu kombo Near-Miss berantai yang melipatgandakan perolehan skor.',
+    proTips: [
+      'Gunakan tombol C untuk beralih antara Chase Cam, Cockpit Hood Cam, dan Retro Arcade Cam',
+      'Perhatikan lampu rem mobil di depan sebelum melakukan manuver salip agresif'
+    ]
   }
 };
 

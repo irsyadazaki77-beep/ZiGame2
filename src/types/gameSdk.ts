@@ -110,7 +110,7 @@ export interface ILoopController {
 export interface ILifecycleController {
   getState(): GameRuntimeState;
   setState(state: GameRuntimeState): void;
-  startWithCountdown(onComplete?: () => void): void;
+  startWithCountdown(onComplete?: () => void, onTick?: (count: number) => void): void;
   pauseGame(): void;
   resumeGame(): void;
   togglePause(): void;

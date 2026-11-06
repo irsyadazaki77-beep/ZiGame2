@@ -1,12 +1,15 @@
 import React, { useMemo, useState, useEffect } from 'react';
 import { motion } from 'motion/react';
-import { Play, Sparkles, Target, ArrowRight, Zap, Trophy, Star } from 'lucide-react';
+import { Play, Sparkles, Target, ArrowRight, Zap, Trophy, Star, Flame, Gift } from 'lucide-react';
 import { GameStats, DailyMission, Achievement, PlayerProfile, RecentlyPlayedEntry } from '../types';
 import { challengeService } from '../services/challengeService';
+import { dailyStreakService } from '../services/dailyStreakService';
 import { getRecommendedGames, getTrendingGames } from '../utils/recommendationEngine';
 import { audio } from '../utils/audio';
 import { useNavigate } from 'react-router-dom';
 import { NewPlayerOnboardingModal } from '../components/onboarding/NewPlayerOnboardingModal';
+import { DailyStreakModal } from '../components/rewards/DailyStreakModal';
+import { PWAInstallButton } from '../components/pwa/PWAInstallButton';
 import { GAME_QUALITY_MAP } from '../config/qualityTiers';
 import GameCard from '../components/GameCard';
 import { GameArtwork } from '../components/GameArtwork';
@@ -36,12 +39,16 @@ export default function Home({
 }: HomeProps) {
   const navigate = useNavigate();
   const [showOnboarding, setShowOnboarding] = useState(false);
+  const [showDailyStreakModal, setShowDailyStreakModal] = useState(false);
+  const streakInfo = dailyStreakService.getStreakInfo();
 
   useEffect(() => {
     try {
       const isCompleted = localStorage.getItem('zigame_onboarding_completed') === 'true';
       if (!isCompleted && totalPlays === 0 && (!recentlyPlayed || recentlyPlayed.length === 0)) {
         setShowOnboarding(true);
+      } else if (streakInfo.canClaimToday) {
+        setShowDailyStreakModal(true);
       }
     } catch {}
   }, [totalPlays, recentlyPlayed]);
@@ -189,6 +196,48 @@ export default function Home({
           </div>
         </section>
       )}
+
+      {/* Daily Login Streak Reward Modal */}
+      <DailyStreakModal
+        isOpen={showDailyStreakModal}
+        onClose={() => setShowDailyStreakModal(false)}
+        profile={profile}
+        onUpdateProfile={onUpdateProfile}
+      />
+
+      {/* Daily Streak & PWA Card Banner */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+        {/* Streak Quick Card */}
+        <div 
+          onClick={() => { audio.playCoin(); setShowDailyStreakModal(true); }}
+          className="p-4 rounded-2xl bg-amber-500/10 hover:bg-amber-500/15 border border-amber-500/20 hover:border-amber-500/35 flex items-center justify-between gap-3 cursor-pointer transition shadow-xs group"
+        >
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-amber-500/20 border border-amber-500/30 flex items-center justify-center text-amber-400 shrink-0">
+              <Flame size={20} className="group-hover:scale-110 transition-transform" />
+            </div>
+            <div>
+              <div className="flex items-center gap-1.5">
+                <span className="font-bold text-xs sm:text-sm text-text-primary">Login Beruntun {streakInfo.currentStreak} Hari</span>
+                {streakInfo.canClaimToday && (
+                  <span className="w-2 h-2 rounded-full bg-amber-500 animate-ping" />
+                )}
+              </div>
+              <p className="text-[11px] text-text-muted mt-0.5">
+                {streakInfo.canClaimToday 
+                  ? 'Hadiah hari ini siap diklaim! Klik untuk buka kalender.' 
+                  : 'Kembali lagi besok untuk hadiah streak berikutnya.'}
+              </p>
+            </div>
+          </div>
+          <button className="px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-zinc-950 font-bold text-xs shrink-0 transition shadow-sm">
+            {streakInfo.canClaimToday ? 'Klaim' : 'Lihat'}
+          </button>
+        </div>
+
+        {/* PWA Card */}
+        <PWAInstallButton variant="card" />
+      </div>
 
       {/* 2. Lanjutkan Bermain & Tantangan Harian (Dual Row) */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-5">

@@ -1,8 +1,10 @@
-import React from 'react';
-import { ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Play, CircleDot } from 'lucide-react';
+import React, { useState } from 'react';
+import { ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Play, CircleDot, Disc3, Grid2X2 } from 'lucide-react';
 import { audio } from '../../utils/audio';
 import { inputManager } from '../../services/inputService';
 import { InputAction } from '../../types';
+import { haptics } from '../../utils/haptics';
+import { AnalogVirtualJoystick } from './AnalogVirtualJoystick';
 
 interface MobileTouchControlsProps {
   visible: boolean;
@@ -10,6 +12,14 @@ interface MobileTouchControlsProps {
 }
 
 export const MobileTouchControls: React.FC<MobileTouchControlsProps> = ({ visible, controlType = 'directional-action' }) => {
+  const [stickMode, setStickMode] = useState<'dpad' | 'joystick'>(() => {
+    try {
+      return (localStorage.getItem('zigame_mobile_control_mode') as 'dpad' | 'joystick') || 'dpad';
+    } catch {
+      return 'dpad';
+    }
+  });
+
   if (!visible) return null;
 
   const showDPad = controlType === 'directional' || controlType === 'directional-action' || controlType === 'dpad' || controlType === 'dpad-action' || controlType === 'joystick' || controlType === 'joystick-action';
@@ -18,9 +28,19 @@ export const MobileTouchControls: React.FC<MobileTouchControlsProps> = ({ visibl
 
   if (!showDPad && !showHorizontalOnly && !showAction) return null;
 
+  const toggleStickMode = () => {
+    const next = stickMode === 'dpad' ? 'joystick' : 'dpad';
+    setStickMode(next);
+    haptics.trigger('selection');
+    try {
+      localStorage.setItem('zigame_mobile_control_mode', next);
+    } catch {}
+  };
+
   const handleTouchStart = (action: InputAction, e: React.TouchEvent | React.MouseEvent) => {
     if (e.cancelable) e.preventDefault();
     audio.playHit();
+    haptics.trigger('light');
     inputManager.dispatchAction(action, true, 'touch');
   };
 
@@ -36,60 +56,76 @@ export const MobileTouchControls: React.FC<MobileTouchControlsProps> = ({ visibl
         className="lg:hidden landscape:hidden flex-none py-2 px-4 sm:px-6 bg-zinc-950/70 backdrop-blur-md border-t border-white/[0.06] flex items-center justify-between select-none touch-none w-full max-w-md mx-auto pb-safe"
         id="virtual-mobile-gamepad-deck-portrait"
       >
-        {/* D-Pad Controller */}
+        {/* Left Control Group (D-Pad or Analog Joystick) */}
         {showDPad ? (
-          <div className="relative w-32 h-32 bg-zinc-900/90 rounded-full border border-white/[0.06] p-0.5 flex items-center justify-center shadow-lg shrink-0 backdrop-blur-md touch-none select-none">
-            {/* UP BUTTON */}
+          <div className="relative flex items-center gap-2">
+            {stickMode === 'joystick' ? (
+              <AnalogVirtualJoystick size={114} />
+            ) : (
+              <div className="relative w-32 h-32 bg-zinc-900/90 rounded-full border border-white/[0.06] p-0.5 flex items-center justify-center shadow-lg shrink-0 backdrop-blur-md touch-none select-none">
+                {/* UP BUTTON */}
+                <button
+                  onTouchStart={(e) => handleTouchStart('UP', e)}
+                  onTouchEnd={(e) => handleTouchEnd('UP', e)}
+                  onMouseDown={(e) => handleTouchStart('UP', e)}
+                  onMouseUp={(e) => handleTouchEnd('UP', e)}
+                  className="absolute top-0.5 left-1/2 -translate-x-1/2 w-11 h-11 bg-zinc-800/90 active:bg-indigo-600 focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:outline-hidden rounded-lg flex items-center justify-center text-zinc-300 active:text-white border border-white/[0.06] cursor-pointer active:scale-95 transition-all duration-150 ease-out touch-none select-none shadow-xs"
+                  aria-label="Atas"
+                >
+                  <ArrowUp size={18} />
+                </button>
+     
+                {/* LEFT BUTTON */}
+                <button
+                  onTouchStart={(e) => handleTouchStart('LEFT', e)}
+                  onTouchEnd={(e) => handleTouchEnd('LEFT', e)}
+                  onMouseDown={(e) => handleTouchStart('LEFT', e)}
+                  onMouseUp={(e) => handleTouchEnd('LEFT', e)}
+                  className="absolute left-0.5 top-1/2 -translate-y-1/2 w-11 h-11 bg-zinc-800/90 active:bg-indigo-600 focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:outline-hidden rounded-lg flex items-center justify-center text-zinc-300 active:text-white border border-white/[0.06] cursor-pointer active:scale-95 transition-all duration-150 ease-out touch-none select-none shadow-xs"
+                  aria-label="Kiri"
+                >
+                  <ArrowLeft size={18} />
+                </button>
+     
+                {/* Center Cap */}
+                <div className="w-8 h-8 rounded-full bg-zinc-950/80 border border-white/[0.04] flex items-center justify-center z-10 shadow-inner select-none touch-none">
+                  <CircleDot size={12} className="text-zinc-600" />
+                </div>
+     
+                {/* RIGHT BUTTON */}
+                <button
+                  onTouchStart={(e) => handleTouchStart('RIGHT', e)}
+                  onTouchEnd={(e) => handleTouchEnd('RIGHT', e)}
+                  onMouseDown={(e) => handleTouchStart('RIGHT', e)}
+                  onMouseUp={(e) => handleTouchEnd('RIGHT', e)}
+                  className="absolute right-0.5 top-1/2 -translate-y-1/2 w-11 h-11 bg-zinc-800/90 active:bg-indigo-600 focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:outline-hidden rounded-lg flex items-center justify-center text-zinc-300 active:text-white border border-white/[0.06] cursor-pointer active:scale-95 transition-all duration-150 ease-out touch-none select-none shadow-xs"
+                  aria-label="Kanan"
+                >
+                  <ArrowRight size={18} />
+                </button>
+     
+                {/* DOWN BUTTON */}
+                <button
+                  onTouchStart={(e) => handleTouchStart('DOWN', e)}
+                  onTouchEnd={(e) => handleTouchEnd('DOWN', e)}
+                  onMouseDown={(e) => handleTouchStart('DOWN', e)}
+                  onMouseUp={(e) => handleTouchEnd('DOWN', e)}
+                  className="absolute bottom-0.5 left-1/2 -translate-x-1/2 w-11 h-11 bg-zinc-800/90 active:bg-indigo-600 focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:outline-hidden rounded-lg flex items-center justify-center text-zinc-300 active:text-white border border-white/[0.06] cursor-pointer active:scale-95 transition-all duration-150 ease-out touch-none select-none shadow-xs"
+                  aria-label="Bawah"
+                >
+                  <ArrowDown size={18} />
+                </button>
+              </div>
+            )}
+
+            {/* Quick Switcher between D-Pad & Joystick */}
             <button
-              onTouchStart={(e) => handleTouchStart('UP', e)}
-              onTouchEnd={(e) => handleTouchEnd('UP', e)}
-              onMouseDown={(e) => handleTouchStart('UP', e)}
-              onMouseUp={(e) => handleTouchEnd('UP', e)}
-              className="absolute top-0.5 left-1/2 -translate-x-1/2 w-11 h-11 bg-zinc-800/90 active:bg-indigo-600 focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:outline-hidden rounded-lg flex items-center justify-center text-zinc-300 active:text-white border border-white/[0.06] cursor-pointer active:scale-95 transition-all duration-150 ease-out touch-none select-none shadow-xs"
-              aria-label="Atas"
+              onClick={toggleStickMode}
+              className="w-8 h-8 rounded-lg bg-zinc-900 border border-white/[0.08] text-zinc-400 hover:text-white flex items-center justify-center transition-colors active:scale-95"
+              title={stickMode === 'dpad' ? 'Ganti ke Analog Joystick' : 'Ganti ke D-Pad'}
+              aria-label="Toggle D-Pad / Joystick"
             >
-              <ArrowUp size={18} />
-            </button>
- 
-            {/* LEFT BUTTON */}
-            <button
-              onTouchStart={(e) => handleTouchStart('LEFT', e)}
-              onTouchEnd={(e) => handleTouchEnd('LEFT', e)}
-              onMouseDown={(e) => handleTouchStart('LEFT', e)}
-              onMouseUp={(e) => handleTouchEnd('LEFT', e)}
-              className="absolute left-0.5 top-1/2 -translate-y-1/2 w-11 h-11 bg-zinc-800/90 active:bg-indigo-600 focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:outline-hidden rounded-lg flex items-center justify-center text-zinc-300 active:text-white border border-white/[0.06] cursor-pointer active:scale-95 transition-all duration-150 ease-out touch-none select-none shadow-xs"
-              aria-label="Kiri"
-            >
-              <ArrowLeft size={18} />
-            </button>
- 
-            {/* Center Cap */}
-            <div className="w-8 h-8 rounded-full bg-zinc-950/80 border border-white/[0.04] flex items-center justify-center z-10 shadow-inner select-none touch-none">
-              <CircleDot size={12} className="text-zinc-600" />
-            </div>
- 
-            {/* RIGHT BUTTON */}
-            <button
-              onTouchStart={(e) => handleTouchStart('RIGHT', e)}
-              onTouchEnd={(e) => handleTouchEnd('RIGHT', e)}
-              onMouseDown={(e) => handleTouchStart('RIGHT', e)}
-              onMouseUp={(e) => handleTouchEnd('RIGHT', e)}
-              className="absolute right-0.5 top-1/2 -translate-y-1/2 w-11 h-11 bg-zinc-800/90 active:bg-indigo-600 focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:outline-hidden rounded-lg flex items-center justify-center text-zinc-300 active:text-white border border-white/[0.06] cursor-pointer active:scale-95 transition-all duration-150 ease-out touch-none select-none shadow-xs"
-              aria-label="Kanan"
-            >
-              <ArrowRight size={18} />
-            </button>
- 
-            {/* DOWN BUTTON */}
-            <button
-              onTouchStart={(e) => handleTouchStart('DOWN', e)}
-              onTouchEnd={(e) => handleTouchEnd('DOWN', e)}
-              onMouseDown={(e) => handleTouchStart('DOWN', e)}
-              onMouseUp={(e) => handleTouchEnd('DOWN', e)}
-              className="absolute bottom-0.5 left-1/2 -translate-x-1/2 w-11 h-11 bg-zinc-800/90 active:bg-indigo-600 focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:outline-hidden rounded-lg flex items-center justify-center text-zinc-300 active:text-white border border-white/[0.06] cursor-pointer active:scale-95 transition-all duration-150 ease-out touch-none select-none shadow-xs"
-              aria-label="Bawah"
-            >
-              <ArrowDown size={18} />
+              {stickMode === 'dpad' ? <Disc3 size={15} className="text-indigo-400" /> : <Grid2X2 size={15} className="text-emerald-400" />}
             </button>
           </div>
         ) : showHorizontalOnly ? (
@@ -116,7 +152,7 @@ export const MobileTouchControls: React.FC<MobileTouchControlsProps> = ({ visibl
             </button>
           </div>
         ) : <div />}
- 
+
         {/* Action Button */}
         {showAction ? (
           <div className="flex items-center shrink-0 touch-none select-none">
@@ -135,46 +171,59 @@ export const MobileTouchControls: React.FC<MobileTouchControlsProps> = ({ visibl
         ) : <div />}
       </div>
 
-      {/* LANDSCAPE MODE OVERLAY (Floating semi-transparent controls on left/right, 0 vertical height block) */}
+      {/* LANDSCAPE MODE OVERLAY */}
       <div 
         className="hidden lg:hidden landscape:block pointer-events-none fixed inset-0 z-40 select-none pl-safe pr-safe pb-safe"
         id="virtual-mobile-gamepad-deck-landscape"
       >
-        {/* Floating Left Overlay: D-Pad */}
+        {/* Floating Left Overlay */}
         {showDPad && (
-          <div className="pointer-events-auto absolute bottom-4 left-4 w-32 h-32 bg-zinc-950/70 backdrop-blur-md rounded-full border border-white/[0.06] p-0.5 flex items-center justify-center shadow-2xl opacity-80 hover:opacity-100 transition-opacity select-none touch-none">
+          <div className="pointer-events-auto absolute bottom-4 left-4 flex items-end gap-2">
+            {stickMode === 'joystick' ? (
+              <AnalogVirtualJoystick size={116} />
+            ) : (
+              <div className="w-32 h-32 bg-zinc-950/70 backdrop-blur-md rounded-full border border-white/[0.06] p-0.5 flex items-center justify-center shadow-2xl opacity-85 hover:opacity-100 transition-opacity select-none touch-none">
+                <button
+                  onTouchStart={(e) => handleTouchStart('UP', e)}
+                  onTouchEnd={(e) => handleTouchEnd('UP', e)}
+                  className="absolute top-0.5 left-1/2 -translate-x-1/2 w-11 h-11 bg-zinc-900/90 active:bg-indigo-600 rounded-lg flex items-center justify-center text-white border border-white/[0.06] cursor-pointer active:scale-95 transition-all duration-150 ease-out touch-none select-none"
+                  aria-label="Atas"
+                >
+                  <ArrowUp size={18} />
+                </button>
+                <button
+                  onTouchStart={(e) => handleTouchStart('LEFT', e)}
+                  onTouchEnd={(e) => handleTouchEnd('LEFT', e)}
+                  className="absolute left-0.5 top-1/2 -translate-y-1/2 w-11 h-11 bg-zinc-900/90 active:bg-indigo-600 rounded-lg flex items-center justify-center text-white border border-white/[0.06] cursor-pointer active:scale-95 transition-all duration-150 ease-out touch-none select-none"
+                  aria-label="Kiri"
+                >
+                  <ArrowLeft size={18} />
+                </button>
+                <div className="w-6 h-6 rounded-full bg-zinc-950/60 border border-white/[0.04] select-none touch-none" />
+                <button
+                  onTouchStart={(e) => handleTouchStart('RIGHT', e)}
+                  onTouchEnd={(e) => handleTouchEnd('RIGHT', e)}
+                  className="absolute right-0.5 top-1/2 -translate-y-1/2 w-11 h-11 bg-zinc-900/90 active:bg-indigo-600 rounded-lg flex items-center justify-center text-white border border-white/[0.06] cursor-pointer active:scale-95 transition-all duration-150 ease-out touch-none select-none"
+                  aria-label="Kanan"
+                >
+                  <ArrowRight size={18} />
+                </button>
+                <button
+                  onTouchStart={(e) => handleTouchStart('DOWN', e)}
+                  onTouchEnd={(e) => handleTouchEnd('DOWN', e)}
+                  className="absolute bottom-0.5 left-1/2 -translate-x-1/2 w-11 h-11 bg-zinc-900/90 active:bg-indigo-600 rounded-lg flex items-center justify-center text-white border border-white/[0.06] cursor-pointer active:scale-95 transition-all duration-150 ease-out touch-none select-none"
+                  aria-label="Bawah"
+                >
+                  <ArrowDown size={18} />
+                </button>
+              </div>
+            )}
             <button
-              onTouchStart={(e) => handleTouchStart('UP', e)}
-              onTouchEnd={(e) => handleTouchEnd('UP', e)}
-              className="absolute top-0.5 left-1/2 -translate-x-1/2 w-11 h-11 bg-zinc-900/90 active:bg-indigo-600 rounded-lg flex items-center justify-center text-white border border-white/[0.06] cursor-pointer active:scale-95 transition-all duration-150 ease-out touch-none select-none"
-              aria-label="Atas"
+              onClick={toggleStickMode}
+              className="w-7 h-7 rounded-md bg-zinc-900/90 border border-white/[0.08] text-zinc-400 hover:text-white flex items-center justify-center transition-colors active:scale-95"
+              title="Toggle Joystick"
             >
-              <ArrowUp size={18} />
-            </button>
-            <button
-              onTouchStart={(e) => handleTouchStart('LEFT', e)}
-              onTouchEnd={(e) => handleTouchEnd('LEFT', e)}
-              className="absolute left-0.5 top-1/2 -translate-y-1/2 w-11 h-11 bg-zinc-900/90 active:bg-indigo-600 rounded-lg flex items-center justify-center text-white border border-white/[0.06] cursor-pointer active:scale-95 transition-all duration-150 ease-out touch-none select-none"
-              aria-label="Kiri"
-            >
-              <ArrowLeft size={18} />
-            </button>
-            <div className="w-6 h-6 rounded-full bg-zinc-950/60 border border-white/[0.04] select-none touch-none" />
-            <button
-              onTouchStart={(e) => handleTouchStart('RIGHT', e)}
-              onTouchEnd={(e) => handleTouchEnd('RIGHT', e)}
-              className="absolute right-0.5 top-1/2 -translate-y-1/2 w-11 h-11 bg-zinc-900/90 active:bg-indigo-600 rounded-lg flex items-center justify-center text-white border border-white/[0.06] cursor-pointer active:scale-95 transition-all duration-150 ease-out touch-none select-none"
-              aria-label="Kanan"
-            >
-              <ArrowRight size={18} />
-            </button>
-            <button
-              onTouchStart={(e) => handleTouchStart('DOWN', e)}
-              onTouchEnd={(e) => handleTouchEnd('DOWN', e)}
-              className="absolute bottom-0.5 left-1/2 -translate-x-1/2 w-11 h-11 bg-zinc-900/90 active:bg-indigo-600 rounded-lg flex items-center justify-center text-white border border-white/[0.06] cursor-pointer active:scale-95 transition-all duration-150 ease-out touch-none select-none"
-              aria-label="Bawah"
-            >
-              <ArrowDown size={18} />
+              {stickMode === 'dpad' ? <Disc3 size={14} className="text-indigo-400" /> : <Grid2X2 size={14} className="text-emerald-400" />}
             </button>
           </div>
         )}
@@ -203,7 +252,7 @@ export const MobileTouchControls: React.FC<MobileTouchControlsProps> = ({ visibl
 
         {/* Floating Right Overlay: Action Button */}
         {showAction && (
-          <div className="pointer-events-auto absolute bottom-4 right-4 opacity-80 hover:opacity-100 transition-opacity select-none touch-none">
+          <div className="pointer-events-auto absolute bottom-4 right-4 opacity-85 hover:opacity-100 transition-opacity select-none touch-none">
             <button
               onTouchStart={(e) => handleTouchStart('PRIMARY', e)}
               onTouchEnd={(e) => handleTouchEnd('PRIMARY', e)}

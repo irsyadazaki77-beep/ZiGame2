@@ -27,6 +27,9 @@ export class LifecycleCoordinator implements ILifecycleController {
 
   private setupWindowEvents(): void {
     if (typeof window === 'undefined') return;
+    if (this.cleanupWindowEvents) {
+      this.cleanupWindowEvents();
+    }
 
     const handleVisibilityChange = () => {
       if (document.hidden && this.currentState === 'playing') {
@@ -34,29 +37,34 @@ export class LifecycleCoordinator implements ILifecycleController {
       }
     };
 
-    const handleBlur = () => {
-      if (this.currentState === 'playing') {
-        this.pauseGame();
-      }
-    };
-
     document.addEventListener('visibilitychange', handleVisibilityChange);
-    window.addEventListener('blur', handleBlur);
 
     this.cleanupWindowEvents = () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
-      window.removeEventListener('blur', handleBlur);
     };
   }
 
   private cleanupWindowEvents?: () => void;
+
+  private ensureActive(): void {
+    if (this.isDestroyed) {
+      this.isDestroyed = false;
+      if (this.currentState === 'destroyed') {
+        this.currentState = 'ready';
+      }
+      this.setupWindowEvents();
+    }
+  }
 
   public getState(): GameRuntimeState {
     return this.currentState;
   }
 
   public setState(nextState: GameRuntimeState): void {
-    if (this.isDestroyed || this.currentState === nextState) return;
+    if (nextState !== 'destroyed') {
+      this.ensureActive();
+    }
+    if (this.currentState === nextState) return;
     const prevState = this.currentState;
     this.currentState = nextState;
 
@@ -67,8 +75,8 @@ export class LifecycleCoordinator implements ILifecycleController {
     });
   }
 
-  public startWithCountdown(onComplete?: () => void): void {
-    if (this.isDestroyed) return;
+  public startWithCountdown(onComplete?: () => void, onTick?: (count: number) => void): void {
+    this.ensureActive();
     this.clearCountdown();
 
     this.opts.score.reset();
@@ -77,11 +85,13 @@ export class LifecycleCoordinator implements ILifecycleController {
 
     this.setState('countdown');
     this.opts.audio.playCountdown(3);
+    if (onTick) onTick(3);
 
     let count = 3;
     this.countdownTimer = setInterval(() => {
       count--;
       if (count > 0) {
+        if (onTick) onTick(count);
         this.opts.audio.playCountdown(count);
       } else {
         this.clearCountdown();
@@ -91,11 +101,12 @@ export class LifecycleCoordinator implements ILifecycleController {
           onComplete();
         }
       }
-    }, 800);
+    }, 550);
   }
 
   public pauseGame(): void {
-    if (this.isDestroyed || this.currentState !== 'playing') return;
+    this.ensureActive();
+    if (this.currentState !== 'playing') return;
     this.opts.loop.pause();
     this.setState('paused');
     if (this.opts.onPause) {
@@ -104,7 +115,8 @@ export class LifecycleCoordinator implements ILifecycleController {
   }
 
   public resumeGame(): void {
-    if (this.isDestroyed || this.currentState !== 'paused') return;
+    this.ensureActive();
+    if (this.currentState !== 'paused') return;
     this.opts.loop.resume();
     this.setState('playing');
     if (this.opts.onResume) {
@@ -113,6 +125,7 @@ export class LifecycleCoordinator implements ILifecycleController {
   }
 
   public togglePause(): void {
+    this.ensureActive();
     if (this.currentState === 'playing') {
       this.pauseGame();
     } else if (this.currentState === 'paused') {
@@ -121,7 +134,8 @@ export class LifecycleCoordinator implements ILifecycleController {
   }
 
   public triggerGameOver(finalScore?: number): void {
-    if (this.isDestroyed || this.currentState === 'gameover') return;
+    this.ensureActive();
+    if (this.currentState === 'gameover') return;
     this.clearCountdown();
     this.opts.loop.stop();
 
@@ -134,7 +148,7 @@ export class LifecycleCoordinator implements ILifecycleController {
   }
 
   public triggerRestart(): void {
-    if (this.isDestroyed) return;
+    this.ensureActive();
     this.clearCountdown();
     this.opts.loop.stop();
     this.opts.score.reset();
@@ -152,6 +166,7 @@ export class LifecycleCoordinator implements ILifecycleController {
     this.opts.audio.stopAll();
     if (this.cleanupWindowEvents) {
       this.cleanupWindowEvents();
+      this.cleanupWindowEvents = undefined;
     }
     this.setState('destroyed');
     this.isDestroyed = true;
@@ -159,6 +174,7 @@ export class LifecycleCoordinator implements ILifecycleController {
   }
 
   public subscribe(listener: (state: GameRuntimeState, prevState: GameRuntimeState) => void): () => void {
+    this.ensureActive();
     this.listeners.add(listener);
     return () => {
       this.listeners.delete(listener);

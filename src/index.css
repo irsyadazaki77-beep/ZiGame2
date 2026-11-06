@@ -318,9 +318,79 @@ body.reduced-motion *, body.reduced-motion ::before, body.reduced-motion ::after
 .game-stage-container > div > div > [class*="aspect-"] {
   flex: 1 1 0% !important;
   min-height: 0 !important;
-  width: auto !important;
-  height: auto !important;
-  max-width: 100% !important;
-  max-height: 100% !important;
 }
 
+/* =========================================================================
+   CRT PHOSPHOR SCANLINE SHADER & RETRO ARCADE EFFECTS
+   ========================================================================= */
+.bg-scanlines, .crt-scanlines {
+  background: linear-gradient(
+    rgba(18, 16, 16, 0) 50%, 
+    rgba(0, 0, 0, 0.38) 50%
+  ), linear-gradient(
+    90deg,
+    rgba(255, 0, 0, 0.04),
+    rgba(0, 255, 0, 0.02),
+    rgba(0, 0, 255, 0.04)
+  );
+  background-size: 100% 3px, 3px 100%;
+  pointer-events: none;
+}
+
+.crt-vignette {
+  background: radial-gradient(
+    circle at center,
+    transparent 62%,
+    rgba(0, 0, 0, 0.6) 96%,
+    rgba(0, 0, 0, 0.85) 100%
+  );
+  box-shadow: inset 0 0 35px rgba(0, 0, 0, 0.8);
+  pointer-events: none;
+}
+
+.crt-bloom {
+  filter: contrast(1.06) brightness(1.05) saturate(1.1);
+}
+
+/* =========================================================================
+   DYNAMIC SCREEN SHAKE (KINETIC IMPACT TRAUMA)
+   ========================================================================= */
+@keyframes screen-shake-subtle {
+  0% { transform: translate(0, 0); }
+  20% { transform: translate(-2px, 1.5px); }
+  40% { transform: translate(2px, -1.5px); }
+  60% { transform: translate(-1.5px, 0.5px); }
+  80% { transform: translate(1px, -0.5px); }
+  100% { transform: translate(0, 0); }
+}
+
+@keyframes screen-shake-medium {
+  0% { transform: translate(0, 0); }
+  15% { transform: translate(-4px, 3px) rotate(-0.5deg); }
+  30% { transform: translate(4px, -3px) rotate(0.5deg); }
+  50% { transform: translate(-3px, 2px); }
+  75% { transform: translate(2px, -1px); }
+  100% { transform: translate(0, 0); }
+}
+
+@keyframes screen-shake-heavy {
+  0% { transform: translate(0, 0); }
+  15% { transform: translate(-6px, 4px) rotate(-1deg); }
+  30% { transform: translate(6px, -4px) rotate(1deg); }
+  50% { transform: translate(-4px, 3px) rotate(-0.5deg); }
+  70% { transform: translate(3px, -2px); }
+  85% { transform: translate(-1.5px, 1px); }
+  100% { transform: translate(0, 0); }
+}
+
+.shake-subtle {
+  animation: screen-shake-subtle 0.22s cubic-bezier(0.36, 0.07, 0.19, 0.97) both;
+}
+
+.shake-medium {
+  animation: screen-shake-medium 0.32s cubic-bezier(0.36, 0.07, 0.19, 0.97) both;
+}
+
+.shake-heavy {
+  animation: screen-shake-heavy 0.42s cubic-bezier(0.36, 0.07, 0.19, 0.97) both;
+}

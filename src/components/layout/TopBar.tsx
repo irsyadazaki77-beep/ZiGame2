@@ -5,6 +5,8 @@ import { useGameContext } from '../../contexts/GameContext';
 import { formatNumber } from '../../utils/format';
 import { audio } from '../../utils/audio';
 
+import { PWAInstallButton } from '../pwa/PWAInstallButton';
+
 interface TopBarProps {
   isSidebarCollapsed?: boolean;
   onToggleSidebar?: () => void;
@@ -69,6 +71,9 @@ export const TopBar: React.FC<TopBarProps> = ({
 
       {/* Top Right Quick Stats / Profile Header */}
       <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+        {/* PWA In-App Install Action */}
+        <PWAInstallButton variant="topbar" />
+
         {/* Toggle Theme Button */}
         <button
           onClick={() => { audio.playCoin(); toggleTheme(); }}

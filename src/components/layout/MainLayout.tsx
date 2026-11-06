@@ -6,6 +6,7 @@ import { TopBar } from './TopBar';
 import { MobileNavigation } from './MobileNavigation';
 import { SessionAutolock } from './SessionAutolock';
 import { SecurityToast } from './SecurityToast';
+import { OfflineIndicator } from '../pwa/OfflineIndicator';
 
 export function MainLayout({ children }: { children: React.ReactNode }) {
   const location = useLocation();
@@ -98,6 +99,9 @@ export function MainLayout({ children }: { children: React.ReactNode }) {
 
       {/* Mobile Bottom Navigation (max 5 items) */}
       {!isGamePage && <MobileNavigation />}
+
+      {/* Global PWA Offline Connectivity Indicator */}
+      <OfflineIndicator />
     </LayoutShell>
   );
 }

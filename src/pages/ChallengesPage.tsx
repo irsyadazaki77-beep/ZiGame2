@@ -5,10 +5,13 @@ import { challengeService } from '../services/challengeService';
 import { progressionService } from '../services/progressionService';
 import { audio } from '../utils/audio';
 import Quests from './Quests';
+import { useNavigate } from 'react-router-dom';
 import { 
   Target, Clock, Calendar, Sparkles, Check, Gift, ShieldAlert, Award, Star, Trophy, 
-  HelpCircle, ArrowUpRight, ArrowDownRight, RefreshCw, Sparkle 
+  HelpCircle, ArrowUpRight, ArrowDownRight, RefreshCw, Sparkle, Swords, Users, Play, Copy, Share2 
 } from "lucide-react";
+import { friendChallengeService, FriendChallenge } from '../services/friendChallengeService';
+import { CreateFriendChallengeModal } from '../components/gamepage/CreateFriendChallengeModal';
 
 interface ChallengesPageProps {
   profile: PlayerProfile;
@@ -23,8 +26,17 @@ export default function ChallengesPage({
   dailyMissions,
   onUpdateProfile
 }: ChallengesPageProps) {
-  const [tab, setTab] = useState<'daily' | 'weekly' | 'missions' | 'special' | 'quests'>('daily');
+  const navigate = useNavigate();
+  const [tab, setTab] = useState<'daily' | 'weekly' | 'missions' | 'special' | 'quests' | 'friends'>('daily');
   const [challenges, setChallenges] = useState<Challenge[]>([]);
+  const [friendSubTab, setFriendSubTab] = useState<'incoming' | 'outgoing'>('incoming');
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [selectedGameForChallenge, setSelectedGameForChallenge] = useState<GameStats>(() => games[0]);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+
+  const incomingChallenges = friendChallengeService.getIncomingChallenges();
+  const outgoingChallenges = friendChallengeService.getOutgoingChallenges();
+
 
   // Initialize and synchronize challenges on load
   useEffect(() => {
@@ -135,6 +147,14 @@ export default function ChallengesPage({
         >
           <Gift size={13} /> Pas Tantangan
         </button>
+        <button
+          onClick={() => { audio.playHit(); setTab('friends'); }}
+          className={`px-4 py-2.5 rounded-xl text-xs font-mono font-bold uppercase transition shrink-0 cursor-pointer flex items-center gap-1.5 ${
+            tab === 'friends' ? 'bg-indigo-500/15 text-indigo-500 dark:text-indigo-400 border border-indigo-500/35 font-black shadow-xs' : 'text-text-muted hover:text-text-primary border border-transparent'
+          }`}
+        >
+          <Swords size={13} className="text-indigo-400" /> Tantangan Teman
+        </button>
       </div>
 
       {/* Claim Indicator Notification if any claim is pending */}
@@ -156,6 +176,232 @@ export default function ChallengesPage({
             onUpdateProfile={onUpdateProfile} 
             totalPlays={games.reduce((acc, g) => acc + g.plays, 0)} 
           />
+        ) : tab === 'friends' ? (
+          <div className="space-y-4">
+            {/* Top Action Bar */}
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 p-5 rounded-3xl bg-surface-card border border-border-subtle shadow-xs">
+              <div>
+                <h2 className="font-bold text-sm sm:text-base text-text-primary flex items-center gap-2">
+                  <Swords size={18} className="text-indigo-500" />
+                  Duel Skor Asinkron Bersama Teman
+                </h2>
+                <p className="text-xs text-text-muted mt-1">
+                  Kirim tautan tantangan dengan target skor tertentu dan rebut hadiah koin!
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2 w-full sm:w-auto">
+                {/* Game select dropdown for quick challenge creation */}
+                <select
+                  value={selectedGameForChallenge.id}
+                  onChange={(e) => {
+                    const found = games.find(g => g.id === e.target.value);
+                    if (found) setSelectedGameForChallenge(found);
+                  }}
+                  className="px-3 py-2 bg-surface-subtle border border-border-subtle rounded-xl text-xs text-text-primary focus:outline-none"
+                >
+                  {games.slice(0, 15).map(g => (
+                    <option key={g.id} value={g.id}>{g.title}</option>
+                  ))}
+                </select>
+
+                <button
+                  onClick={() => {
+                    audio.playCoin();
+                    setIsCreateModalOpen(true);
+                  }}
+                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-white font-bold text-xs rounded-xl flex items-center gap-1.5 transition cursor-pointer shadow-md shadow-indigo-600/20 shrink-0"
+                >
+                  <Swords size={14} />
+                  <span>Buat Tantangan</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Sub-tab selection: Masuk vs Terkirim */}
+            <div className="flex items-center gap-2 border-b border-border-subtle pb-2">
+              <button
+                onClick={() => setFriendSubTab('incoming')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-mono font-medium transition cursor-pointer ${
+                  friendSubTab === 'incoming'
+                    ? 'bg-indigo-500/15 text-indigo-400 border border-indigo-500/30 font-bold'
+                    : 'text-text-muted hover:text-text-primary'
+                }`}
+              >
+                Tantangan Masuk ({incomingChallenges.length})
+              </button>
+              <button
+                onClick={() => setFriendSubTab('outgoing')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-mono font-medium transition cursor-pointer ${
+                  friendSubTab === 'outgoing'
+                    ? 'bg-indigo-500/15 text-indigo-400 border border-indigo-500/30 font-bold'
+                    : 'text-text-muted hover:text-text-primary'
+                }`}
+              >
+                Tantangan Terkirim ({outgoingChallenges.length})
+              </button>
+            </div>
+
+            {/* Cards Display */}
+            {friendSubTab === 'incoming' ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {incomingChallenges.length > 0 ? (
+                  incomingChallenges.map((ch) => {
+                    const isWin = ch.status === 'completed';
+                    const isFail = ch.status === 'failed';
+                    const shareUrl = friendChallengeService.generateShareUrl(ch);
+
+                    return (
+                      <div
+                        key={ch.id}
+                        className={`p-5 rounded-3xl border transition flex flex-col justify-between gap-4 ${
+                          isWin 
+                            ? 'bg-emerald-500/5 border-emerald-500/25'
+                            : isFail
+                            ? 'bg-rose-500/5 border-rose-500/25'
+                            : 'bg-surface-card border-border-subtle hover:border-border-medium'
+                        }`}
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <span className="text-[10px] font-mono text-text-muted uppercase">
+                              Dari: <span className="text-text-primary font-bold">{ch.challengerName}</span>
+                            </span>
+                            <h3 className="font-black text-sm text-text-primary mt-0.5">{ch.gameTitle}</h3>
+                            {ch.message && (
+                              <p className="text-xs text-text-muted italic mt-1 font-sans">
+                                "{ch.message}"
+                              </p>
+                            )}
+                          </div>
+
+                          <div className="text-right shrink-0">
+                            <span className="text-[10px] text-text-muted font-mono block">TARGET</span>
+                            <span className="text-base font-mono font-black text-amber-500">
+                              {ch.targetScore.toLocaleString()}
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center justify-between gap-2 pt-3 border-t border-border-subtle">
+                          <div className="text-xs font-mono">
+                            {isWin ? (
+                              <span className="text-emerald-500 font-bold flex items-center gap-1">
+                                <Check size={13} /> Berhasil Ditaklukkan
+                              </span>
+                            ) : isFail ? (
+                              <span className="text-rose-400 font-bold">
+                                Skor Terakhir: {ch.achievedScore?.toLocaleString() || 0}
+                              </span>
+                            ) : (
+                              <span className="text-indigo-400 font-medium">
+                                Bounty: +{ch.bountyCoins} Koin
+                              </span>
+                            )}
+                          </div>
+
+                          <button
+                            onClick={() => {
+                              audio.playCoin();
+                              navigate(`/game/${ch.gameId}?challenge=${friendChallengeService.encodeChallenge(ch)}`);
+                            }}
+                            className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold flex items-center gap-1 transition cursor-pointer active:scale-95"
+                          >
+                            <Play size={12} />
+                            <span>{isWin ? 'Main Lagi' : 'Mainkan'}</span>
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })
+                ) : (
+                  <div className="col-span-full text-center py-12 text-text-muted text-xs italic font-mono bg-surface-card rounded-3xl border border-border-subtle">
+                    Belum ada tantangan masuk dari teman. Minta temanmu mengirimkan tautan tantangan atau buat tantangan baru untuk mereka!
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {outgoingChallenges.length > 0 ? (
+                  outgoingChallenges.map((ch) => {
+                    const shareUrl = friendChallengeService.generateShareUrl(ch);
+                    const isCopied = copiedId === ch.id;
+
+                    return (
+                      <div
+                        key={ch.id}
+                        className="p-5 rounded-3xl border bg-surface-card border-border-subtle hover:border-border-medium transition flex flex-col justify-between gap-4"
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <span className="text-[10px] font-mono text-text-muted uppercase">Tantangan Kamu</span>
+                            <h3 className="font-black text-sm text-text-primary mt-0.5">{ch.gameTitle}</h3>
+                            <p className="text-xs text-text-muted italic mt-1 font-sans">"{ch.message}"</p>
+                          </div>
+
+                          <div className="text-right shrink-0">
+                            <span className="text-[10px] text-text-muted font-mono block">TARGET</span>
+                            <span className="text-base font-mono font-black text-amber-500">
+                              {ch.targetScore.toLocaleString()}
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center justify-between gap-2 pt-3 border-t border-border-subtle">
+                          <span className="text-xs font-mono text-emerald-400">
+                            Bounty: +{ch.bountyCoins} Koin
+                          </span>
+
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              onClick={async () => {
+                                try {
+                                  await navigator.clipboard.writeText(shareUrl);
+                                  setCopiedId(ch.id);
+                                  audio.playScore();
+                                  setTimeout(() => setCopiedId(null), 2000);
+                                } catch {}
+                              }}
+                              className="px-3 py-1.5 bg-surface-subtle hover:bg-surface-hover border border-border-subtle text-text-primary rounded-xl text-xs font-medium flex items-center gap-1 transition cursor-pointer"
+                            >
+                              <Copy size={12} />
+                              <span>{isCopied ? 'Tersalin!' : 'Salin Link'}</span>
+                            </button>
+
+                            <button
+                              onClick={() => {
+                                const text = encodeURIComponent(
+                                  `🕹️ *TANTANGAN ZIGAME*\nCoba kalahkan skor *${ch.targetScore.toLocaleString()}* di *${ch.gameTitle}*!\n\nLink main:\n${shareUrl}`
+                                );
+                                window.open(`https://api.whatsapp.com/send?text=${text}`, '_blank');
+                              }}
+                              className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition cursor-pointer"
+                            >
+                              WA
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })
+                ) : (
+                  <div className="col-span-full text-center py-12 text-text-muted text-xs italic font-mono bg-surface-card rounded-3xl border border-border-subtle">
+                    Kamu belum membuat tantangan keluar. Klik tombol "+ Buat Tantangan" untuk menantang temanmu sekarang!
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Create Challenge Modal */}
+            {isCreateModalOpen && (
+              <CreateFriendChallengeModal
+                isOpen={isCreateModalOpen}
+                onClose={() => setIsCreateModalOpen(false)}
+                activeGame={selectedGameForChallenge}
+                profile={profile}
+              />
+            )}
+          </div>
         ) : tab !== 'missions' ? (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {filteredChallenges.length > 0 ? (

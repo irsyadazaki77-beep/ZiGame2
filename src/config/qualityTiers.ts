@@ -422,6 +422,28 @@ export const GAME_QUALITY_MAP: Record<string, GameQualityInfo> = {
     ghostModeSupported: false,
     competitiveSupported: true,
     estimatedDuration: 'deep'
+  },
+  'wizard-chess': {
+    gameId: 'wizard-chess',
+    tier: 'flagship',
+    targetFps: 60,
+    mobileOptimized: true,
+    gamepadOptimized: false,
+    saveStateSupported: true,
+    ghostModeSupported: false,
+    competitiveSupported: true,
+    estimatedDuration: 'deep'
+  },
+  'desk-racer': {
+    gameId: 'desk-racer',
+    tier: 'flagship',
+    targetFps: 60,
+    mobileOptimized: true,
+    gamepadOptimized: true,
+    saveStateSupported: false,
+    ghostModeSupported: true,
+    competitiveSupported: true,
+    estimatedDuration: 'standard'
   }
 };
 

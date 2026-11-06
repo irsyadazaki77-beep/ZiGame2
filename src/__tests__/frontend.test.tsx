@@ -53,13 +53,13 @@ describe('Frontend Utilities & Configuration Tests', () => {
     });
   });
 
-  describe('Canonical Game Registry & 37 Games Integrity', () => {
-    it('should have exactly 37 canonical games declared', () => {
-      expect(CANONICAL_GAME_IDS.length).toBe(37);
-      expect(INITIAL_GAMES.length).toBe(37);
+  describe('Canonical Game Registry & 39 Games Integrity', () => {
+    it('should have exactly 39 canonical games declared', () => {
+      expect(CANONICAL_GAME_IDS.length).toBe(39);
+      expect(INITIAL_GAMES.length).toBe(39);
     });
 
-    it('should validate all 37 games for canonical ID, registry, component, layout, and balance', () => {
+    it('should validate all 39 games for canonical ID, registry, component, layout, and balance', () => {
       for (const id of CANONICAL_GAME_IDS) {
         expect(isValidGameId(id)).toBe(true);
         expect(toCanonicalGameId(id)).toBe(id);
