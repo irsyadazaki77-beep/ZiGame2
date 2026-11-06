@@ -20,7 +20,7 @@ export const CreateFriendChallengeModal: React.FC<CreateFriendChallengeModalProp
   profile,
   lastScore = 0
 }) => {
-  const [challengerName, setChallengerName] = useState(profile.username || 'Pro Gamer');
+  const [challengerName, setChallengerName] = useState(profile.username || profile.name || 'Pro Gamer');
   const [targetScore, setTargetScore] = useState<number>(() => {
     return Math.max(lastScore > 0 ? lastScore : activeGame.highScore || 500, 100);
   });
@@ -76,17 +76,15 @@ export const CreateFriendChallengeModal: React.FC<CreateFriendChallengeModalProp
     }
   };
 
-  const handleWhatsAppShare = () => {
-    if (!shareUrl || !createdChallenge) return;
-    const text = encodeURIComponent(
-      `🕹️ *TANTANGAN ZIGAME ARKADE*\n\n` +
-      `*${challengerName}* menantangmu di game *${createdChallenge.gameTitle}*!\n` +
-      `🎯 Target Skor: *${targetScore.toLocaleString()} poin*\n` +
-      `💬 Pesan: "${message}"\n\n` +
-      `Buka link ini untuk langsung bertanding & rebut hadiahnya:\n${shareUrl}`
-    );
-    window.open(`https://api.whatsapp.com/send?text=${text}`, '_blank');
-  };
+  const whatsappShareHref = shareUrl && createdChallenge
+    ? `https://api.whatsapp.com/send?text=${encodeURIComponent(
+        `🕹️ *TANTANGAN ZIGAME ARKADE*\n\n` +
+        `*${challengerName}* menantangmu di game *${createdChallenge.gameTitle}*!\n` +
+        `🎯 Target Skor: *${targetScore.toLocaleString()} poin*\n` +
+        `💬 Pesan: "${message}"\n\n` +
+        `Buka link ini untuk langsung bertanding & rebut hadiahnya:\n${shareUrl}`
+      )}`
+    : '#';
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-xs animate-in fade-in duration-200">
@@ -238,12 +236,14 @@ export const CreateFriendChallengeModal: React.FC<CreateFriendChallengeModalProp
             </div>
 
             <div className="grid grid-cols-2 gap-2">
-              <button
-                onClick={handleWhatsAppShare}
+              <a
+                href={whatsappShareHref}
+                target="_blank"
+                rel="noopener noreferrer"
                 className="py-2 px-3 bg-emerald-600 hover:bg-emerald-500 active:scale-95 transition rounded-xl text-xs font-bold text-white flex items-center justify-center gap-1.5 shadow-md shadow-emerald-900/20"
               >
                 <span>Bagikan ke WhatsApp</span>
-              </button>
+              </a>
 
               <button
                 onClick={handleNativeShare}

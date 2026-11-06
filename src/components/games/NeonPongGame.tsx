@@ -482,7 +482,7 @@ export default function NeonPongGame({ onGameOver, onScoreUpdate, highScore }: N
       haptics.trigger('success');
     } else {
       audio.playExplosion();
-      haptics.trigger('gameOver');
+      haptics.trigger('error');
     }
     triggerGameOver();
   };
@@ -749,7 +749,7 @@ export default function NeonPongGame({ onGameOver, onScoreUpdate, highScore }: N
         />
 
         {/* 2P Control Hints Overlay during countdown or start */}
-        {gameMode === '2p' && gameState === 'idle' && (
+        {gameMode === '2p' && (gameState === 'ready' || gameState === 'initialize') && (
           <div className="absolute inset-x-4 bottom-3 flex justify-between pointer-events-none text-[11px] font-mono text-zinc-400 z-10">
             <div className="bg-zinc-950/80 px-2.5 py-1 rounded-lg border border-cyan-500/30 text-cyan-400">
               Pemain 1: [W / S] atau Sentuh Kiri

@@ -133,24 +133,57 @@ export function useGameEngine({
     ctx.lifecycle.triggerGameOver(finalScore);
   }, [ctx]);
 
+  // Auto-pause when tab is inactive / hidden
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (typeof document !== 'undefined' && document.hidden) {
+        const state = (gameStateRef.current as string)?.toLowerCase();
+        if (state === 'playing') {
+          pauseGame();
+        }
+      }
+    };
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', handleVisibilityChange);
+      return () => {
+        document.removeEventListener('visibilitychange', handleVisibilityChange);
+      };
+    }
+  }, [pauseGame]);
+
   const triggerRestart = useCallback(() => {
+    if (animFrameRef.current !== null) {
+      cancelAnimationFrame(animFrameRef.current);
+      animFrameRef.current = null;
+    }
+    setScore(0);
+    scoreRef.current = 0;
     ctx.lifecycle.triggerRestart();
-  }, [ctx]);
+  }, [ctx, setScore]);
 
   const setGameState = useCallback((state: GameEngineState) => {
     ctx.lifecycle.setState(state as any);
   }, [ctx]);
 
   const startWithCountdown = useCallback((onCountdownEnd?: () => void) => {
+    if (animFrameRef.current !== null) {
+      cancelAnimationFrame(animFrameRef.current);
+      animFrameRef.current = null;
+    }
+    setScore(0);
+    scoreRef.current = 0;
     setCountdown(3);
     ctx.lifecycle.startWithCountdown(onCountdownEnd, (count) => {
       setCountdown(count);
     });
-  }, [ctx]);
+  }, [ctx, setScore]);
 
-  // Viewport / canvas helper with DPR capping
-  const setupCanvasContext = useCallback((canvas: HTMLCanvasElement | null, width: number, height: number) => {
-    return ctx.viewport.setupCanvas(canvas, width, height, maxDpr);
+  // Viewport / canvas helper with DPR capping & deterministic transformation
+  const setupCanvasContext = useCallback((canvas: HTMLCanvasElement | null, width?: number, height?: number) => {
+    if (!canvas) return null;
+    const w = width ?? (canvas.clientWidth || 800);
+    const h = height ?? (canvas.clientHeight || 600);
+    return ctx.viewport.setupCanvas(canvas, w, h, maxDpr);
   }, [ctx, maxDpr]);
 
   return {
@@ -168,6 +201,7 @@ export function useGameEngine({
     triggerGameOver,
     triggerRestart,
     startWithCountdown,
+    startsWithCountdown: startWithCountdown,
     startLoop,
     stopLoop,
     scoreRef,

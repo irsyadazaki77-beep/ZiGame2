@@ -7,5 +7,9 @@ test-results/
 .cache/
 .DS_Store
 *.log
+lint_output.txt
+audit_output.txt
+bun.lock
+bun.lockb
 .env*
 !.env.example

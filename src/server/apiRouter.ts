@@ -841,3 +841,20 @@ apiRouter.post('/telemetry', rateLimit(100, 60000, 'telemetry'), (req: Request, 
 
   return res.json({ success: true });
 });
+
+apiRouter.post('/analytics/events', rateLimit(100, 60000, 'analytics'), (req: Request, res: Response) => {
+  const { events } = req.body;
+  if (!Array.isArray(events) || events.length > 100) {
+    return sendApiError(res, 400, 'MALFORMED_PAYLOAD', 'Format batch event analitik tidak valid.');
+  }
+
+  serverLogger.info('ANALYTICS_BATCH', `Received ${events.length} analytics events`, {
+    count: events.length
+  }, req.user?.uid, req.ip, req.id);
+
+  return res.json({
+    success: true,
+    accepted: events.length
+  });
+});
+

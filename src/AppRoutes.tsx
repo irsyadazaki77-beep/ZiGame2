@@ -5,36 +5,36 @@ import { PlayerProfile, GameStats, Achievement, RecentlyPlayedEntry } from './ty
 import { useToast } from './utils/ToastContext';
 import { AdminRoute } from './components/AdminRoute';
 
-// Lazy Loaded Pages with automatic retry on dynamic import failure
+import Home from './pages/Home';
+import GamesPage from './pages/GamesPage';
+import GamePage from './pages/GamePage';
+
+// Lazy Loaded Pages with exponential backoff retry on dynamic import failure
 function lazyWithRetry<T extends React.ComponentType<any>>(
-  factory: () => Promise<{ default: T }>
+  factory: () => Promise<{ default: T }>,
+  retries = 3,
+  delayMs = 350
 ) {
   return React.lazy(async () => {
-    try {
-      return await factory();
-    } catch (error) {
+    let currentDelay = delayMs;
+    for (let attempt = 0; attempt <= retries; attempt++) {
       try {
-        // Retry factory import once
         return await factory();
-      } catch (retryErr) {
-        // Force reload if stale Vite module graph cache
-        const reloadKey = 'zigame_reload_' + window.location.pathname;
-        if (!sessionStorage.getItem(reloadKey)) {
-          sessionStorage.setItem(reloadKey, 'true');
-          window.location.reload();
+      } catch (err) {
+        if (attempt === retries) {
+          throw err;
         }
-        throw retryErr;
+        await new Promise((resolve) => setTimeout(resolve, currentDelay));
+        currentDelay *= 1.8;
       }
     }
+    return factory();
   });
 }
 
-const Home = lazyWithRetry(() => import('./pages/Home'));
-const GamesPage = lazyWithRetry(() => import('./pages/GamesPage'));
 const ChallengesPage = lazyWithRetry(() => import('./pages/ChallengesPage'));
 const LeaderboardPage = lazyWithRetry(() => import('./pages/LeaderboardPage'));
 const ProfilePage = lazyWithRetry(() => import('./pages/ProfilePage'));
-const GamePage = lazyWithRetry(() => import('./pages/GamePage'));
 const Shop = lazyWithRetry(() => import('./pages/Shop'));
 const AdminDashboard = lazyWithRetry(() => import('./pages/AdminDashboard'));
 

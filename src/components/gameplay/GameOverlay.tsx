@@ -5,6 +5,7 @@ export type GameState = 'initialize' | 'ready' | 'countdown' | 'playing' | 'paus
 
 export interface GameOverlayProps {
   gameState: GameState;
+  gameTitle?: string;
   countdown?: number;
   score?: number;
   highScore?: number;

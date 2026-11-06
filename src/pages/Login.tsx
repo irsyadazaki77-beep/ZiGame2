@@ -6,6 +6,7 @@ import { Lock, User, KeyRound, Palette, UserPlus, LogIn, Sparkles, AlertCircle, 
 import { authService } from '../services/authService';
 import { isFirebaseReady } from '../services/firebase';
 import { useAuth } from '../contexts/AuthContext';
+import { useConfirm } from '../utils/ConfirmContext';
 
 interface LoginProps {
   onLoginSuccess: (
@@ -60,6 +61,7 @@ export default function Login({
   ];
 
   const { user, isFirebaseUser, logout: authLogout } = useAuth();
+  const { confirm } = useConfirm();
 
   useEffect(() => {
     if (user) {
@@ -349,8 +351,15 @@ export default function Login({
                     <h4 className="font-display font-black text-sm text-white tracking-widest uppercase">Terakhir Dimainkan</h4>
                   </div>
                   <button 
-                    onClick={() => {
-                      if(window.confirm('Yakin ingin menghapus riwayat permainan?')) {
+                    onClick={async () => {
+                      const ok = await confirm({
+                        title: 'Hapus Riwayat Permainan',
+                        message: 'Yakin ingin menghapus riwayat permainan terakhir Anda?',
+                        confirmText: 'Hapus',
+                        cancelText: 'Batal',
+                        danger: true
+                      });
+                      if (ok) {
                         onClearRecentlyPlayed();
                       }
                     }}

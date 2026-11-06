@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { useGameEngine } from '../../hooks/useGameEngine';
+import { disposeThreeScene } from '../../utils/threeCleanup';
 import { audio } from '../../utils/audio';
 import { screenShake } from '../../utils/screenShake';
 import { Crown, Swords, RotateCcw, Eye, ChevronDown, ChevronUp, Sparkles, ShieldAlert, Play, Zap, Shield, Flame, Snowflake } from 'lucide-react';
@@ -609,7 +610,9 @@ export default function WizardChess3DGame({ onScoreUpdate, onGameOver, highScore
     score,
     updateScore,
     triggerGameOver,
-    setGameState
+    setGameState,
+    gameState,
+    gameStateRef
   } = useGameEngine({
     gameId: 'wizard-chess',
     onScoreUpdate,
@@ -1259,65 +1262,68 @@ export default function WizardChess3DGame({ onScoreUpdate, onGameOver, highScore
     function tick() {
       if (isDisposed) return;
       const dt = Math.min(clock.getDelta(), 0.1);
+      const isPlaying = (gameStateRef.current as string)?.toLowerCase() === 'playing';
 
-      pieceMeshesRef.current.forEach((grp) => {
-        const r = grp.userData.squareRow;
-        const c = grp.userData.squareCol;
-        const isSel =
-          selectedSquareRef.current &&
-          selectedSquareRef.current.row === r &&
-          selectedSquareRef.current.col === c;
-        if (!captureSequenceRef.current?.active || grp !== captureSequenceRef.current.attackerMesh) {
-          grp.position.y = THREE.MathUtils.damp(grp.position.y, isSel ? 0.42 : 0.18, 10, dt);
-        }
-      });
+      if (isPlaying) {
+        pieceMeshesRef.current.forEach((grp) => {
+          const r = grp.userData.squareRow;
+          const c = grp.userData.squareCol;
+          const isSel =
+            selectedSquareRef.current &&
+            selectedSquareRef.current.row === r &&
+            selectedSquareRef.current.col === c;
+          if (!captureSequenceRef.current?.active || grp !== captureSequenceRef.current.attackerMesh) {
+            grp.position.y = THREE.MathUtils.damp(grp.position.y, isSel ? 0.42 : 0.18, 10, dt);
+          }
+        });
 
-      const seq = captureSequenceRef.current;
-      if (seq && seq.active) {
-        seq.progress += dt * 1.45;
-        if (seq.progress < 0.65) {
-          const t = seq.progress / 0.65;
-          seq.attackerMesh.position.lerpVectors(seq.startPos, seq.targetPos, t * 0.82);
-          seq.attackerMesh.position.y = 0.18 + Math.sin(t * Math.PI) * 0.55;
-          seq.attackerMesh.rotation.x = Math.sin(t * Math.PI) * 0.45;
-        } else if (!seq.shattered) {
-          seq.shattered = true;
-          seq.victimMesh.visible = false;
-          spawnStoneShatter(seq.targetPos, turnRef.current === 'w' ? 'b' : 'w');
-          audio.playExplosion();
-          screenShake.trigger('heavy');
-        } else if (seq.progress < 1.15) {
-          seq.attackerMesh.position.lerp(seq.targetPos, 0.25);
-          seq.attackerMesh.rotation.x = THREE.MathUtils.damp(seq.attackerMesh.rotation.x, 0, 12, dt);
-        } else {
-          seq.active = false;
-          captureSequenceRef.current = null;
-          seq.onComplete();
+        const seq = captureSequenceRef.current;
+        if (seq && seq.active) {
+          seq.progress += dt * 1.45;
+          if (seq.progress < 0.65) {
+            const t = seq.progress / 0.65;
+            seq.attackerMesh.position.lerpVectors(seq.startPos, seq.targetPos, t * 0.82);
+            seq.attackerMesh.position.y = 0.18 + Math.sin(t * Math.PI) * 0.55;
+            seq.attackerMesh.rotation.x = Math.sin(t * Math.PI) * 0.45;
+          } else if (!seq.shattered) {
+            seq.shattered = true;
+            seq.victimMesh.visible = false;
+            spawnStoneShatter(seq.targetPos, turnRef.current === 'w' ? 'b' : 'w');
+            audio.playExplosion();
+            screenShake.trigger('heavy');
+          } else if (seq.progress < 1.15) {
+            seq.attackerMesh.position.lerp(seq.targetPos, 0.25);
+            seq.attackerMesh.rotation.x = THREE.MathUtils.damp(seq.attackerMesh.rotation.x, 0, 12, dt);
+          } else {
+            seq.active = false;
+            captureSequenceRef.current = null;
+            seq.onComplete();
+          }
         }
-      }
 
-      for (let i = fragmentsRef.current.length - 1; i >= 0; i--) {
-        const f = fragmentsRef.current[i];
-        f.life += dt;
-        if (f.life >= f.maxLife) {
-          debrisRoot.remove(f.mesh);
-          f.mesh.geometry.dispose();
-          fragmentsRef.current.splice(i, 1);
-          continue;
+        for (let i = fragmentsRef.current.length - 1; i >= 0; i--) {
+          const f = fragmentsRef.current[i];
+          f.life += dt;
+          if (f.life >= f.maxLife) {
+            debrisRoot.remove(f.mesh);
+            f.mesh.geometry.dispose();
+            fragmentsRef.current.splice(i, 1);
+            continue;
+          }
+          f.vel.y -= 9.8 * dt;
+          f.mesh.position.addScaledVector(f.vel, dt);
+          if (f.mesh.position.y < 0.22) {
+            f.mesh.position.y = 0.22;
+            f.vel.y *= -0.42;
+            f.vel.x *= 0.72;
+            f.vel.z *= 0.72;
+          }
+          f.mesh.rotation.x += f.angVel.x * dt;
+          f.mesh.rotation.y += f.angVel.y * dt;
+          f.mesh.rotation.z += f.angVel.z * dt;
+          const scale = Math.max(0.01, 1 - f.life / f.maxLife);
+          f.mesh.scale.setScalar(scale);
         }
-        f.vel.y -= 9.8 * dt;
-        f.mesh.position.addScaledVector(f.vel, dt);
-        if (f.mesh.position.y < 0.22) {
-          f.mesh.position.y = 0.22;
-          f.vel.y *= -0.42;
-          f.vel.x *= 0.72;
-          f.vel.z *= 0.72;
-        }
-        f.mesh.rotation.x += f.angVel.x * dt;
-        f.mesh.rotation.y += f.angVel.y * dt;
-        f.mesh.rotation.z += f.angVel.z * dt;
-        const scale = Math.max(0.01, 1 - f.life / f.maxLife);
-        f.mesh.scale.setScalar(scale);
       }
 
       if (activeCameraTransitionRef.current) {
@@ -1369,7 +1375,7 @@ export default function WizardChess3DGame({ onScoreUpdate, onGameOver, highScore
       controls.dispose();
       envTarget.dispose();
       runeFrameTex.dispose();
-      renderer.dispose();
+      disposeThreeScene(scene, renderer);
     };
   }, [triggerGameOver, updateScore]);
 

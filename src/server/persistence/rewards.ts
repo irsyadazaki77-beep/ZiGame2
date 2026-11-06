@@ -272,50 +272,59 @@ export async function executeClaimReward(
       verified = true;
     }
   } else if (claimType === 'daily_mission') {
+    const streakMatch = canonicalClaimId.match(/^streak_(\d{4}-\d{2}-\d{2})_([1-7])$/);
     const match = canonicalClaimId.match(/^m_(\d{4}-\d{2}-\d{2})_([123])$/);
-    if (!match) {
-      throw ApiError.badRequest('Format ID misi harian tidak valid.', 'INVALID_REWARD_CLAIM');
-    }
-    const dateStr = match[1];
     const todayUtc = getUtcDateString();
-    if (dateStr !== todayUtc) {
-      throw ApiError.badRequest('Klaim misi harian hanya berlaku untuk tanggal aktif hari ini (UTC). Klaim masa lalu atau masa depan ditolak.', 'INVALID_REWARD_CLAIM');
-    }
 
-    const missions = getAuthoritativeDailyMissions(todayUtc);
-    const mission = missions.find(m => m.id === canonicalClaimId);
-    if (!mission) {
-      throw ApiError.badRequest('Definisi misi harian tidak ditemukan.', 'INVALID_REWARD_CLAIM');
-    }
+    if (streakMatch) {
+      const dateStr = streakMatch[1];
+      if (dateStr !== todayUtc) {
+        throw ApiError.badRequest('Klaim streak harian hanya berlaku untuk tanggal aktif hari ini (UTC).', 'INVALID_REWARD_CLAIM');
+      }
+      verified = true;
+    } else if (match) {
+      const dateStr = match[1];
+      if (dateStr !== todayUtc) {
+        throw ApiError.badRequest('Klaim misi harian hanya berlaku untuk tanggal aktif hari ini (UTC). Klaim masa lalu atau masa depan ditolak.', 'INVALID_REWARD_CLAIM');
+      }
 
-    const dailySessions = await getDailySessionHistory(userId, todayUtc);
-    const countPlayedToday = await getCountOfGamesPlayedToday(userId);
+      const missions = getAuthoritativeDailyMissions(todayUtc);
+      const mission = missions.find(m => m.id === canonicalClaimId);
+      if (!mission) {
+        throw ApiError.badRequest('Definisi misi harian tidak ditemukan.', 'INVALID_REWARD_CLAIM');
+      }
 
-    if (mission.type === 'score_target') {
-      const highScore = mission.gameId ? await getUserHighScore(userId, mission.gameId) : 0;
-      const sessionHigh = dailySessions.some(s => s.gameId === mission.gameId && s.score >= mission.target);
-      if (sessionHigh || highScore >= mission.target) {
-        verified = true;
+      const dailySessions = await getDailySessionHistory(userId, todayUtc);
+      const countPlayedToday = await getCountOfGamesPlayedToday(userId);
+
+      if (mission.type === 'score_target') {
+        const highScore = mission.gameId ? await getUserHighScore(userId, mission.gameId) : 0;
+        const sessionHigh = dailySessions.some(s => s.gameId === mission.gameId && s.score >= mission.target);
+        if (sessionHigh || highScore >= mission.target) {
+          verified = true;
+        }
+      } else if (mission.type === 'beat_pb') {
+        const hasPb = dailySessions.some(s => s.isPersonalBest);
+        if (hasPb) {
+          verified = true;
+        }
+      } else if (mission.type === 'total_score') {
+        const sum = dailySessions.reduce((acc, s) => acc + s.score, 0);
+        if (sum >= mission.target) {
+          verified = true;
+        }
+      } else if (mission.type === 'play_genre_count') {
+        const distinctGenres = new Set(dailySessions.map(s => s.genre)).size;
+        if (distinctGenres >= mission.target) {
+          verified = true;
+        }
+      } else if (mission.type === 'play_count') {
+        if (dailySessions.length >= mission.target || countPlayedToday >= mission.target) {
+          verified = true;
+        }
       }
-    } else if (mission.type === 'beat_pb') {
-      const hasPb = dailySessions.some(s => s.isPersonalBest);
-      if (hasPb) {
-        verified = true;
-      }
-    } else if (mission.type === 'total_score') {
-      const sum = dailySessions.reduce((acc, s) => acc + s.score, 0);
-      if (sum >= mission.target) {
-        verified = true;
-      }
-    } else if (mission.type === 'play_genre_count') {
-      const distinctGenres = new Set(dailySessions.map(s => s.genre)).size;
-      if (distinctGenres >= mission.target) {
-        verified = true;
-      }
-    } else if (mission.type === 'play_count') {
-      if (dailySessions.length >= mission.target || countPlayedToday >= mission.target) {
-        verified = true;
-      }
+    } else {
+      throw ApiError.badRequest('Format ID misi harian tidak valid.', 'INVALID_REWARD_CLAIM');
     }
   } else if (claimType === 'challenge') {
     const dailyMatch = canonicalClaimId.match(/^daily_(\d{4}-\d{2}-\d{2})_([123])$/);
@@ -391,6 +400,12 @@ export async function executeClaimReward(
       const comp = await getCompetitiveProfile(userId);
       const hasScore = await hasAnyHighScore(userId);
       if (history.length >= 3 || comp.rankedGames >= 1 || hasScore) {
+        verified = true;
+      }
+    } else if (/^ch_[a-zA-Z0-9_-]{4,64}$/.test(canonicalClaimId)) {
+      const history = await getUserGameHistory(userId);
+      const hasScore = await hasAnyHighScore(userId);
+      if (history.length >= 1 || hasScore) {
         verified = true;
       }
     } else {

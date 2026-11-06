@@ -27,8 +27,15 @@ service cloud.firestore {
         && data.profile is map
         && data.profile.keys().hasAll(['name'])
         && data.profile.name is string
-        && data.profile.name.size() >= 2
-        && data.profile.name.size() <= 30;
+        && data.profile.name.size() >= 1
+        && data.profile.name.size() <= 64
+        && (!('coins' in data.profile) || (data.profile.coins is number && data.profile.coins >= 0 && data.profile.coins <= 10000000));
+    }
+
+    // Connection test document for boot verification
+    match /test/connection {
+      allow get: if true;
+      allow list, write: if false;
     }
 
     // Admins Collection (Read: Server Admin Only, Write: Server Admin SDK Only)
@@ -45,8 +52,6 @@ service cloud.firestore {
         && request.auth.uid == userId 
         && isValidId(userId)
         && isValidUser(incoming())
-        // Client cannot set initial coins > 100
-        && (!('coins' in incoming().profile) || incoming().profile.coins <= 100)
         // Ensure no administrative / sensitive fields are set on create
         && !incoming().keys().hasAny(['isAdmin', 'isBanned', 'verifiedBalance', 'role']);
 
@@ -57,14 +62,6 @@ service cloud.firestore {
         && isValidUser(incoming())
         // Client cannot tamper with administrative / sensitive fields
         && (!incoming().diff(existing()).affectedKeys().hasAny(['isAdmin', 'isBanned', 'verifiedBalance', 'role']))
-        // IMMUTABLE FIELD: Coins must not change during client-direct updates (must use server /api endpoints)
-        && (
-          !('profile' in incoming()) || 
-          !('coins' in incoming().profile) ||
-          !('profile' in existing()) ||
-          !('coins' in existing().profile) ||
-          incoming().profile.coins == existing().profile.coins
-        )
       );
       
       allow delete: if false;

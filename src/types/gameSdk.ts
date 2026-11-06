@@ -150,3 +150,18 @@ export interface GameModule<TState = any> {
   getState?(): TState;
   loadState?(state: TState): void;
 }
+
+export interface GameSessionTicket {
+  sessionId: string;
+  userId: string;
+  gameId: string;
+  mode: string;
+  nonce: string;
+  startTime: number;
+  expiresAt: number;
+  consumed: boolean;
+  gameVersion: string;
+  balanceVersion: string;
+  rulesetVersion: string;
+}
+

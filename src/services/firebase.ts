@@ -1,8 +1,59 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut as fbSignOut, onAuthStateChanged, User } from 'firebase/auth';
-import { getFirestore, doc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
+import { getFirestore, doc, getDoc, getDocFromServer, setDoc, updateDoc } from 'firebase/firestore';
 import { logger } from '../utils/logger';
 import firebaseConfigJson from '../../firebase-applet-config.json';
+
+export enum OperationType {
+  CREATE = 'create',
+  UPDATE = 'update',
+  DELETE = 'delete',
+  LIST = 'list',
+  GET = 'get',
+  WRITE = 'write',
+}
+
+export interface FirestoreErrorInfo {
+  error: string;
+  operationType: OperationType;
+  path: string | null;
+  authInfo: {
+    userId: string | undefined;
+    email: string | null | undefined;
+    emailVerified: boolean | undefined;
+    isAnonymous: boolean | undefined;
+    tenantId: string | null | undefined;
+    providerInfo: {
+      providerId: string;
+      displayName: string | null;
+      email: string | null;
+      photoUrl: string | null;
+    }[];
+  };
+}
+
+export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null): FirestoreErrorInfo {
+  const errInfo: FirestoreErrorInfo = {
+    error: error instanceof Error ? error.message : String(error),
+    authInfo: {
+      userId: auth?.currentUser?.uid,
+      email: auth?.currentUser?.email,
+      emailVerified: auth?.currentUser?.emailVerified,
+      isAnonymous: auth?.currentUser?.isAnonymous,
+      tenantId: auth?.currentUser?.tenantId,
+      providerInfo: auth?.currentUser?.providerData?.map((p: any) => ({
+        providerId: p.providerId,
+        displayName: p.displayName,
+        email: p.email,
+        photoUrl: p.photoURL
+      })) || []
+    },
+    operationType,
+    path
+  };
+  logger.error('Firestore Error', { context: { details: JSON.stringify(errInfo) } });
+  return errInfo;
+}
 
 // Configuration priority: firebase-applet-config.json with env var overrides
 const firebaseConfig = {
@@ -32,6 +83,14 @@ try {
     provider = new GoogleAuthProvider();
     provider.setCustomParameters({ prompt: 'select_account' });
     isInitialized = true;
+
+    if (typeof window !== 'undefined' && !import.meta.env.VITEST && import.meta.env.MODE !== 'test') {
+      getDocFromServer(doc(db, 'test', 'connection')).catch((err) => {
+        if (err instanceof Error && err.message.includes('the client is offline')) {
+          logger.warn('Please check your Firebase configuration. The client is offline.');
+        }
+      });
+    }
   }
 } catch (e) {
   logger.warn("Firebase not fully configured or failed to initialize", { error: e as Error });
@@ -39,5 +98,6 @@ try {
 
 export const isFirebaseReady = () => isInitialized;
 
-export { app, auth, db, provider, signInWithPopup, fbSignOut, onAuthStateChanged, doc, getDoc, setDoc, updateDoc };
+export { app, auth, db, provider, signInWithPopup, fbSignOut, onAuthStateChanged, doc, getDoc, getDocFromServer, setDoc, updateDoc };
 export type { User };
+

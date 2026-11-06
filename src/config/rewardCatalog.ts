@@ -129,6 +129,20 @@ export function resolveAuthoritativeReward(
           return { rewardCoins: 80, rewardXp: 100, title: 'Daily Mission: Consistency', canonicalId: canonical };
         }
       }
+
+      // Daily Login Streak: streak_YYYY-MM-DD_[1-7]
+      const streakMatch = canonical.match(/^streak_(\d{4}-\d{2}-\d{2})_([1-7])$/);
+      if (streakMatch) {
+        const dayIdx = parseInt(streakMatch[2], 10);
+        const streakCoins = [50, 75, 100, 150, 200, 250, 500][dayIdx - 1] || 50;
+        const streakXp = [100, 150, 200, 250, 300, 400, 1000][dayIdx - 1] || 100;
+        return {
+          rewardCoins: streakCoins,
+          rewardXp: streakXp,
+          title: `Daily Login Streak: Day ${dayIdx}`,
+          canonicalId: canonical
+        };
+      }
       return null;
     }
 
@@ -163,6 +177,16 @@ export function resolveAuthoritativeReward(
       if (sanitizedId in AUTHORITATIVE_SEASONAL_CHALLENGES) {
         const seasonal = AUTHORITATIVE_SEASONAL_CHALLENGES[sanitizedId];
         return { ...seasonal, canonicalId: sanitizedId };
+      }
+
+      // 4. Asynchronous Friend Challenge bounty check: ch_<timestamp>_<rand>
+      if (/^ch_[a-zA-Z0-9_-]{4,64}$/.test(sanitizedId)) {
+        return {
+          rewardCoins: 150,
+          rewardXp: 300,
+          title: 'Friend Challenge Bounty',
+          canonicalId: sanitizedId
+        };
       }
 
       // Rejects any arbitrary/unregistered challenge ID

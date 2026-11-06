@@ -5,8 +5,8 @@
 ---
 
 ## 1. Feature Freeze & Scope Integrity
-- [x] **Strict 37-Game Catalog**: No experimental, phantom, or duplicate games introduced.
-- [x] **Canonical Game Registry**: All 37 games registered in `src/config/gamesRegistry.ts` with bidirectional alias resolution.
+- [x] **Strict 39-Game Catalog**: No experimental, phantom, or duplicate games introduced (includes 37 2D/puzzle games + 2 flagship 3D games: wizard-chess and desk-racer).
+- [x] **Canonical Game Registry**: All 39 games registered in `src/config/gameRegistry.ts` and `src/config/canonicalGames.ts` with bidirectional alias resolution.
 - [x] **No Ghost References**: UI components render strictly canonical game IDs.
 
 ---

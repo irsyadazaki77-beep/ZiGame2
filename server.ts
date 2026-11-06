@@ -1,11 +1,27 @@
 import express, { Request, Response, NextFunction } from "express";
+import send from "send";
 import path from "path";
+
+// Defend against hoisted mime v2+ breaking express mime.charsets.lookup
+if ((send as any).mime && !(send as any).mime.charsets) {
+  (send as any).mime.charsets = {
+    lookup: (type: string) => {
+      if (!type) return undefined;
+      const cleanType = type.split(';')[0].trim().toLowerCase();
+      if (/^text\/|^application\/(javascript|json)/.test(cleanType)) {
+        return 'UTF-8';
+      }
+      return undefined;
+    }
+  };
+}
 import { createServer as createViteServer } from "vite";
 import { initializeApp, cert, getApps } from "firebase-admin/app";
 import { apiRouter } from "./src/server/apiRouter";
 import { serverLogger } from "./src/server/logger";
 import { requestCorrelationMiddleware, handleServerException } from "./src/server/requestContext";
 import { APP_VERSION } from "./src/config/version";
+import firebaseAppletConfig from "./firebase-applet-config.json";
 
 // Validate production environment on boot
 export function validateEnvironment() {
@@ -27,15 +43,25 @@ try {
     if (process.env.FIREBASE_SERVICE_ACCOUNT) {
       const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
       initializeApp({
-        credential: cert(serviceAccount)
+        credential: cert(serviceAccount),
+        projectId: serviceAccount.project_id || firebaseAppletConfig.projectId
       });
       serverLogger.info('FIREBASE_INIT', 'Firebase Admin initialized with service account.');
     } else if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
-      initializeApp();
+      initializeApp({
+        projectId: firebaseAppletConfig.projectId
+      });
       serverLogger.info('FIREBASE_INIT', 'Firebase Admin initialized with explicit application default credentials.');
     } else if (process.env.NODE_ENV === 'production') {
-      initializeApp();
+      initializeApp({
+        projectId: firebaseAppletConfig.projectId
+      });
       serverLogger.info('FIREBASE_INIT', 'Firebase Admin initialized with implicit application default credentials (Cloud Run).');
+    } else if (!process.env.VITEST && process.env.NODE_ENV !== 'test' && firebaseAppletConfig.projectId) {
+      initializeApp({
+        projectId: firebaseAppletConfig.projectId
+      });
+      serverLogger.info('FIREBASE_DEV', `Firebase Admin initialized with projectId (${firebaseAppletConfig.projectId}) for ID token verification. Persistence utilizing memory adapter.`);
     } else {
       serverLogger.warn('FIREBASE_DEV', 'Running in non-production mode without Firebase credentials. Utilizing memory adapter.');
     }

@@ -17,6 +17,7 @@
     "test:e2e": "playwright test",
     "seed:catalog": "tsx scripts/seed-catalog.ts",
     "economy-simulator": "tsx scripts/economy-simulator.ts",
+    "audit:games": "node scripts/audit-games.cjs",
     "clean": "node -e \"const fs = require('fs'); fs.rmSync('dist', { recursive: true, force: true }); try { fs.rmSync('server.js', { force: true }); } catch (e) {}\""
   },
   "dependencies": {

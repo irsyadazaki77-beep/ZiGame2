@@ -20,8 +20,7 @@ export class ViewportController implements IViewportController {
     canvas.width = Math.floor(logicalWidth * dpr);
     canvas.height = Math.floor(logicalHeight * dpr);
 
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.scale(dpr, dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
     return ctx;
   }

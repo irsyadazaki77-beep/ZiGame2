@@ -123,15 +123,25 @@ export default function Home({
           games={games}
           profile={profile}
           onComplete={(favoriteGenres, selectedGameId) => {
+            try {
+              localStorage.setItem('zigame_onboarding_completed', 'true');
+            } catch {}
             setShowOnboarding(false);
             if (favoriteGenres.length > 0) {
               onUpdateProfile({ favoriteGenre: favoriteGenres[0], hasCompletedOnboarding: true });
+            } else {
+              onUpdateProfile({ hasCompletedOnboarding: true });
             }
             if (selectedGameId) {
               onSelectGame(selectedGameId);
             }
           }}
-          onSkip={() => setShowOnboarding(false)}
+          onSkip={() => {
+            try {
+              localStorage.setItem('zigame_onboarding_completed', 'true');
+            } catch {}
+            setShowOnboarding(false);
+          }}
         />
       )}
 

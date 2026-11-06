@@ -6,24 +6,18 @@ import { PlayerProfile } from '../../types/player';
 import { CompetitiveProfile } from '../../types/competitive';
 import { EconomyState } from '../../types/economy';
 import { GameSessionTicket } from '../../types/gameSdk';
-import { LeaderboardEntry } from '../../types/game';
+import { LeaderboardEntry } from '../../types/competitive';
 
 export function createTestUser(overrides: Partial<PlayerProfile> = {}): PlayerProfile {
   const uid = overrides.uid || `user-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
   return {
     uid,
-    displayName: `Player_${uid.slice(-4)}`,
-    email: `${uid}@example.com`,
-    photoURL: 'https://example.com/avatar.png',
-    level: 1,
-    xp: 0,
+    name: overrides.name || `Player_${uid.slice(-4)}`,
+    avatar: overrides.avatar || '🎮',
+    colorTheme: overrides.colorTheme || 'indigo',
     coins: 100,
     unlockedAvatars: ['🎮', '🕹️', '👾'],
     unlockedThemes: ['indigo', 'emerald'],
-    equippedAvatar: '🎮',
-    equippedTheme: 'indigo',
-    createdAt: Date.now(),
-    lastLoginAt: Date.now(),
     ...overrides,
   };
 }
@@ -31,8 +25,7 @@ export function createTestUser(overrides: Partial<PlayerProfile> = {}): PlayerPr
 export function createAdminUser(overrides: Partial<PlayerProfile> = {}): PlayerProfile {
   return createTestUser({
     uid: `admin-${Date.now()}`,
-    displayName: 'System Admin',
-    email: 'admin@zigame.com',
+    name: 'System Admin',
     ...overrides,
   });
 }
@@ -74,7 +67,7 @@ export function createLeaderboardEntry(overrides: Partial<LeaderboardEntry> = {}
     playerName: overrides.playerName || 'TestPlayer',
     playerAvatar: overrides.playerAvatar || '🎮',
     score: overrides.score || 100,
-    timestamp: Date.now(),
+    submittedAt: new Date().toISOString(),
     ...overrides,
   };
 }

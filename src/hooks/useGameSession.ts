@@ -122,24 +122,42 @@ export function useGameSession(
     let competitiveTier = undefined;
     const sessionDuration = sessionStartTimeRef.current ? Math.max(0, Date.now() - sessionStartTimeRef.current) : undefined;
 
-    if (isRankedMode && currentSessionIdRef.current) {
+    const consumedSessionId = currentSessionIdRef.current;
+    currentSessionIdRef.current = undefined;
+    sessionStartTimeRef.current = Date.now();
+
+    if (isRankedMode && consumedSessionId) {
       const res = await competitiveService.submitRankedScore({
         gameId: activeGame.id,
         score,
-        sessionId: currentSessionIdRef.current,
+        sessionId: consumedSessionId,
         playerName: profile.name,
         playerAvatar: profile.avatar,
         durationMs: sessionDuration,
         masteryLevel: profile.mastery?.[activeGame.id]?.level || 1,
-        idempotencyKey: 'rank_' + currentSessionIdRef.current
+        idempotencyKey: 'rank_' + consumedSessionId
       });
 
       if (res) {
         competitiveRatingChange = res.ratingChange;
         competitiveTier = res.newTier;
       }
+
+      competitiveService.startRankedSession(activeGame.id).then((nextSession) => {
+        if (nextSession?.sessionId) {
+          currentSessionIdRef.current = nextSession.sessionId;
+          sessionStartTimeRef.current = nextSession.startTime || Date.now();
+        }
+      }).catch(() => {});
     } else {
-      onGameOver(activeGame.id, score, currentSessionIdRef.current, sessionDuration);
+      onGameOver(activeGame.id, score, consumedSessionId, sessionDuration);
+
+      scoreService.startSession(activeGame.id).then((nextSession) => {
+        if (nextSession?.sessionId) {
+          currentSessionIdRef.current = nextSession.sessionId;
+          sessionStartTimeRef.current = nextSession.startTime || Date.now();
+        }
+      }).catch(() => {});
     }
 
     const isPb = score > (activeGame.highScore || 0);

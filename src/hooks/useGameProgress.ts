@@ -9,6 +9,9 @@ import { scoreService } from '../services/scoreService';
 import { audio } from '../utils/audio';
 import { auth, isFirebaseReady } from '../services/firebase';
 import { logger } from '../utils/logger';
+import { getGameBalanceConfig, ECONOMY_BALANCE_CONFIG } from '../config/balanceConfig';
+import { toCanonicalGameId } from '../config/canonicalGames';
+import { economyService } from '../services/economyService';
 
 export const useGameProgress = (
   profile: PlayerProfile,
@@ -115,7 +118,6 @@ export const useGameProgress = (
     });
     setGames(updatedGames);
     storageService.saveGamesStats(updatedGames);
-    // checkMissions('play', gameId, 1);
     
     // Add to recently played (without score initially)
     updateRecentlyPlayed(gameId);
@@ -132,8 +134,11 @@ export const useGameProgress = (
     // Validate score with server only if the user is authenticated with Firebase
     const activeUser = localStorage.getItem('zigame_active_user');
     const isOfflineProfile = activeUser && activeUser !== auth?.currentUser?.uid && activeUser !== auth?.currentUser?.email;
+    const isOfflineOrGuest = !isFirebaseReady() || !auth?.currentUser || isOfflineProfile;
 
-    if (!isFirebaseReady() || !auth?.currentUser || isOfflineProfile) {
+    let serverNewCoinBalance: number | undefined;
+
+    if (isOfflineOrGuest) {
       logger.info('Offline/Local profile detected. Score saved locally, not submitted to public cloud leaderboard.');
     } else {
       const result = await scoreService.submitScore({
@@ -141,13 +146,19 @@ export const useGameProgress = (
         score: finalScore,
         playerName: profile.name,
         playerAvatar: profile.avatar,
-        sessionId
+        sessionId,
+        durationMs: sessionDuration
       });
 
       if (!result.success) {
-        logger.warn('Score rejected by server:', { context: { message: result.message } });
-        showToast('Skor Ditolak', result.message || 'Gagal memvalidasi sesi', 'error');
-        return; // Don't save if server rejects
+        const isShortDuration = result.message?.toLowerCase().includes('durasi') || result.message?.toLowerCase().includes('singkat');
+        if (!isShortDuration) {
+          logger.warn('Score rejected by server:', { context: { message: result.message } });
+          showToast('Skor Ditolak', result.message || 'Gagal memvalidasi sesi', 'error');
+          return;
+        }
+      } else if (typeof result.newCoinBalance === 'number') {
+        serverNewCoinBalance = result.newCoinBalance;
       }
     }
 
@@ -179,37 +190,49 @@ export const useGameProgress = (
     } else {
       newStreak = 1;
     }
-    const xpResult = processGameSession(gameId, finalScore, sessionDuration || 0);
-
-
+    processGameSession(gameId, finalScore, sessionDuration || 0);
 
     setGames(updatedGames);
     storageService.saveGamesStats(updatedGames);
 
     updateRecentlyPlayed(gameId, finalScore, sessionDuration);
-    
-    // We expect the server to give us coinsEarned and newBalance in result if we updated scoreService to return it.
-    // Wait, let's just use the server result if available, or sync it.
-    // Sync balance after playing a game
-    import('../services/economyService').then(({ economyService }) => {
-      economyService.syncBalance(profile.name).then(serverCoins => {
-         if (serverCoins !== null) {
-            onUpdateProfile(prev => ({
-              ...prev,
-              streak: newStreak,
-              lastPlayDate: todayStr,
-              coins: serverCoins
-            }));
-         }
-      });
-    });
 
-    // Optimistic update if economy sync is slow
+    // Compute local coin reward for guest/offline players
+    let localCoinsEarned = 0;
+    if (isOfflineOrGuest && finalScore > 0) {
+      const canonicalId = toCanonicalGameId(gameId);
+      if (canonicalId) {
+        const balance = getGameBalanceConfig(canonicalId);
+        const effectiveDuration = sessionDuration !== undefined ? sessionDuration : balance.minDurationMs;
+        if (effectiveDuration >= balance.minDurationMs) {
+          const cappedScore = Math.min(finalScore, balance.maxScoreCeiling);
+          localCoinsEarned = Math.min(
+            ECONOMY_BALANCE_CONFIG.caps.maxSingleGameRewardCoins,
+            Math.max(1, Math.floor(cappedScore * balance.baseCoinMultiplier))
+          );
+        }
+      }
+    }
+
     onUpdateProfile(prev => ({
       ...prev,
       streak: newStreak,
-      lastPlayDate: todayStr
+      lastPlayDate: todayStr,
+      coins: serverNewCoinBalance !== undefined
+        ? serverNewCoinBalance
+        : prev.coins + localCoinsEarned
     }));
+
+    if (!isOfflineOrGuest && serverNewCoinBalance === undefined) {
+      economyService.syncBalance(profile.name).then(serverCoins => {
+        if (serverCoins !== null) {
+          onUpdateProfile(prev => ({
+            ...prev,
+            coins: serverCoins
+          }));
+        }
+      });
+    }
     
     checkMissions('score', gameId, finalScore, isHighScore);
     checkAchievements(gameId, finalScore);
@@ -276,16 +299,14 @@ export const useGameProgress = (
       
       const newlyCompletedMissions = updatedMissions.filter(m => m.completed && dailyMissions.find(om => om.id === m.id && !om.completed));
       if (newlyCompletedMissions.length > 0) {
-        import('../services/economyService').then(({ economyService }) => {
-          newlyCompletedMissions.forEach(m => {
-            economyService.claimReward(m.id, 'daily_mission', profile.name).then(res => {
-              if (res.success && res.newBalance !== undefined) {
-                onUpdateProfile(prev => ({
-                  ...prev,
-                  coins: res.newBalance
-                }));
-              }
-            });
+        newlyCompletedMissions.forEach(m => {
+          economyService.claimReward(m.id, 'daily_mission', profile.name).then(res => {
+            if (res.success && res.newBalance !== undefined) {
+              onUpdateProfile(prev => ({
+                ...prev,
+                coins: res.newBalance
+              }));
+            }
           });
         });
       }
@@ -316,16 +337,14 @@ export const useGameProgress = (
       setAchievements(updatedAchievements);
       storageService.saveAchievements(updatedAchievements);
 
-      import('../services/economyService').then(({ economyService }) => {
-        unlockedIds.forEach(achId => {
-          economyService.claimReward(achId, 'achievement', profile.name).then(res => {
-            if (res.success && res.newBalance !== undefined) {
-              onUpdateProfile(prev => ({
-                ...prev,
-                coins: res.newBalance
-              }));
-            }
-          });
+      unlockedIds.forEach(achId => {
+        economyService.claimReward(achId, 'achievement', profile.name).then(res => {
+          if (res.success && res.newBalance !== undefined) {
+            onUpdateProfile(prev => ({
+              ...prev,
+              coins: res.newBalance
+            }));
+          }
         });
       });
     }

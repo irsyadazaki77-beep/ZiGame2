@@ -12,21 +12,23 @@ class RetroAudio {
   private activeNodes: Set<AudioNode> = new Set();
 
   constructor() {
-    try {
-      const savedMute = localStorage.getItem('zigame_muted');
-      if (savedMute !== null) {
-        this.isMuted = savedMute === 'true';
+    if (typeof window !== 'undefined' && typeof localStorage !== 'undefined') {
+      try {
+        const savedMute = localStorage.getItem('zigame_muted');
+        if (savedMute !== null) {
+          this.isMuted = savedMute === 'true';
+        }
+        const savedMusicVol = localStorage.getItem('zigame_music_vol');
+        if (savedMusicVol !== null) {
+          this.musicVolume = parseFloat(savedMusicVol);
+        }
+        const savedSfxVol = localStorage.getItem('zigame_sfx_vol');
+        if (savedSfxVol !== null) {
+          this.sfxVolume = parseFloat(savedSfxVol);
+        }
+      } catch {
+        // Quietly ignore storage access restrictions
       }
-      const savedMusicVol = localStorage.getItem('zigame_music_vol');
-      if (savedMusicVol !== null) {
-        this.musicVolume = parseFloat(savedMusicVol);
-      }
-      const savedSfxVol = localStorage.getItem('zigame_sfx_vol');
-      if (savedSfxVol !== null) {
-        this.sfxVolume = parseFloat(savedSfxVol);
-      }
-    } catch (e: any) {
-      logger.warn('Audio settings read error:', { error: e });
     }
   }
 
@@ -432,6 +434,18 @@ class RetroAudio {
 
   playGameOver() {
     this.playHit();
+  }
+
+  playError() {
+    this.playHit();
+  }
+
+  playCrash() {
+    this.playExplosion();
+  }
+
+  playMove() {
+    this.playClick();
   }
 
   playHit() {

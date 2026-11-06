@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { friendChallengeService, FriendChallenge } from '../services/friendChallengeService';
 import { CreateFriendChallengeModal } from '../components/gamepage/CreateFriendChallengeModal';
+import { economyService } from '../services/economyService';
 
 interface ChallengesPageProps {
   profile: PlayerProfile;
@@ -49,9 +50,8 @@ export default function ChallengesPage({
   const handleClaim = (challenge: Challenge) => {
     if (!challenge.completed || challenge.claimed) return;
 
-    import('../services/economyService').then(({ economyService }) => {
-      economyService.claimReward(challenge.id, 'challenge', profile.name).then(res => {
-        if (res.success && res.newBalance !== undefined) {
+    economyService.claimReward(challenge.id, 'challenge', profile.name).then(res => {
+      if (res.success && res.newBalance !== undefined) {
           audio.playLevelUp();
           
           const result = challengeService.claimChallenge(challenge.id);
@@ -73,7 +73,6 @@ export default function ChallengesPage({
           }
         }
       });
-    });
   };
 
   // Computes progress summary
@@ -368,17 +367,16 @@ export default function ChallengesPage({
                               <span>{isCopied ? 'Tersalin!' : 'Salin Link'}</span>
                             </button>
 
-                            <button
-                              onClick={() => {
-                                const text = encodeURIComponent(
-                                  `🕹️ *TANTANGAN ZIGAME*\nCoba kalahkan skor *${ch.targetScore.toLocaleString()}* di *${ch.gameTitle}*!\n\nLink main:\n${shareUrl}`
-                                );
-                                window.open(`https://api.whatsapp.com/send?text=${text}`, '_blank');
-                              }}
-                              className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition cursor-pointer"
+                            <a
+                              href={`https://api.whatsapp.com/send?text=${encodeURIComponent(
+                                `🕹️ *TANTANGAN ZIGAME*\nCoba kalahkan skor *${ch.targetScore.toLocaleString()}* di *${ch.gameTitle}*!\n\nLink main:\n${shareUrl}`
+                              )}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition cursor-pointer inline-flex items-center justify-center"
                             >
                               WA
-                            </button>
+                            </a>
                           </div>
                         </div>
                       </div>

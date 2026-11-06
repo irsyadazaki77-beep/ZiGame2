@@ -74,3 +74,13 @@ export interface DynamicEvent {
     value: string | number;
   };
 }
+
+export interface EconomyState {
+  userId: string;
+  coins: number;
+  inventory: string[];
+  lastSpinTimestamp: number;
+  totalXp: number;
+  level: number;
+}
+

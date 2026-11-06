@@ -163,9 +163,11 @@ export class InMemoryStore {
 
 export const memoryStore = new InMemoryStore();
 
+import firebaseAppletConfig from '../../../firebase-applet-config.json';
+
 export function isFirestoreAvailable(): boolean {
   if (process.env.NODE_ENV === 'test' || process.env.VITEST) return false;
-  if (!process.env.FIREBASE_SERVICE_ACCOUNT) {
+  if (!process.env.FIREBASE_SERVICE_ACCOUNT && !process.env.GOOGLE_APPLICATION_CREDENTIALS) {
     if (process.env.NODE_ENV !== 'production') {
       return false;
     }
@@ -175,6 +177,10 @@ export function isFirestoreAvailable(): boolean {
 }
 
 export function getDb(): Firestore {
+  const dbId = process.env.VITE_FIRESTORE_DATABASE_ID || firebaseAppletConfig.firestoreDatabaseId;
+  if (dbId && dbId !== '(default)') {
+    return getFirestore(getApps()[0], dbId);
+  }
   return getFirestore();
 }
 

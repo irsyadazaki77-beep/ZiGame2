@@ -14,13 +14,21 @@ export function useProgressionManager(
   
   // Load masteries from local storage or initialize empty
   const [masteries, setMasteries] = useState<Record<string, GameMastery>>(() => {
-    const saved = localStorage.getItem('zigame_masteries');
-    return saved ? JSON.parse(saved) : {};
+    try {
+      const saved = localStorage.getItem('zigame_masteries');
+      return saved ? JSON.parse(saved) : {};
+    } catch {
+      return {};
+    }
   });
 
   // Persist masteries when changed
   useEffect(() => {
-    localStorage.setItem('zigame_masteries', JSON.stringify(masteries));
+    try {
+      localStorage.setItem('zigame_masteries', JSON.stringify(masteries));
+    } catch {
+      // Ignore storage quota errors
+    }
   }, [masteries]);
 
   const processGameSession = useCallback((

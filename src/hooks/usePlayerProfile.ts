@@ -3,11 +3,23 @@ import { PlayerProfile } from '../types';
 import { storageService } from '../services/storageService';
 
 export const usePlayerProfile = () => {
-  const [profile, setProfile] = useState<PlayerProfile>({
-    name: 'ARKADE_X',
-    avatar: '👾',
-    colorTheme: '#6366f1',
-    coins: 0,
+  const [profile, setProfile] = useState<PlayerProfile>(() => {
+    const saved = storageService.getProfile();
+    if (saved) {
+      return {
+        ...saved,
+        colorTheme: saved.colorTheme || '#6366f1',
+        coins: typeof saved.coins === 'number' ? saved.coins : 100
+      };
+    }
+    const initial: PlayerProfile = {
+      name: 'ARKADE_X',
+      avatar: '👾',
+      colorTheme: '#6366f1',
+      coins: 100,
+    };
+    storageService.saveProfile(initial);
+    return initial;
   });
 
   // Load from storage on mount

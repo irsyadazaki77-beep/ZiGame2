@@ -123,8 +123,11 @@ export const dailyStreakService = {
     const today = getTodayUtcString();
 
     try {
-      // Claim reward through economy service
-      await economyService.claimReward(reward.coins, 'daily_mission');
+      // Claim reward through economy service with canonical streak ID
+      const claimRes = await economyService.claimReward(`streak_${today}_${day}`, 'daily_mission');
+      if (!claimRes.success) {
+        return { success: false, day, coins: 0, xp: 0, isMysteryDay: false };
+      }
 
       const newState: DailyStreakState = {
         currentStreak: day,

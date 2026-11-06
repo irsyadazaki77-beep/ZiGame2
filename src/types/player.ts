@@ -16,6 +16,8 @@ export interface GameMastery {
 }
 
 export interface PlayerProfile {
+  uid?: string;
+  username?: string;
   name: string;
   avatar: string;
   colorTheme: string;

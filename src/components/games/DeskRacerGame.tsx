@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { useGameEngine } from '../../hooks/useGameEngine';
+import { disposeThreeScene } from '../../utils/threeCleanup';
 import { audio } from '../../utils/audio';
 import { screenShake } from '../../utils/screenShake';
 import { Flag, Gauge, RotateCcw, Eye, ChevronDown, ChevronUp, Ghost, Zap, Play, Shield, Sparkles, AlertTriangle } from 'lucide-react';
@@ -324,7 +325,9 @@ export default function DeskRacerGame({ onScoreUpdate, onGameOver, highScore }: 
     score,
     updateScore,
     triggerGameOver,
-    setGameState
+    setGameState,
+    gameState,
+    gameStateRef
   } = useGameEngine({
     gameId: 'desk-racer',
     onScoreUpdate,
@@ -811,14 +814,18 @@ export default function DeskRacerGame({ onScoreUpdate, onGameOver, highScore }: 
       const now = performance.now();
       const elapsedTotal = clock.getElapsedTime();
 
-      // Rotate Power-Up Mesh Boxes
-      powerUps.forEach((p) => {
-        if (p.active) {
-          p.mesh.rotation.y = elapsedTotal * 2.5;
-        }
-      });
+      const isPlaying = (gameStateRef.current as string)?.toLowerCase() === 'playing';
 
-      if (!finished) {
+      // Rotate Power-Up Mesh Boxes
+      if (isPlaying) {
+        powerUps.forEach((p) => {
+          if (p.active) {
+            p.mesh.rotation.y = elapsedTotal * 2.5;
+          }
+        });
+      }
+
+      if (!finished && isPlaying) {
         const k = keysRef.current;
         const isBoosting = k.boost && boostEnergy > 5 && k.up;
         const maxSpeed = isBoosting ? 32 : 22;
@@ -1134,7 +1141,7 @@ export default function DeskRacerGame({ onScoreUpdate, onGameOver, highScore }: 
       roadTex.dispose();
       checkerTex.dispose();
       roadGeo.dispose();
-      renderer.dispose();
+      disposeThreeScene(scene, renderer);
     };
   }, [setGameState, triggerGameOver, updateScore]);
 
