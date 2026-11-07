@@ -25,9 +25,50 @@ export interface RateLimiter {
  */
 export class MemoryRateLimiter implements RateLimiter {
   private store = new Map<string, { count: number; resetTime: number }>();
+  private readonly maxEntries: number;
+  private cleanupInterval: NodeJS.Timeout | null = null;
+
+  constructor(maxEntries: number = 10000, cleanupIntervalMs: number = 60000) {
+    this.maxEntries = maxEntries;
+
+    // Periodic sweep for expired window keys
+    this.cleanupInterval = setInterval(() => {
+      this.cleanupExpired();
+    }, cleanupIntervalMs);
+
+    // Call .unref() so this background timer does not keep Node.js or Vitest processes alive
+    if (this.cleanupInterval && typeof this.cleanupInterval.unref === 'function') {
+      this.cleanupInterval.unref();
+    }
+  }
+
+  cleanupExpired(now: number = Date.now()): void {
+    for (const [key, entry] of this.store.entries()) {
+      if (now > entry.resetTime) {
+        this.store.delete(key);
+      }
+    }
+  }
+
+  private enforceCapacity(now: number): void {
+    if (this.store.size >= this.maxEntries) {
+      this.cleanupExpired(now);
+      // If still at or over threshold after expired sweep, evict oldest 10%
+      if (this.store.size >= this.maxEntries) {
+        const evictBatch = Math.max(1, Math.floor(this.maxEntries * 0.1));
+        let evicted = 0;
+        for (const key of this.store.keys()) {
+          this.store.delete(key);
+          evicted++;
+          if (evicted >= evictBatch) break;
+        }
+      }
+    }
+  }
 
   async check(key: string, maxRequests: number, windowMs: number): Promise<RateLimitResult> {
     const now = Date.now();
+    this.enforceCapacity(now);
     const entry = this.store.get(key);
 
     if (!entry || now > entry.resetTime) {
@@ -44,7 +85,15 @@ export class MemoryRateLimiter implements RateLimiter {
     return { allowed: true, remaining: maxRequests - entry.count, resetTime: entry.resetTime };
   }
 
-  clear() {
+  clear(): void {
+    this.store.clear();
+  }
+
+  destroy(): void {
+    if (this.cleanupInterval) {
+      clearInterval(this.cleanupInterval);
+      this.cleanupInterval = null;
+    }
     this.store.clear();
   }
 }

@@ -7,6 +7,7 @@ test-results/
 .cache/
 .DS_Store
 *.log
+error_log.txt
 lint_output.txt
 audit_output.txt
 bun.lock

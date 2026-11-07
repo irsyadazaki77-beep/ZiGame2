@@ -29,7 +29,9 @@ service cloud.firestore {
         && data.profile.name is string
         && data.profile.name.size() >= 1
         && data.profile.name.size() <= 64
-        && (!('coins' in data.profile) || (data.profile.coins is number && data.profile.coins >= 0 && data.profile.coins <= 10000000));
+        && (!('coins' in data.profile) || (data.profile.coins is number && data.profile.coins >= 0))
+        && (!('unlockedAvatars' in data.profile) || (data.profile.unlockedAvatars is list && data.profile.unlockedAvatars.size() <= 64))
+        && (!('unlockedThemes' in data.profile) || (data.profile.unlockedThemes is list && data.profile.unlockedThemes.size() <= 64));
     }
 
     // Connection test document for boot verification
@@ -52,6 +54,8 @@ service cloud.firestore {
         && request.auth.uid == userId 
         && isValidId(userId)
         && isValidUser(incoming())
+        // Client cannot set coins above starting bonus (max 500) on create
+        && (!('coins' in incoming().profile) || incoming().profile.coins <= 500)
         // Ensure no administrative / sensitive fields are set on create
         && !incoming().keys().hasAny(['isAdmin', 'isBanned', 'verifiedBalance', 'role']);
 
@@ -60,6 +64,8 @@ service cloud.firestore {
         && request.auth.uid == userId 
         && isValidId(userId)
         && isValidUser(incoming())
+        // Client cannot unilaterally increase profile.coins unless <= existing balance or <= 500 starter bonus
+        && (!('coins' in incoming().profile) || ('coins' in existing().profile && incoming().profile.coins <= existing().profile.coins) || incoming().profile.coins <= 500)
         // Client cannot tamper with administrative / sensitive fields
         && (!incoming().diff(existing()).affectedKeys().hasAny(['isAdmin', 'isBanned', 'verifiedBalance', 'role']))
       );

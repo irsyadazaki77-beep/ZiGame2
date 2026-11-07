@@ -10,10 +10,26 @@ const logErrorPlugin = () => ({
   configureServer(server: any) {
     server.middlewares.use('/log_error', (req: any, res: any) => {
       let body = '';
-      req.on('data', (chunk: any) => body += chunk.toString());
+      let rejected = false;
+      req.on('data', (chunk: any) => {
+        if (rejected) return;
+        body += chunk.toString();
+        if (body.length > 65536) {
+          rejected = true;
+          res.statusCode = 413;
+          res.end('Payload too large');
+        }
+      });
       req.on('end', () => {
-        fs.writeFileSync('error_log.txt', body + '\n', { flag: 'a' });
-        res.end('ok');
+        if (rejected) return;
+        if (body.length > 65536) {
+          res.statusCode = 413;
+          res.end('Payload too large');
+          return;
+        }
+        fs.appendFile('error_log.txt', body + '\n', () => {
+          res.end('ok');
+        });
       });
     });
   },
@@ -36,6 +52,9 @@ export default defineConfig(() => {
       rollupOptions: {
         output: {
           manualChunks(id) {
+            if (id.includes('node_modules/three')) {
+              return 'vendor-three';
+            }
             if (id.includes('node_modules/firebase')) {
               return 'vendor-firebase';
             }
@@ -143,7 +162,7 @@ export default defineConfig(() => {
           ]
         },
         devOptions: {
-          enabled: true,
+          enabled: process.env.ENABLE_PWA_DEV === 'true',
           type: 'module',
         }
       })

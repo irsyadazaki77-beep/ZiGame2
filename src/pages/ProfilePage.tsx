@@ -4,6 +4,8 @@ import { audio } from '../utils/audio';
 import { authService } from '../services/authService';
 import { socialService } from '../services/socialService';
 import { useAuth } from '../contexts/AuthContext';
+import { useGameContext } from '../contexts/GameContext';
+import { useToast } from '../utils/ToastContext';
 
 import { ProfileHeader } from '../components/profile/ProfileHeader';
 import { ProfileOverview } from '../components/profile/ProfileOverview';
@@ -22,8 +24,8 @@ interface ProfilePageProps {
   totalPlays: number;
   onUpdateProfile: (newProfile: PlayerProfile) => void;
   onResetStats: () => void;
-  onLogout: () => void;
-  onLoginSuccess: (
+  onLogout?: () => void;
+  onLoginSuccess?: (
     profile: PlayerProfile,
     games: GameStats[],
     achievements: Achievement[],
@@ -47,6 +49,26 @@ export default function ProfilePage({
   masteries,
   onSelectGame
 }: ProfilePageProps) {
+  const { setProfile, setGames, setAchievements, setRecentlyPlayed } = useGameContext();
+  const { showToast } = useToast();
+
+  const applyLoginSuccess = (
+    newProfile: PlayerProfile,
+    newGames: GameStats[],
+    newAchievements: Achievement[],
+    newRecentlyPlayed: RecentlyPlayedEntry[]
+  ) => {
+    if (onLoginSuccess) {
+      onLoginSuccess(newProfile, newGames, newAchievements, newRecentlyPlayed);
+    } else {
+      setProfile(newProfile);
+      setGames(newGames);
+      setAchievements(newAchievements);
+      setRecentlyPlayed(newRecentlyPlayed);
+      showToast('Login Berhasil', 'Data kamu sudah disinkronkan.', 'success', '👋');
+    }
+  };
+
   // Navigation Tabs within Profile
   const [activeTab, setActiveTab] = useState<'overview' | 'mastery' | 'achievements' | 'friends' | 'settings' | 'auth'>('overview');
   
@@ -207,7 +229,7 @@ export default function ProfilePage({
     
     if (res.session) {
       setTimeout(() => {
-        onLoginSuccess(
+        applyLoginSuccess(
           res.session!.profile,
           res.session!.games,
           res.session!.achievements,
@@ -258,7 +280,7 @@ export default function ProfilePage({
 
     if (res.session) {
       setTimeout(() => {
-        onLoginSuccess(
+        applyLoginSuccess(
           res.session!.profile,
           res.session!.games,
           res.session!.achievements,
@@ -289,7 +311,7 @@ export default function ProfilePage({
     if (res.session) {
       setLoggedInUser(res.session.username);
       setTimeout(() => {
-        onLoginSuccess(
+        applyLoginSuccess(
           res.session!.profile,
           res.session!.games,
           res.session!.achievements,
@@ -306,7 +328,11 @@ export default function ProfilePage({
     setLoggedInUser(null);
     setUsername('');
     setPassword('');
-    onLogout();
+    if (onLogout) {
+      onLogout();
+    } else {
+      window.location.reload();
+    }
     setActiveTab('auth');
   };
 

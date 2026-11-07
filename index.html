@@ -17,21 +17,32 @@
     <script>
       (function() {
         try {
-          const savedTheme = localStorage.getItem('zigame_theme');
-          const theme = savedTheme || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
-          document.documentElement.setAttribute('data-theme', theme);
-          if (theme === 'light') {
+          var savedTheme = localStorage.getItem('zigame_theme');
+          var isExplicitLight = savedTheme === 'light' || (!savedTheme && window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches && !window.matchMedia('(prefers-color-scheme: dark)').matches);
+          var baseMode = savedTheme === 'light' ? 'light' : 'dark';
+          document.documentElement.setAttribute('data-theme', baseMode);
+          if (savedTheme && savedTheme !== 'light' && savedTheme !== 'dark') {
+            document.documentElement.setAttribute('data-accent-theme', savedTheme);
+          }
+          if (baseMode === 'light' && isExplicitLight) {
             document.documentElement.classList.add('light');
             document.documentElement.classList.remove('dark');
           } else {
             document.documentElement.classList.add('dark');
             document.documentElement.classList.remove('light');
           }
-        } catch (e) {}
+        } catch (e) {
+          document.documentElement.classList.add('dark');
+        }
       })();
     </script>
   </head>
   <body>
+    <noscript>
+      <div style="padding: 2rem; text-align: center; background: #080a0f; color: #f4f4f5; font-family: monospace; min-height: 100vh; display: flex; align-items: center; justify-content: center;">
+        JavaScript diperlukan untuk menjalankan ZIGAME Retro Cyber Arcade. Silakan aktifkan JavaScript di pengaturan browser Anda.
+      </div>
+    </noscript>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

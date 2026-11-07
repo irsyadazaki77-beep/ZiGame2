@@ -36,6 +36,9 @@ jobs:
       - name: Integration Tests
         run: npm run test:integration
 
+      - name: Audit Games Catalog
+        run: npm run audit:games
+
       - name: Install Playwright Browsers
         run: npx playwright install --with-deps chromium
 

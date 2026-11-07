@@ -1,13 +1,10 @@
 import React, { Suspense } from 'react';
-import { Routes, Route } from 'react-router-dom';
+import { Routes, Route, Navigate } from 'react-router-dom';
 import { useGameContext } from './contexts/GameContext';
-import { PlayerProfile, GameStats, Achievement, RecentlyPlayedEntry } from './types';
-import { useToast } from './utils/ToastContext';
 import { AdminRoute } from './components/AdminRoute';
 
 import Home from './pages/Home';
 import GamesPage from './pages/GamesPage';
-import GamePage from './pages/GamePage';
 
 // Lazy Loaded Pages with exponential backoff retry on dynamic import failure
 function lazyWithRetry<T extends React.ComponentType<any>>(
@@ -32,6 +29,7 @@ function lazyWithRetry<T extends React.ComponentType<any>>(
   });
 }
 
+const GamePage = lazyWithRetry(() => import('./pages/GamePage'));
 const ChallengesPage = lazyWithRetry(() => import('./pages/ChallengesPage'));
 const LeaderboardPage = lazyWithRetry(() => import('./pages/LeaderboardPage'));
 const ProfilePage = lazyWithRetry(() => import('./pages/ProfilePage'));
@@ -41,15 +39,11 @@ const AdminDashboard = lazyWithRetry(() => import('./pages/AdminDashboard'));
 export function AppRoutes() {
   const {
     profile,
-    setProfile,
     handleUpdateProfile,
     games,
-    setGames,
     achievements,
-    setAchievements,
     dailyMissions,
     recentlyPlayed,
-    setRecentlyPlayed,
     clearRecentlyPlayed,
     handleSelectGame,
     handleScoreUpdate,
@@ -58,25 +52,7 @@ export function AppRoutes() {
     masteries
   } = useGameContext();
 
-  const { showToast } = useToast();
   const totalPlays = games.reduce((acc, g) => acc + g.plays, 0);
-
-  const handleLogout = () => {
-    window.location.reload();
-  };
-
-  const handleLoginSuccess = (
-    newProfile: PlayerProfile,
-    newGames: GameStats[],
-    newAchievements: Achievement[],
-    newRecentlyPlayed: RecentlyPlayedEntry[]
-  ) => {
-    setProfile(newProfile);
-    setGames(newGames);
-    setAchievements(newAchievements);
-    setRecentlyPlayed(newRecentlyPlayed);
-    showToast('Login Berhasil', 'Data kamu sudah disinkronkan.', 'success', '👋');
-  };
 
   return (
     <Suspense fallback={
@@ -113,8 +89,6 @@ export function AppRoutes() {
             games={games}
             recentlyPlayed={recentlyPlayed}
             totalPlays={totalPlays}
-            onLogout={handleLogout}
-            onLoginSuccess={handleLoginSuccess}
             onClearRecentlyPlayed={clearRecentlyPlayed}
             onSelectGame={handleSelectGame}
             masteries={masteries}
@@ -150,7 +124,17 @@ export function AppRoutes() {
             </AdminRoute>
           } 
         />
+
+        {/* Legacy Route Redirects */}
+        <Route path="/quests" element={<Navigate to="/challenges" replace />} />
+        <Route path="/stats" element={<Navigate to="/profile" replace />} />
+        <Route path="/settings" element={<Navigate to="/profile" replace />} />
+        <Route path="/login" element={<Navigate to="/profile" replace />} />
+
+        {/* Catch-All 404 Fallback */}
+        <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </Suspense>
   );
 }
+

@@ -26,11 +26,13 @@ function getDeviceId(): string {
   return id;
 }
 
+export const DEFAULT_AVATARS = ['🤖', '🕹️', '👾', '🚀', '🦊', '🐱', '🐶', '🐼'];
+export const DEFAULT_THEMES = ['indigo', 'purple', 'rose', 'emerald', '#6366f1', '#a855f7', '#f43f5e', '#10b981'];
+
 /**
- * Field-based merge resolver ensuring non-destructive synchronization across devices.
- * Server authoritative economy balance is respected without client Math.max overrides.
+ * Merge local and cloud user data ensuring server-authoritative economy and cosmetic protections.
  */
-export function resolveCloudConflict(
+export function mergeUserData(
   local: {
     profile: PlayerProfile;
     games: GameStats[];
@@ -46,33 +48,56 @@ export function resolveCloudConflict(
   missions: DailyMission[];
   recentlyPlayed: RecentlyPlayedEntry[];
 } {
-  const cloudProfile = cloud.profile || ({} as Partial<PlayerProfile>);
+  const cloudProfile = cloud?.profile || ({} as Partial<PlayerProfile>);
+  const hasCloudProfile = Boolean(cloud && cloud.profile);
 
-  // Cosmetic unlocks: union of sets
-  const mergedAvatars = Array.from(new Set([
-    ...(local.profile.unlockedAvatars || ['🎮', '🕹️', '👾', '🚀', '🦊', '🐱', '🐶', '🐼']),
-    ...(cloudProfile.unlockedAvatars || [])
-  ]));
+  // Cosmetic unlocks: when cloud data is available, only combine default starter cosmetics
+  // with cloud-authoritative unlocks, rejecting unverified client-side cosmetic claims
+  const mergedAvatars = hasCloudProfile && Array.isArray(cloudProfile.unlockedAvatars)
+    ? Array.from(new Set([...DEFAULT_AVATARS, ...cloudProfile.unlockedAvatars]))
+    : Array.from(new Set([...DEFAULT_AVATARS, ...(local.profile.unlockedAvatars || [])]));
 
-  const mergedThemes = Array.from(new Set([
-    ...(local.profile.unlockedThemes || ['indigo', 'purple', 'rose', 'emerald', '#6366f1', '#a855f7', '#f43f5e', '#10b981']),
-    ...(cloudProfile.unlockedThemes || [])
-  ]));
+  const mergedThemes = hasCloudProfile && Array.isArray(cloudProfile.unlockedThemes)
+    ? Array.from(new Set([...DEFAULT_THEMES, ...cloudProfile.unlockedThemes]))
+    : Array.from(new Set([...DEFAULT_THEMES, ...(local.profile.unlockedThemes || [])]));
 
-  // Coins: prefer cloud authoritative if present, otherwise local
-  const resolvedCoins = typeof cloudProfile.coins === 'number' ? cloudProfile.coins : (local.profile.coins || 100);
+  // Active avatar & theme validation: must exist within merged unlocked sets or revert to default
+  const selectedAvatar = local.profile.avatar && mergedAvatars.includes(local.profile.avatar)
+    ? local.profile.avatar
+    : cloudProfile.avatar && mergedAvatars.includes(cloudProfile.avatar)
+      ? cloudProfile.avatar
+      : DEFAULT_AVATARS[0];
+
+  const selectedTheme = local.profile.colorTheme && mergedThemes.includes(local.profile.colorTheme)
+    ? local.profile.colorTheme
+    : cloudProfile.colorTheme && mergedThemes.includes(cloudProfile.colorTheme)
+      ? cloudProfile.colorTheme
+      : DEFAULT_THEMES[0];
+
+  // Coins: strictly respect cloud authoritative balance when present, never allow unverified local override
+  const resolvedCoins = typeof cloudProfile.coins === 'number'
+    ? cloudProfile.coins
+    : Math.min(typeof local.profile.coins === 'number' ? local.profile.coins : 100, 500);
 
   const mergedProfile: PlayerProfile = {
     ...cloudProfile,
     ...local.profile,
     name: local.profile.name || cloudProfile.name || 'GUEST',
+    avatar: selectedAvatar,
+    colorTheme: selectedTheme,
     coins: resolvedCoins,
     unlockedAvatars: mergedAvatars,
     unlockedThemes: mergedThemes
   };
 
-  // 2. Games: highest verified highscore & max total plays
-  const cloudGames = cloud.games || [];
+  // Strip any illegal administrative / privilege escalation fields from merged state
+  delete (mergedProfile as any).isAdmin;
+  delete (mergedProfile as any).isBanned;
+  delete (mergedProfile as any).role;
+  delete (mergedProfile as any).verifiedBalance;
+
+  // Games: highest verified highscore & max total plays
+  const cloudGames = cloud?.games || [];
   const mergedGames = local.games.map(localG => {
     const cloudG = cloudGames.find(cg => cg.id === localG.id);
     if (!cloudG) return localG;
@@ -83,8 +108,8 @@ export function resolveCloudConflict(
     };
   });
 
-  // 3. Achievements: union of unlocked status
-  const cloudAch = cloud.achievements || [];
+  // Achievements: union of unlocked status
+  const cloudAch = cloud?.achievements || [];
   const mergedAchievements = local.achievements.map(localA => {
     const cloudA = cloudAch.find(ca => ca.id === localA.id);
     const isUnlocked = localA.unlocked || !!cloudA?.unlocked;
@@ -95,10 +120,10 @@ export function resolveCloudConflict(
     };
   });
 
-  // 4. Recently Played: timestamp merge with deduplication
+  // Recently Played: timestamp merge with deduplication
   const combinedRecents = [
     ...local.recentlyPlayed,
-    ...(cloud.recentlyPlayed || [])
+    ...(cloud?.recentlyPlayed || [])
   ];
   const recentMap = new Map<string, RecentlyPlayedEntry>();
   combinedRecents.forEach(entry => {
@@ -115,10 +140,15 @@ export function resolveCloudConflict(
     profile: mergedProfile,
     games: mergedGames,
     achievements: mergedAchievements,
-    missions: local.missions.length > 0 ? local.missions : (cloud.missions || []),
+    missions: local.missions.length > 0 ? local.missions : (cloud?.missions || []),
     recentlyPlayed: mergedRecentlyPlayed
   };
 }
+
+/**
+ * Backward compatibility alias for resolveCloudConflict
+ */
+export const resolveCloudConflict = mergeUserData;
 
 export const syncDataToCloud = async (
   profile: PlayerProfile, 
@@ -142,13 +172,76 @@ export const syncDataToCloud = async (
     const userRef = doc(db, 'users', uid);
 
     await withRetry(async () => {
+      // Fetch current authoritative cloud profile to prevent client-side overwrite of coins or cosmetics
+      let cloudCoins: number | null = null;
+      let cloudUnlockedAvatars: string[] | null = null;
+      let cloudUnlockedThemes: string[] | null = null;
+
+      try {
+        const snap = await getDoc(userRef);
+        if (snap.exists()) {
+          const currentData = snap.data();
+          if (currentData?.profile) {
+            if (typeof currentData.profile.coins === 'number') {
+              cloudCoins = currentData.profile.coins;
+            }
+            if (Array.isArray(currentData.profile.unlockedAvatars)) {
+              cloudUnlockedAvatars = currentData.profile.unlockedAvatars;
+            }
+            if (Array.isArray(currentData.profile.unlockedThemes)) {
+              cloudUnlockedThemes = currentData.profile.unlockedThemes;
+            }
+          }
+        }
+      } catch {
+        // Fallback gracefully on network / read errors
+      }
+
+      // Authoritative coins: strictly retain existing cloud balance or clamp starter bonus to max 500
+      const safeCoins = cloudCoins !== null
+        ? cloudCoins
+        : Math.min(typeof profile.coins === 'number' ? profile.coins : 100, 500);
+
+      // Authoritative cosmetics: only permit default starter cosmetics or server-confirmed cloud inventory
+      const safeUnlockedAvatars = cloudUnlockedAvatars !== null
+        ? Array.from(new Set([...DEFAULT_AVATARS, ...cloudUnlockedAvatars]))
+        : DEFAULT_AVATARS;
+
+      const safeUnlockedThemes = cloudUnlockedThemes !== null
+        ? Array.from(new Set([...DEFAULT_THEMES, ...cloudUnlockedThemes]))
+        : DEFAULT_THEMES;
+
+      const safeAvatar = profile.avatar && safeUnlockedAvatars.includes(profile.avatar)
+        ? profile.avatar
+        : DEFAULT_AVATARS[0];
+
+      const safeTheme = profile.colorTheme && safeUnlockedThemes.includes(profile.colorTheme)
+        ? profile.colorTheme
+        : DEFAULT_THEMES[0];
+
+      const sanitizedProfile: PlayerProfile = {
+        ...profile,
+        name: (profile.name || 'GUEST').slice(0, 64),
+        avatar: safeAvatar,
+        colorTheme: safeTheme,
+        coins: safeCoins,
+        unlockedAvatars: safeUnlockedAvatars,
+        unlockedThemes: safeUnlockedThemes
+      };
+
+      // Ensure no administrative or privilege-escalating fields can ever be sent
+      delete (sanitizedProfile as any).isAdmin;
+      delete (sanitizedProfile as any).isBanned;
+      delete (sanitizedProfile as any).role;
+      delete (sanitizedProfile as any).verifiedBalance;
+
       const payload: CloudSavePayload = {
         schemaVersion: storageService.getSchemaVersion(),
         revision: storageService.getStorageRevision(),
         updatedAt: Date.now(),
         userId: uid,
         deviceId: getDeviceId(),
-        profile,
+        profile: sanitizedProfile,
         games,
         achievements,
         missions,

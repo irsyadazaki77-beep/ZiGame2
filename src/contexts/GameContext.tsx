@@ -6,7 +6,8 @@ import { useGameProgress } from '../hooks/useGameProgress';
 import { useProgressionManager } from '../hooks/useProgressionManager';
 import { GameMastery } from '../types';
 import { useAuth } from './AuthContext';
-import { syncDataToCloud, fetchCloudData } from '../services/sync';
+import { syncDataToCloud, fetchCloudData, mergeUserData } from '../services/sync';
+import { economyService } from '../services/economyService';
 import { INITIAL_GAMES } from '../data/games';
 import { INITIAL_ACHIEVEMENTS } from '../data/achievements';
 
@@ -103,26 +104,35 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       if (isCancelled) return;
 
       if (cloudData) {
-        if (cloudData.profile) setProfile(cloudData.profile);
-        if (cloudData.games) {
-          const mergedGames = INITIAL_GAMES.map(initialGame => {
-            const found = cloudData.games.find((g: GameStats) => g.id === initialGame.id);
-            return found ? { ...initialGame, plays: found.plays, highScore: found.highScore } : initialGame;
-          });
-          gameProgress.setGames(mergedGames);
+        const merged = mergeUserData(
+          {
+            profile,
+            games: gameProgress.games,
+            achievements: gameProgress.achievements,
+            missions: gameProgress.dailyMissions,
+            recentlyPlayed: gameProgress.recentlyPlayed
+          },
+          cloudData
+        );
+        setProfile(merged.profile);
+        gameProgress.setGames(merged.games);
+        gameProgress.setAchievements(merged.achievements);
+        gameProgress.setDailyMissions(merged.missions);
+        gameProgress.setRecentlyPlayed(merged.recentlyPlayed);
+
+        // Fetch authoritative server balance
+        const authoritativeCoins = await economyService.syncBalance();
+        if (!isCancelled && typeof authoritativeCoins === 'number') {
+          setProfile(prev => ({ ...prev, coins: authoritativeCoins }));
         }
-        if (cloudData.achievements) {
-          const mergedAchievements = INITIAL_ACHIEVEMENTS.map(initialAch => {
-            const found = cloudData.achievements.find((a: Achievement) => a.id === initialAch.id);
-            return found ? { ...initialAch, unlocked: found.unlocked, unlockedAt: found.unlockedAt } : initialAch;
-          });
-          gameProgress.setAchievements(mergedAchievements);
-        }
-        if (cloudData.missions) gameProgress.setDailyMissions(cloudData.missions);
-        if (cloudData.recentlyPlayed) gameProgress.setRecentlyPlayed(cloudData.recentlyPlayed);
+
         showToast('Sinkronisasi Sukses', 'Data profil cloud berhasil dimuat.', 'success', '☁️');
       } else {
         syncDataToCloud(profile, gameProgress.games, gameProgress.achievements, gameProgress.dailyMissions, gameProgress.recentlyPlayed);
+        const authoritativeCoins = await economyService.syncBalance();
+        if (!isCancelled && typeof authoritativeCoins === 'number') {
+          setProfile(prev => ({ ...prev, coins: authoritativeCoins }));
+        }
       }
     }
 
