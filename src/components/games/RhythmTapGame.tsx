@@ -1,449 +1,321 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
+import * as THREE from 'three';
+import { GameComponentProps } from '../../types';
 import { audio } from '../../utils/audio';
 import { useGameEngine } from '../../hooks/useGameEngine';
-import { GameContainer } from '../gameplay/GameContainer';
-import { GameHUD } from '../gameplay/GameHUD';
 import { GameOverlay } from '../gameplay/GameOverlay';
+import { ThreeDockOverlay } from '../gameplay/ThreeDockOverlay';
+import {
+  ThreeStageController,
+  CameraPreset3D,
+  QualityLevel3D
+} from '../../utils/threeStage';
+import { Music, Flame, Zap } from 'lucide-react';
 
-interface GameProps {
-  onGameOver: (score: number) => void;
-  onScoreUpdate: (score: number) => void;
-  highScore: number;
-}
-
-interface BeatNote {
-  id: string;
+interface RhythmNote3D {
+  mesh: THREE.Mesh;
   lane: number; // 0, 1, 2, 3
-  y: number; // 0 to 100
+  z: number;
+  hit: boolean;
 }
 
-const LANES_KEYS = ['D', 'F', 'J', 'K'];
-const LANE_COLORS = [
-  'border-pink-500/30 text-pink-500 shadow-pink-500/20 bg-pink-950/25',
-  'border-cyan-500/30 text-cyan-500 shadow-cyan-500/20 bg-cyan-950/25',
-  'border-yellow-500/30 text-yellow-500 shadow-yellow-500/20 bg-yellow-950/25',
-  'border-purple-500/30 text-purple-500 shadow-purple-500/20 bg-purple-950/25'
-];
-const NOTE_GLOWS = [
-  'bg-pink-500 shadow-[0_0_12px_rgba(236,72,153,0.8)] border-pink-300',
-  'bg-cyan-500 shadow-[0_0_12px_rgba(6,182,212,0.8)] border-cyan-300',
-  'bg-yellow-500 shadow-[0_0_12px_rgba(234,179,8,0.8)] border-yellow-300',
-  'bg-purple-500 shadow-[0_0_12px_rgba(168,85,247,0.8)] border-purple-300'
-];
+const LANE_X = [-2.7, -0.9, 0.9, 2.7];
+const LANE_COLORS = [0xec4899, 0x06b6d4, 0xa855f7, 0xf59e0b];
+const HIT_Z = 4.6;
 
-export default function RhythmTapGame({ onGameOver, onScoreUpdate, highScore }: GameProps) {
+export default function RhythmTapGame({
+  onGameOver,
+  onScoreUpdate,
+  highScore
+}: GameComponentProps) {
+  const mountRef = useRef<HTMLDivElement | null>(null);
+  const stageRef = useRef<ThreeStageController | null>(null);
+
   const {
     gameState,
-    setGameState,
     score,
-    updateScore,
     addScore,
-    startLoop,
-    stopLoop,
-    triggerGameOver,
     startWithCountdown,
     countdown,
-    scoreRef,
+    triggerGameOver,
+    scoreRef
   } = useGameEngine({
-    gameId: 'rhythmtap',
+    gameId: 'rhythm-tap',
     onGameOver,
-    onScoreUpdate,
+    onScoreUpdate
   });
 
+  const [combo, setCombo] = useState(0);
+  const [missesLeft, setMissesLeft] = useState(5);
+  const [judgment, setJudgment] = useState<string>('READY');
+  const [cameraPreset, setCameraPreset] = useState<CameraPreset3D>('chase');
+  const [quality, setQuality] = useState<QualityLevel3D>('ultra');
+
   const gameStateRef = useRef(gameState);
-  
   useEffect(() => {
     gameStateRef.current = gameState;
   }, [gameState]);
-  const [notes, setNotes] = useState<BeatNote[]>([]);
-  const [combo, setCombo] = useState(0);
-  const [maxCombo, setMaxCombo] = useState(0);
-  const [timeLeft, setTimeLeft] = useState(45);
-  const [feedback, setFeedback] = useState<{ text: string; color: string } | null>(null);
-  const [keyStates, setKeyStates] = useState<boolean[]>([false, false, false, false]);
 
-  const notesRef = useRef<BeatNote[]>([]);
-  const spawnTimerRef = useRef(0);
-  const gameTimerRef = useRef(0);
+  const rhythmRef = useRef({
+    combo: 0,
+    missesLeft: 5,
+    speed: 11.5,
+    spawnTimer: 0.35
+  });
 
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const cabinetRef = useRef<HTMLDivElement | null>(null);
-  const particlesRef = useRef<{ x: number; y: number; vx: number; vy: number; color: string; radius: number; alpha: number; decay: number }[]>([]);
-  const floatingTextsRef = useRef<{ x: number; y: number; text: string; color: string; alpha: number; vy: number }[]>([]);
-  const shakeRef = useRef<number>(0);
+  const notesRef = useRef<RhythmNote3D[]>([]);
 
-  const lastTimeRef = useRef(0);
-
-  useEffect(() => {
-    scoreRef.current = score;
-  }, [score]);
-
-  useEffect(() => {
-    notesRef.current = notes;
-  }, [notes]);
-
-  const startGame = useCallback(() => {
-    updateScore(0);
-    setCombo(0);
-    setMaxCombo(0);
-    setTimeLeft(45);
-    setNotes([]);
-    setFeedback(null);
-    particlesRef.current = [];
-    floatingTextsRef.current = [];
-
-    startWithCountdown(() => {
-      lastTimeRef.current = performance.now();
-      startLoop(gameStep);
-    });
-  }, [startWithCountdown, startLoop, updateScore]);
-
-  const triggerFeedback = (text: string, isGood: boolean) => {
-    if (isGood) {
-      setFeedback({ text, color: 'text-emerald-400 font-black scale-110' });
-    } else {
-      setFeedback({ text, color: 'text-red-500 font-bold scale-95' });
-    }
-    setTimeout(() => setFeedback(null), 300);
-  };
-
-  const triggerHitEffects = (laneIdx: number, type: 'perfect' | 'good' | 'bad' | 'miss', earnedText: string) => {
-    const x = (laneIdx + 0.5) * 96;
-    const y = 240; // target line zone
-    
-    let color = '#9ca3af'; // gray default
-    let particleCount = 6;
-    let shakeAmt = 2;
-
-    if (type === 'perfect') {
-      color = '#fbbf24'; // beautiful glowing gold
-      particleCount = 20;
-      shakeAmt = 15;
-    } else if (type === 'good') {
-      const colors = ['#ec4899', '#06b6d4', '#eab308', '#a855f7'];
-      color = colors[laneIdx] || '#06b6d4';
-      particleCount = 12;
-      shakeAmt = 7;
-    } else if (type === 'bad' || type === 'miss') {
-      color = '#ef4444'; // red timing error
-      particleCount = 8;
-      shakeAmt = 9;
-    }
-
-    shakeRef.current = Math.max(shakeRef.current, shakeAmt);
-
-    // Spawn floating text
-    floatingTextsRef.current.push({
-      x,
-      y: y - 10,
-      text: earnedText,
-      color,
-      alpha: 1.0,
-      vy: -1.2
-    });
-
-    // Spawn particles
-    for (let i = 0; i < particleCount; i++) {
-      particlesRef.current.push({
-        x,
-        y,
-        vx: (Math.random() - 0.5) * 6,
-        vy: type === 'perfect' ? -Math.random() * 5 - 2 : -Math.random() * 4 - 1,
-        color: type === 'perfect' && i % 2 === 0 ? '#ffffff' : color,
-        radius: Math.random() * 2.5 + 1.5,
-        alpha: 1.0,
-        decay: Math.random() * 0.04 + 0.02
-      });
-    }
-  };
-
-  const triggerLaneHit = (laneIdx: number) => {
-    if (gameStateRef.current !== 'playing') return;
-
-    // Flash key state for visual feedback
-    setKeyStates(prev => {
-      const copy = [...prev];
-      copy[laneIdx] = true;
-      return copy;
-    });
-    setTimeout(() => {
-      setKeyStates(prev => {
-        const copy = [...prev];
-        copy[laneIdx] = false;
-        return copy;
-      });
-    }, 100);
-
-    // Look for matching note in the target zone (y from 80 to 95 is standard target slot)
-    const currentNotes = notesRef.current;
-    const laneNotes = currentNotes.filter(n => n.lane === laneIdx);
-
-    if (laneNotes.length === 0) {
-      // Misclick / Empty lane tap penalty
-      audio.playHit();
-      setCombo(0);
-      triggerHitEffects(laneIdx, 'bad', 'TAP!');
-      return;
-    }
-
-    // Find the closest note to target bar center (y = 88)
-    let closestNote: BeatNote | null = null;
-    let minDistance = 999;
-
-    for (const note of laneNotes) {
-      const distance = Math.abs(note.y - 88);
-      if (distance < minDistance) {
-        minDistance = distance;
-        closestNote = note;
-      }
-    }
-
-    if (closestNote && minDistance < 15) {
-      // HIT SUCCESS
-      audio.playScore();
-      let earned = 0;
-      if (minDistance <= 5) {
-        earned = 50 + combo * 2;
-        triggerFeedback('🔥 PERFECT! 🔥', true);
-        triggerHitEffects(laneIdx, 'perfect', `PERFECT +${earned}`);
-      } else {
-        earned = 25 + combo;
-        triggerFeedback('👍 GOOD! 👍', true);
-        triggerHitEffects(laneIdx, 'good', `GOOD +${earned}`);
-      }
-
-      addScore(earned);
-      setCombo(prev => {
-        const next = prev + 1;
-        if (next > maxCombo) setMaxCombo(next);
-        return next;
-      });
-
-      // Blast/Remove note
-      const noteIdToKill = closestNote.id;
-      setNotes(prev => prev.filter(n => n.id !== noteIdToKill));
-    } else {
-      // Too early or too late
-      audio.playHit();
-      setCombo(0);
-      triggerFeedback('❌ BAD TIMING ❌', false);
-      triggerHitEffects(laneIdx, 'bad', 'MISS!');
-    }
-  };
-
-  // Keyboard controls listener
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
+  const tapLane = useCallback(
+    (laneIdx: number) => {
       if (gameStateRef.current !== 'playing') return;
-      const key = e.key.toUpperCase();
-      const laneIdx = LANES_KEYS.indexOf(key);
-      if (laneIdx !== -1) {
-        e.preventDefault();
-        triggerLaneHit(laneIdx);
-      }
-    };
+      const stage = stageRef.current;
+      const st = rhythmRef.current;
 
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+      // Find closest note in this lane near HIT_Z
+      let bestIdx = -1;
+      let bestDist = Infinity;
+      notesRef.current.forEach((n, idx) => {
+        if (n.lane === laneIdx && !n.hit) {
+          const d = Math.abs(n.z - HIT_Z);
+          if (d < bestDist) {
+            bestDist = d;
+            bestIdx = idx;
+          }
+        }
+      });
+
+      if (bestIdx !== -1 && bestDist < 1.35) {
+        const note = notesRef.current[bestIdx];
+        note.hit = true;
+        stage?.scene.remove(note.mesh);
+        notesRef.current.splice(bestIdx, 1);
+
+        const isPerfect = bestDist < 0.55;
+        st.combo += 1;
+        setCombo(st.combo);
+        setJudgment(isPerfect ? 'PERFECT!' : 'GREAT!');
+        const mult = Math.min(4, 1 + Math.floor(st.combo / 6));
+        addScore((isPerfect ? 30 : 15) * mult);
+        audio.playCoin?.();
+        stage?.particles.burst(
+          LANE_X[laneIdx],
+          0.45,
+          HIT_Z,
+          isPerfect ? 22 : 12,
+          LANE_COLORS[laneIdx],
+          7
+        );
+        if (isPerfect) stage?.triggerTrauma(0.18);
+      } else {
+        stage?.particles.burst(LANE_X[laneIdx], 0.3, HIT_Z, 6, 0x64748b, 3.5);
+        audio.playClick?.();
+      }
+    },
+    [addScore]
+  );
+
+  const handleStart = useCallback(() => {
+    const stage = stageRef.current;
+    if (stage) {
+      notesRef.current.forEach((n) => stage.scene.remove(n.mesh));
+    }
+    notesRef.current = [];
+    rhythmRef.current = {
+      combo: 0,
+      missesLeft: 5,
+      speed: 11.5,
+      spawnTimer: 0.35
+    };
+    setCombo(0);
+    setMissesLeft(5);
+    setJudgment('SYNTH READY');
+    startWithCountdown();
+  }, [startWithCountdown]);
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      const k = e.key.toLowerCase();
+      if (k === 'd' || k === 'arrowleft' || k === '1') tapLane(0);
+      else if (k === 'f' || k === 'arrowdown' || k === '2') tapLane(1);
+      else if (k === 'j' || k === 'arrowup' || k === '3') tapLane(2);
+      else if (k === 'k' || k === 'arrowright' || k === '4') tapLane(3);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [tapLane]);
+
+  const handleSelectPreset = useCallback((preset: CameraPreset3D) => {
+    setCameraPreset(preset);
+    stageRef.current?.setCameraPreset(preset);
   }, []);
 
-  const gameStep = useCallback((timestamp: number, dt: number) => {
-    if (gameStateRef.current !== 'playing') return;
-
-    const delta = dt / 16.666;
-    gameTimerRef.current += delta;
-    spawnTimerRef.current += delta;
-
-    // Time limit (45 seconds = 2700 frames at 60fps)
-    if (gameTimerRef.current > 2700) {
-      triggerGameOver();
-      return;
-    }
-    
-    setTimeLeft(Math.max(0, Math.ceil(45 - gameTimerRef.current / 60)));
-
-    // Cascading notes downwards (Runs at ~60fps)
-    setNotes(prev => {
-      let missedAny = false;
-      const updated = prev.map(n => {
-        const nextY = n.y + 1.25 * delta; // standard fall velocity
-        if (nextY > 100) {
-          missedAny = true;
-          return null; // Note missed (went past screen edge)
-        }
-        return { ...n, y: nextY };
-      }).filter(Boolean) as BeatNote[];
-
-      if (missedAny) {
-        setCombo(0);
-        triggerFeedback('⚠️ MISS ⚠️', false);
-        shakeRef.current = Math.max(shakeRef.current, 6);
-      }
-
-      return updated;
+  const handleCycleQuality = useCallback(() => {
+    setQuality((prev) => {
+      const next: QualityLevel3D =
+        prev === 'ultra' ? 'balanced' : prev === 'balanced' ? 'performance' : 'ultra';
+      stageRef.current?.setQualityLevel(next);
+      return next;
     });
-
-    // Periodic random note spawning (synchronized to standard beats rhythm)
-    if (spawnTimerRef.current > 37) { // roughly 620ms
-      spawnTimerRef.current = 0;
-      const targetLane = Math.floor(Math.random() * 4);
-      const newNote: BeatNote = {
-        id: `${Date.now()}-${Math.random()}`,
-        lane: targetLane,
-        y: 0,
-      };
-      setNotes(prev => [...prev, newNote]);
-    }
-  }, [triggerGameOver]);
-
-  const draw = () => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    ctx.clearRect(0, 0, 384, 280);
-
-    // Apply direct DOM transformation for camera shake on the cabinet element
-    const cabinet = cabinetRef.current;
-    if (cabinet) {
-      if (shakeRef.current > 0) {
-        const dx = (Math.random() - 0.5) * shakeRef.current;
-        const dy = (Math.random() - 0.5) * shakeRef.current;
-        cabinet.style.transform = `translate(${dx}px, ${dy}px)`;
-        // decay shake
-        shakeRef.current *= 0.88;
-        if (shakeRef.current < 0.5) {
-          shakeRef.current = 0;
-          cabinet.style.transform = 'none';
-        }
-      } else {
-        cabinet.style.transform = 'none';
-      }
-    }
-
-    // Update & Render standard particle sparks
-    particlesRef.current.forEach(p => {
-      p.x += p.vx;
-      p.y += p.vy;
-      p.alpha -= p.decay;
-
-      ctx.fillStyle = p.color;
-      ctx.shadowColor = p.color;
-      ctx.shadowBlur = 4;
-      ctx.globalAlpha = Math.max(0, p.alpha);
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
-      ctx.fill();
-    });
-    ctx.shadowBlur = 0;
-    ctx.globalAlpha = 1.0;
-    particlesRef.current = particlesRef.current.filter(p => p.alpha > 0);
-
-    // Update & Render arcade-style floating score text popups
-    floatingTextsRef.current.forEach(t => {
-      t.y += t.vy;
-      t.alpha -= 0.025;
-
-      ctx.fillStyle = t.color;
-      ctx.globalAlpha = Math.max(0, t.alpha);
-      ctx.font = 'bold 8px "Press Start 2P", monospace';
-      ctx.textAlign = 'center';
-      ctx.fillText(t.text, t.x, t.y);
-    });
-    ctx.globalAlpha = 1.0;
-    floatingTextsRef.current = floatingTextsRef.current.filter(t => t.alpha > 0);
-  };
+  }, []);
 
   useEffect(() => {
-    if (gameStateRef.current === 'playing') draw();
-  }, [notes, draw]);
+    const container = mountRef.current;
+    if (!container) return;
+
+    let stage: ThreeStageController;
+    try {
+      stage = new ThreeStageController({
+        container,
+        backgroundColor: 0x090514,
+        fogColor: 0x090514,
+        fogDensity: 0.018,
+        initialPreset: 'chase',
+        gridPrimaryColor: '#a855f7',
+        gridSecondaryColor: '#120924',
+        cameraPresets: {
+          chase: { position: [0, 6.2, 10.8], lookAt: [0, 0.2, -2.5], fov: 52 },
+          isometric: { position: [7.8, 9.5, 9.5], lookAt: [0, 0.2, -1], fov: 46 },
+          diorama: { position: [0, 14.5, 2.0], lookAt: [0, 0, -1], fov: 46 }
+        }
+      });
+    } catch {
+      return;
+    }
+
+    stageRef.current = stage;
+    setQuality(stage.getQualityLevel());
+
+    // Build 4-Lane Synthwave Note Highway & Receptor Pads
+    const padGeo = new THREE.CylinderGeometry(0.68, 0.75, 0.22, 16);
+    for (let i = 0; i < 4; i++) {
+      const padMat = new THREE.MeshStandardMaterial({
+        color: LANE_COLORS[i],
+        emissive: LANE_COLORS[i],
+        emissiveIntensity: 0.65,
+        roughness: 0.2
+      });
+      const pad = new THREE.Mesh(padGeo, padMat);
+      pad.position.set(LANE_X[i], 0.11, HIT_Z);
+      stage.scene.add(pad);
+    }
+
+    const noteGeo = new THREE.BoxGeometry(1.25, 0.36, 0.65);
+
+    stage.startLoop((dt) => {
+      if (gameStateRef.current !== 'playing') return;
+
+      const st = rhythmRef.current;
+      st.speed = Math.min(20, st.speed + dt * 0.18);
+
+      st.spawnTimer -= dt;
+      if (st.spawnTimer <= 0) {
+        st.spawnTimer = Math.max(0.24, 0.55 - (st.speed - 11.5) * 0.02);
+        const lane = Math.floor(Math.random() * 4);
+        const mat = new THREE.MeshPhysicalMaterial({
+          color: LANE_COLORS[lane],
+          emissive: LANE_COLORS[lane],
+          emissiveIntensity: 0.75,
+          roughness: 0.15,
+          clearcoat: 0.9
+        });
+        const mesh = new THREE.Mesh(noteGeo, mat);
+        mesh.position.set(LANE_X[lane], 0.28, -15);
+        mesh.castShadow = true;
+        stage.scene.add(mesh);
+        notesRef.current.push({ mesh, lane, z: -15, hit: false });
+      }
+
+      for (let i = notesRef.current.length - 1; i >= 0; i--) {
+        const n = notesRef.current[i];
+        n.z += st.speed * dt;
+        n.mesh.position.z = n.z;
+
+        if (n.z > HIT_Z + 1.45) {
+          stage.scene.remove(n.mesh);
+          notesRef.current.splice(i, 1);
+          st.combo = 0;
+          setCombo(0);
+          setJudgment('MISS');
+          st.missesLeft -= 1;
+          setMissesLeft(st.missesLeft);
+          stage.triggerTrauma(0.35);
+          if (st.missesLeft <= 0) {
+            triggerGameOver(scoreRef.current);
+            return;
+          }
+        }
+      }
+    });
+
+    return () => {
+      stage.dispose();
+      stageRef.current = null;
+    };
+  }, [scoreRef, triggerGameOver]);
 
   return (
-    <GameContainer aspect="square" maxWidth="sm">
-      {gameState === 'playing' && (
-        <GameHUD 
-          stats={[
-            { id: 'score', label: 'SKOR', value: score, emphasized: true },
-            { id: 'combo', label: 'KOMBO', value: combo },
-            { id: 'time', label: 'WAKTU', value: timeLeft }
-          ]} 
-        />
-      )}
+    <div className="relative w-full h-full min-h-[460px] bg-slate-950 overflow-hidden rounded-2xl border border-purple-500/20">
+      <div ref={mountRef} className="absolute inset-0 w-full h-full" />
 
-      <GameOverlay
-        gameState={gameState}
-        score={score}
-        countdown={countdown}
-        onStart={startGame}
-        onRestart={startGame}
-        instructions="Ikuti ritme musik siber! Tekan tombol D, F, J, K atau tap pada layar saat not berada di garis target."
-      />
-
-      {gameState === 'playing' && (
-        <div ref={cabinetRef} className="w-full aspect-video md:aspect-square bg-zinc-950 border-4 border-zinc-900 rounded-2xl relative overflow-hidden flex mb-4 transition-transform duration-75">
-          {/* Transparent particle overlay canvas */}
-          <canvas ref={canvasRef} width={384} height={280} className="absolute inset-0 pointer-events-none w-full h-full object-fill z-20" />
-          {/* Split tracks divisions */}
-          {[0, 1, 2, 3].map((track) => (
-            <div key={track} className="flex-1 h-full border-r border-zinc-900/50 relative last:border-r-0">
-              {/* Track Target hit line slots */}
-              <div className={`absolute bottom-[12%] inset-x-1.5 h-[10px] rounded border-2 z-10 transition-colors ${
-                keyStates[track] ? 'bg-white/30 border-white' : 'bg-transparent border-zinc-800/40'
-              }`} />
-            </div>
-          ))}
-
-          {/* Falling Beat Notes */}
-          {notes.map((note) => {
-            const lanePercent = 25 * note.lane;
-            return (
-              <div
-                key={note.id}
-                className={`absolute w-8 h-8 rounded-full border-2 transform -translate-x-1/2 flex items-center justify-center text-xs font-bold text-white select-none ${NOTE_GLOWS[note.lane]}`}
-                style={{
-                  left: `${lanePercent + 12.5}%`,
-                  top: `${note.y}%`,
-                  transition: 'top 16ms linear',
-                }}
-              >
-                🎵
-              </div>
-            );
-          })}
-
-          {/* Float combo text overlay inside cabinet */}
-          {feedback && (
-            <div className="absolute inset-x-0 top-1/3 flex items-center justify-center pointer-events-none z-30">
-              <span className={`font-mono text-xs uppercase tracking-wider text-center transition-all duration-300 transform scale-125 select-none ${feedback.color}`}>
-                {feedback.text}
-              </span>
-            </div>
+      <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex flex-wrap items-center justify-between gap-2 p-3.5">
+        <div className="flex items-center gap-3 rounded-xl border border-white/10 bg-slate-950/85 px-3.5 py-2 text-xs text-slate-200 tabular-nums">
+          <span className="flex items-center gap-1 font-semibold text-purple-400">
+            <Music className="w-3.5 h-3.5" /> {judgment}
+          </span>
+          <span aria-hidden="true">·</span>
+          <span>SKOR: <strong className="text-white">{score}</strong></span>
+          {combo > 1 && (
+            <>
+              <span aria-hidden="true">·</span>
+              <span className="text-amber-400 font-semibold">{combo}x COMBO</span>
+            </>
           )}
         </div>
-      )}
 
+        <div className="flex items-center gap-1.5 rounded-xl border border-white/10 bg-slate-950/85 px-3.5 py-2 text-xs font-semibold text-rose-400 tabular-nums">
+          <Flame className="w-3.5 h-3.5" /> NYAWA: {missesLeft}
+        </div>
+      </div>
+
+      {/* Interactive Touch / Click 4-Lane Buttons above Dock */}
       {gameState === 'playing' && (
-        <div className="grid grid-cols-4 gap-2 w-full">
-          {LANES_KEYS.map((k, idx) => (
+        <div className="pointer-events-auto absolute inset-x-0 bottom-16 z-10 flex justify-center gap-2 px-4">
+          {['D (Lane 1)', 'F (Lane 2)', 'J (Lane 3)', 'K (Lane 4)'].map((lbl, idx) => (
             <button
-              key={k}
-              onPointerDown={(e) => { 
-                e.preventDefault(); 
-                triggerLaneHit(idx);
-                if (navigator.vibrate) navigator.vibrate(10);
-              }}
-              className={`py-4 rounded-xl border-2 font-mono font-black text-sm text-center cursor-pointer transition select-none active:scale-90 touch-none no-tap-highlight ${
-                keyStates[idx]
-                  ? 'bg-white border-white text-black shadow-[0_0_15px_rgba(255,255,255,0.5)]'
-                  : LANE_COLORS[idx]
-              }`}
+              key={lbl}
+              type="button"
+              onPointerDown={() => tapLane(idx)}
+              className="rounded-xl border border-white/15 bg-slate-900/90 px-4 py-2.5 text-xs font-semibold text-white shadow-lg active:scale-95 transition-transform whitespace-nowrap shrink-0"
             >
-              <span>{k}</span>
+              {lbl}
             </button>
           ))}
         </div>
       )}
-    </GameContainer>
+
+      <ThreeDockOverlay
+        cameraPreset={cameraPreset}
+        onSelectPreset={handleSelectPreset}
+        quality={quality}
+        onCycleQuality={handleCycleQuality}
+        extraControls={
+          <span className="hidden sm:inline-flex items-center gap-1 text-[11px] text-slate-400 px-2 whitespace-nowrap shrink-0">
+            <Zap className="w-3 h-3 text-purple-400" /> Tombol D, F, J, K atau Klik Tombol Jalur Saat Balok Menyentuh Target
+          </span>
+        }
+      />
+
+      <GameOverlay
+        gameState={gameState}
+        score={score}
+        highScore={highScore}
+        countdown={countdown}
+        onStart={handleStart}
+        onRestart={handleStart}
+        title="Cyber Rhythm Beats 3D"
+        description="Ketuk irama not balok 3D tepat saat mencapai bantalan frekuensi Synthwave!"
+        themeColor="purple"
+      />
+    </div>
   );
 }

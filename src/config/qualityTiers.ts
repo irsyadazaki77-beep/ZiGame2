@@ -128,13 +128,13 @@ export const GAME_QUALITY_MAP: Record<string, GameQualityInfo> = {
   },
   stacker: {
     gameId: 'stacker',
-    tier: 'core',
+    tier: 'flagship',
     targetFps: 60,
     mobileOptimized: true,
     gamepadOptimized: true,
     saveStateSupported: false,
     ghostModeSupported: false,
-    competitiveSupported: false,
+    competitiveSupported: true,
     estimatedDuration: 'quick'
   },
   sinerider: {
@@ -150,13 +150,13 @@ export const GAME_QUALITY_MAP: Record<string, GameQualityInfo> = {
   },
   cosmicdodge: {
     gameId: 'cosmicdodge',
-    tier: 'core',
+    tier: 'flagship',
     targetFps: 60,
     mobileOptimized: true,
     gamepadOptimized: true,
     saveStateSupported: false,
     ghostModeSupported: true,
-    competitiveSupported: false,
+    competitiveSupported: true,
     estimatedDuration: 'quick'
   },
   lasergrid: {
@@ -249,13 +249,13 @@ export const GAME_QUALITY_MAP: Record<string, GameQualityInfo> = {
   },
   maze: {
     gameId: 'maze',
-    tier: 'core',
+    tier: 'flagship',
     targetFps: 60,
     mobileOptimized: true,
     gamepadOptimized: true,
     saveStateSupported: false,
     ghostModeSupported: false,
-    competitiveSupported: false,
+    competitiveSupported: true,
     estimatedDuration: 'standard'
   },
   matrixmemory: {
@@ -282,24 +282,24 @@ export const GAME_QUALITY_MAP: Record<string, GameQualityInfo> = {
   },
   puttgolf: {
     gameId: 'puttgolf',
-    tier: 'core',
+    tier: 'flagship',
     targetFps: 60,
     mobileOptimized: true,
-    gamepadOptimized: false,
+    gamepadOptimized: true,
     saveStateSupported: false,
     ghostModeSupported: false,
-    competitiveSupported: false,
+    competitiveSupported: true,
     estimatedDuration: 'standard'
   },
   archery: {
     gameId: 'archery',
-    tier: 'core',
+    tier: 'flagship',
     targetFps: 60,
     mobileOptimized: true,
-    gamepadOptimized: false,
+    gamepadOptimized: true,
     saveStateSupported: false,
     ghostModeSupported: false,
-    competitiveSupported: false,
+    competitiveSupported: true,
     estimatedDuration: 'quick'
   },
   mines: {
@@ -348,13 +348,13 @@ export const GAME_QUALITY_MAP: Record<string, GameQualityInfo> = {
   },
   neondrift: {
     gameId: 'neondrift',
-    tier: 'core',
+    tier: 'flagship',
     targetFps: 60,
     mobileOptimized: true,
     gamepadOptimized: true,
     saveStateSupported: false,
     ghostModeSupported: true,
-    competitiveSupported: false,
+    competitiveSupported: true,
     estimatedDuration: 'quick'
   },
   lockbreaker: {

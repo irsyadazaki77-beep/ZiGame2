@@ -23,12 +23,26 @@ export function MainLayout({ children }: { children: React.ReactNode }) {
   });
 
   useEffect(() => {
-    try {
-      const saved = localStorage.getItem('zigame_sidebar_collapsed');
-      if (saved === null) {
-        setIsSidebarCollapsed(window.innerWidth < 1280);
-      }
-    } catch {}
+    const mql = window.matchMedia('(max-width: 1279px)');
+    const handleMediaChange = (e: MediaQueryListEvent | MediaQueryList) => {
+      try {
+        const saved = localStorage.getItem('zigame_sidebar_collapsed');
+        if (saved === null) {
+          setIsSidebarCollapsed(e.matches);
+        }
+      } catch {}
+    };
+    
+    // Initial check
+    handleMediaChange(mql);
+    
+    if (mql.addEventListener) {
+      mql.addEventListener('change', handleMediaChange);
+      return () => mql.removeEventListener('change', handleMediaChange);
+    } else {
+      mql.addListener(handleMediaChange);
+      return () => mql.removeListener(handleMediaChange);
+    }
   }, []);
 
   const toggleSidebar = useCallback(() => {
@@ -44,8 +58,18 @@ export function MainLayout({ children }: { children: React.ReactNode }) {
   // Keyboard shortcut listener ('[' to toggle sidebar)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
-        return;
+      const target = e.target as HTMLElement | null;
+      if (
+        target && (
+          target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.tagName === 'SELECT' ||
+          target.isContentEditable ||
+          target.closest?.('[role="dialog"]') ||
+          target.closest?.('.modal-content')
+        )
+      ) {
+        return; // Jangan toggle sidebar jika pengguna sedang mengetik atau berada di dalam modal/dialog
       }
       if (e.key === '[') {
         toggleSidebar();

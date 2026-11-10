@@ -1722,4 +1722,202 @@ describe('ZiGame 2.0 Backend Authority & Security Tests', () => {
       expect(Array.isArray(listRes.body.entries)).toBe(true);
     });
   });
+
+  describe('Phase 5 Advanced Anti-Cheat HMAC, Auto-Suspension & Threat Defense Suite', () => {
+    it('HMAC: Session start returns cryptographic signature and rejects tampered signature or clientProof', async () => {
+      const uid = `hmac-tester-${Date.now()}`;
+
+      // 1. Start session and verify signature is issued
+      const startRes = await request(app)
+        .post('/api/session/start')
+        .set('x-test-uid', uid)
+        .send({ gameId: 'snake' });
+
+      expect(startRes.status).toBe(200);
+      expect(startRes.body.sessionId).toBeDefined();
+      expect(startRes.body.nonce).toBeDefined();
+      expect(startRes.body.signature).toBeDefined();
+      expect(typeof startRes.body.signature).toBe('string');
+      expect(startRes.body.signature.length).toBe(64); // SHA-256 hex
+
+      const { sessionId } = startRes.body;
+      const sessionObj = memoryStore.sessions.get(sessionId);
+      if (sessionObj) sessionObj.startTime = Date.now() - 5000;
+
+      // 2. Submit score with forged clientProof -> must be rejected with 422 INVALID_SESSION_SIGNATURE and burn session
+      const forgedRes = await request(app)
+        .post('/api/submit-score')
+        .set('x-test-uid', uid)
+        .send({
+          sessionId,
+          gameId: 'snake',
+          score: 100,
+          clientProof: '0000000000000000000000000000000000000000000000000000000000000000',
+          idempotencyKey: `hmac_forged_${Date.now()}`
+        });
+
+      expect(forgedRes.status).toBe(422);
+      expect(forgedRes.body.code).toBe('INVALID_SESSION_SIGNATURE');
+
+      // 3. Reusing the burned session even without forged proof must fail with SESSION_ALREADY_CONSUMED
+      const retryRes = await request(app)
+        .post('/api/submit-score')
+        .set('x-test-uid', uid)
+        .send({
+          sessionId,
+          gameId: 'snake',
+          score: 100,
+          idempotencyKey: `hmac_retry_${Date.now()}`
+        });
+
+      expect(retryRes.status).toBe(422);
+      expect(retryRes.body.code).toBe('SESSION_ALREADY_CONSUMED');
+    });
+
+    it('Auto-Ban: Repeated anti-cheat violations (3 strikes) automatically freeze the user account', async () => {
+      const uid = `repeat-offender-${Date.now()}`;
+
+      // Trigger 3 consecutive CRITICAL score ceiling violations
+      for (let strike = 1; strike <= 3; strike++) {
+        const startRes = await request(app)
+          .post('/api/session/start')
+          .set('x-test-uid', uid)
+          .send({ gameId: 'snake' });
+        expect(startRes.status).toBe(200);
+
+        const sessionId = startRes.body.sessionId;
+        const sessionObj = memoryStore.sessions.get(sessionId);
+        if (sessionObj) sessionObj.startTime = Date.now() - 5000;
+
+        const cheatRes = await request(app)
+          .post('/api/submit-score')
+          .set('x-test-uid', uid)
+          .send({
+            sessionId,
+            gameId: 'snake',
+            score: 999999, // Exceeds ceiling -> CRITICAL strike
+            idempotencyKey: `strike_${strike}_${Date.now()}`
+          });
+
+        expect(cheatRes.status).toBe(422);
+        expect(cheatRes.body.code).toBe('SCORE_CEILING_EXCEEDED');
+      }
+
+      // Now on the 4th attempt, starting a session or mutating economy must be blocked with 403 ACCOUNT_SUSPENDED
+      const blockedSession = await request(app)
+        .post('/api/session/start')
+        .set('x-test-uid', uid)
+        .send({ gameId: 'snake' });
+
+      expect(blockedSession.status).toBe(403);
+      expect(blockedSession.body.code).toBe('ACCOUNT_SUSPENDED');
+
+      const blockedBuy = await request(app)
+        .post('/api/buy-item')
+        .set('x-test-uid', uid)
+        .send({ itemId: 'av_dino', idempotencyKey: `blocked_buy_${Date.now()}` });
+
+      expect(blockedBuy.status).toBe(403);
+      expect(blockedBuy.body.code).toBe('ACCOUNT_SUSPENDED');
+    });
+
+    it('Admin Ban Panel: Admin can manually ban, inspect, and unban a user account', async () => {
+      const adminUid = `sec-admin-${Date.now()}`;
+      const targetUid = `manual-ban-target-${Date.now()}`;
+
+      // 1. Admin bans target user
+      const banRes = await request(app)
+        .post('/api/admin/security/ban-user')
+        .set('x-test-uid', adminUid)
+        .set('x-test-admin', 'true')
+        .send({
+          userId: targetUid,
+          reason: 'Terdeteksi bot otomatis pada leaderboard',
+          durationHours: 24
+        });
+
+      expect(banRes.status).toBe(200);
+      expect(banRes.body.success).toBe(true);
+      expect(banRes.body.profile.isBanned).toBe(true);
+
+      // 2. Target user cannot start a game session while banned
+      const attemptRes = await request(app)
+        .post('/api/session/start')
+        .set('x-test-uid', targetUid)
+        .send({ gameId: 'snake' });
+
+      expect(attemptRes.status).toBe(403);
+      expect(attemptRes.body.code).toBe('ACCOUNT_SUSPENDED');
+
+      // 3. Admin queries ban list and sees targetUid
+      const listRes = await request(app)
+        .get('/api/admin/security/bans')
+        .set('x-test-uid', adminUid)
+        .set('x-test-admin', 'true');
+
+      expect(listRes.status).toBe(200);
+      expect(listRes.body.users.some((u: any) => u.userId === targetUid && u.isBanned)).toBe(true);
+
+      // 4. Admin unbans target user
+      const unbanRes = await request(app)
+        .post('/api/admin/security/unban-user')
+        .set('x-test-uid', adminUid)
+        .set('x-test-admin', 'true')
+        .send({ userId: targetUid });
+
+      expect(unbanRes.status).toBe(200);
+      expect(unbanRes.body.profile.isBanned).toBe(false);
+      expect(unbanRes.body.profile.strikeCount).toBe(0);
+
+      // 5. Target user can now start a game session again
+      const restoredRes = await request(app)
+        .post('/api/session/start')
+        .set('x-test-uid', targetUid)
+        .send({ gameId: 'snake' });
+
+      expect(restoredRes.status).toBe(200);
+      expect(restoredRes.body.sessionId).toBeDefined();
+    });
+
+    it('Sanitizer & Headers: Blocks NoSQL operator injection and sets strict CSP headers', async () => {
+      const uid = `sanitizer-user-${Date.now()}`;
+
+      // Check security headers on health endpoint
+      const healthRes = await request(app).get('/api/health');
+      expect(healthRes.headers['content-security-policy']).toBeDefined();
+      expect(healthRes.headers['x-content-type-options']).toBe('nosniff');
+      expect(healthRes.headers['x-frame-options']).toBe('SAMEORIGIN');
+
+      // Attempt NoSQL operator injection ($ne) in JSON body -> must be blocked with 400 SECURITY_VIOLATION
+      const injectionRes = await request(app)
+        .post('/api/buy-item')
+        .set('x-test-uid', uid)
+        .send({
+          itemId: { '$ne': null },
+          idempotencyKey: 'nosql_inj_1'
+        });
+
+      expect(injectionRes.status).toBe(400);
+      expect(injectionRes.body.code).toBe('SECURITY_VIOLATION');
+    });
+
+    it('Schema Gateway & Modular Routers: Strips unapproved mass-assignment fields and reports architecture status', async () => {
+      const adminUid = `arch-admin-${Date.now()}`;
+      const archRes = await request(app)
+        .get('/api/admin/security/architecture')
+        .set('x-test-uid', adminUid)
+        .set('x-test-admin', 'true');
+
+      expect(archRes.status).toBe(200);
+      expect(archRes.body.success).toBe(true);
+      expect(archRes.body.architecture.schemaGatewayActive).toBe(true);
+      expect(archRes.body.architecture.domainRouters).toContain('sessionRoutes');
+      expect(archRes.body.architecture.domainRouters).toContain('economyRoutes');
+      expect(archRes.body.architecture.domainRouters).toContain('competitiveRoutes');
+      expect(archRes.body.architecture.domainRouters).toContain('adminRoutes');
+      expect(archRes.body.architecture.registeredSchemasCount).toBeGreaterThanOrEqual(12);
+    });
+  });
 });
+
+

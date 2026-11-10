@@ -30,6 +30,7 @@ export default function ChallengesPage({
   const navigate = useNavigate();
   const [tab, setTab] = useState<'daily' | 'weekly' | 'missions' | 'special' | 'quests' | 'friends'>('daily');
   const [challenges, setChallenges] = useState<Challenge[]>([]);
+  const [claimingId, setClaimingId] = useState<string | null>(null);
   const [friendSubTab, setFriendSubTab] = useState<'incoming' | 'outgoing'>('incoming');
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [selectedGameForChallenge, setSelectedGameForChallenge] = useState<GameStats>(() => games[0]);
@@ -37,7 +38,6 @@ export default function ChallengesPage({
 
   const incomingChallenges = friendChallengeService.getIncomingChallenges();
   const outgoingChallenges = friendChallengeService.getOutgoingChallenges();
-
 
   // Initialize and synchronize challenges on load
   useEffect(() => {
@@ -48,31 +48,34 @@ export default function ChallengesPage({
   const filteredChallenges = challenges.filter(c => c.frequency === (tab === 'missions' ? 'daily' : tab));
 
   const handleClaim = (challenge: Challenge) => {
-    if (!challenge.completed || challenge.claimed) return;
+    if (!challenge.completed || challenge.claimed || claimingId === challenge.id) return;
 
+    setClaimingId(challenge.id);
     economyService.claimReward(challenge.id, 'challenge', profile.name).then(res => {
       if (res.success && res.newBalance !== undefined) {
-          audio.playLevelUp();
+        audio.playLevelUp();
+        
+        const result = challengeService.claimChallenge(challenge.id);
+        if (result.success) {
+          const earnedXp = result.xp || 0;
+          onUpdateProfile(prev => {
+            const currentXp = prev.xp || 0;
+            const nextXp = currentXp + earnedXp;
+            const nextLevel = progressionService.calculateLevel(nextXp).level;
+            return {
+              ...prev,
+              coins: res.newBalance,
+              xp: nextXp,
+              level: nextLevel
+            };
+          });
           
-          const result = challengeService.claimChallenge(challenge.id);
-          if (result.success) {
-            const earnedXp = result.xp || 0;
-            onUpdateProfile(prev => {
-              const currentXp = prev.xp || 0;
-              const nextXp = currentXp + earnedXp;
-              const nextLevel = progressionService.calculateLevel(nextXp).level;
-              return {
-                ...prev,
-                coins: res.newBalance,
-                xp: nextXp,
-                level: nextLevel
-              };
-            });
-            
-            setChallenges(challengeService.getStoredChallenges());
-          }
+          setChallenges(challengeService.getStoredChallenges());
         }
-      });
+      }
+    }).finally(() => {
+      setClaimingId(null);
+    });
   };
 
   // Computes progress summary
@@ -105,10 +108,10 @@ export default function ChallengesPage({
       </section>
 
       {/* Filter Tabs Navigation */}
-      <div className="flex gap-1 overflow-x-auto pb-2 border-b border-border-subtle">
+      <div className="flex gap-1.5 overflow-x-auto no-scrollbar snap-x flex-nowrap pb-2 border-b border-border-subtle">
         <button
           onClick={() => { audio.playHit(); setTab('daily'); }}
-          className={`px-4 py-2.5 rounded-xl text-xs font-mono font-bold uppercase transition shrink-0 cursor-pointer flex items-center gap-1.5 ${
+          className={`px-4 py-2.5 rounded-xl text-xs font-mono font-bold uppercase transition shrink-0 snap-start cursor-pointer flex items-center gap-1.5 ${
             tab === 'daily' ? 'bg-amber-500/10 text-amber-500 dark:text-amber-400 border border-amber-500/30' : 'text-text-muted hover:text-text-primary border border-transparent'
           }`}
         >
@@ -116,7 +119,7 @@ export default function ChallengesPage({
         </button>
         <button
           onClick={() => { audio.playHit(); setTab('weekly'); }}
-          className={`px-4 py-2.5 rounded-xl text-xs font-mono font-bold uppercase transition shrink-0 cursor-pointer flex items-center gap-1.5 ${
+          className={`px-4 py-2.5 rounded-xl text-xs font-mono font-bold uppercase transition shrink-0 snap-start cursor-pointer flex items-center gap-1.5 ${
             tab === 'weekly' ? 'bg-amber-500/10 text-amber-500 dark:text-amber-400 border border-amber-500/30' : 'text-text-muted hover:text-text-primary border border-transparent'
           }`}
         >
@@ -124,7 +127,7 @@ export default function ChallengesPage({
         </button>
         <button
           onClick={() => { audio.playHit(); setTab('missions'); }}
-          className={`px-4 py-2.5 rounded-xl text-xs font-mono font-bold uppercase transition shrink-0 cursor-pointer flex items-center gap-1.5 ${
+          className={`px-4 py-2.5 rounded-xl text-xs font-mono font-bold uppercase transition shrink-0 snap-start cursor-pointer flex items-center gap-1.5 ${
             tab === 'missions' ? 'bg-amber-500/10 text-amber-500 dark:text-amber-400 border border-amber-500/30' : 'text-text-muted hover:text-text-primary border border-transparent'
           }`}
         >
@@ -132,7 +135,7 @@ export default function ChallengesPage({
         </button>
         <button
           onClick={() => { audio.playHit(); setTab('special'); }}
-          className={`px-4 py-2.5 rounded-xl text-xs font-mono font-bold uppercase transition shrink-0 cursor-pointer flex items-center gap-1.5 ${
+          className={`px-4 py-2.5 rounded-xl text-xs font-mono font-bold uppercase transition shrink-0 snap-start cursor-pointer flex items-center gap-1.5 ${
             tab === 'special' ? 'bg-amber-500/10 text-amber-500 dark:text-amber-400 border border-amber-500/30' : 'text-text-muted hover:text-text-primary border border-transparent'
           }`}
         >
@@ -140,7 +143,7 @@ export default function ChallengesPage({
         </button>
         <button
           onClick={() => { audio.playHit(); setTab('quests'); }}
-          className={`px-4 py-2.5 rounded-xl text-xs font-mono font-bold uppercase transition shrink-0 cursor-pointer flex items-center gap-1.5 ${
+          className={`px-4 py-2.5 rounded-xl text-xs font-mono font-bold uppercase transition shrink-0 snap-start cursor-pointer flex items-center gap-1.5 ${
             tab === 'quests' ? 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/30' : 'text-text-muted hover:text-text-primary border border-transparent'
           }`}
         >
@@ -148,7 +151,7 @@ export default function ChallengesPage({
         </button>
         <button
           onClick={() => { audio.playHit(); setTab('friends'); }}
-          className={`px-4 py-2.5 rounded-xl text-xs font-mono font-bold uppercase transition shrink-0 cursor-pointer flex items-center gap-1.5 ${
+          className={`px-4 py-2.5 rounded-xl text-xs font-mono font-bold uppercase transition shrink-0 snap-start cursor-pointer flex items-center gap-1.5 ${
             tab === 'friends' ? 'bg-indigo-500/15 text-indigo-500 dark:text-indigo-400 border border-indigo-500/35 font-black shadow-xs' : 'text-text-muted hover:text-text-primary border border-transparent'
           }`}
         >
@@ -463,9 +466,11 @@ export default function ChallengesPage({
                       ) : ch.completed ? (
                         <button
                           onClick={() => handleClaim(ch)}
-                          className="px-3.5 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-zinc-950 font-mono font-black text-xs uppercase tracking-wider transition cursor-pointer shadow-xs"
+                          disabled={claimingId === ch.id}
+                          className="px-3.5 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-zinc-950 font-mono font-black text-xs uppercase tracking-wider transition cursor-pointer shadow-xs flex items-center gap-1"
                         >
-                          Klaim
+                          {claimingId === ch.id ? <RefreshCw size={11} className="animate-spin shrink-0" /> : null}
+                          <span>{claimingId === ch.id ? 'Klaim...' : 'Klaim'}</span>
                         </button>
                       ) : (
                         <span className="text-[10px] font-mono text-text-muted px-3 py-1.5 uppercase select-none font-bold">

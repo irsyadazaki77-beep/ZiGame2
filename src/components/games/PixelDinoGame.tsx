@@ -1,507 +1,385 @@
-import React, { useRef, useEffect, useCallback } from 'react';
-import { useGameEngine } from '../../hooks/useGameEngine';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
+import * as THREE from 'three';
+import { GameComponentProps } from '../../types';
 import { audio } from '../../utils/audio';
+import { useGameEngine } from '../../hooks/useGameEngine';
 import { inputManager } from '../../services/inputService';
 import { GameOverlay } from '../gameplay/GameOverlay';
-import { Zap } from 'lucide-react';
+import { ThreeDockOverlay } from '../gameplay/ThreeDockOverlay';
+import {
+  ThreeStageController,
+  CameraPreset3D,
+  QualityLevel3D
+} from '../../utils/threeStage';
+import { Zap, Sun } from 'lucide-react';
 
-interface GameProps {
-  onScoreUpdate: (score: number) => void;
-  onGameOver: (score: number) => void;
-  highScore: number;
-}
-
-interface Obstacle {
+interface DinoObstacle3D {
+  mesh: THREE.Group;
   x: number;
+  type: 'cactus' | 'ptero';
   y: number;
-  width: number;
-  height: number;
-  type: 'cactus' | 'drone';
-  speed: number;
-  passed: boolean;
 }
 
-interface Particle {
-  x: number;
-  y: number;
-  vx: number;
-  vy: number;
-  size: number;
-  color: string;
-  alpha: number;
-  decay: number;
+function buildVoxelDino3D(): {
+  group: THREE.Group;
+  legL: THREE.Mesh;
+  legR: THREE.Mesh;
+  headGroup: THREE.Group;
+} {
+  const group = new THREE.Group();
+  const bodyMat = new THREE.MeshPhysicalMaterial({
+    color: 0x22c55e,
+    metalness: 0.35,
+    roughness: 0.32,
+    clearcoat: 0.65
+  });
+  const bellyMat = new THREE.MeshStandardMaterial({
+    color: 0x86efac,
+    roughness: 0.5
+  });
+  const eyeMat = new THREE.MeshStandardMaterial({
+    color: 0xfef08a,
+    emissive: 0xfacc15,
+    emissiveIntensity: 0.9
+  });
+
+  // 1 & 2. Legs
+  const legGeo = new THREE.BoxGeometry(0.24, 0.45, 0.24);
+  const legL = new THREE.Mesh(legGeo, bodyMat);
+  legL.position.set(0, 0.22, 0.18);
+  legL.castShadow = true;
+  const legR = legL.clone();
+  legR.position.z = -0.18;
+  group.add(legL, legR);
+
+  // 3. Torso
+  const torso = new THREE.Mesh(new THREE.BoxGeometry(0.75, 0.65, 0.52), bodyMat);
+  torso.position.set(0, 0.68, 0);
+  torso.castShadow = true;
+  group.add(torso);
+
+  // 4. Belly Plate
+  const belly = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.52, 0.54), bellyMat);
+  belly.position.set(0.18, 0.66, 0);
+  group.add(belly);
+
+  // 5. Tail
+  const tail = new THREE.Mesh(new THREE.BoxGeometry(0.65, 0.28, 0.32), bodyMat);
+  tail.position.set(-0.58, 0.68, 0);
+  tail.rotation.z = 0.22;
+  group.add(tail);
+
+  // 6 & 7. Head & Snout Group
+  const headGroup = new THREE.Group();
+  const skull = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.48, 0.48), bodyMat);
+  skull.position.set(0.32, 1.18, 0);
+  skull.castShadow = true;
+  const eye = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.12, 0.52), eyeMat);
+  eye.position.set(0.38, 1.26, 0);
+  headGroup.add(skull, eye);
+  group.add(headGroup);
+
+  return { group, legL, legR, headGroup };
 }
 
-interface FloatingText {
-  x: number;
-  y: number;
-  text: string;
-  color: string;
-  alpha: number;
-  vy: number;
+function buildDinoHazard3D(type: 'cactus' | 'ptero'): THREE.Group {
+  const g = new THREE.Group();
+  if (type === 'cactus') {
+    const cactusMat = new THREE.MeshStandardMaterial({
+      color: 0x10b981,
+      roughness: 0.45,
+      metalness: 0.25
+    });
+    const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.26, 1.35, 8), cactusMat);
+    trunk.position.y = 0.68;
+    trunk.castShadow = true;
+    const armL = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.14, 0.55, 8), cactusMat);
+    armL.position.set(-0.28, 0.85, 0);
+    armL.rotation.z = 0.6;
+    const armR = armL.clone();
+    armR.position.set(0.28, 0.72, 0);
+    armR.rotation.z = -0.6;
+    g.add(trunk, armL, armR);
+  } else {
+    const pteroMat = new THREE.MeshStandardMaterial({
+      color: 0xf59e0b,
+      emissive: 0xd97706,
+      emissiveIntensity: 0.4,
+      roughness: 0.3
+    });
+    const body = new THREE.Mesh(new THREE.ConeGeometry(0.28, 0.95, 6), pteroMat);
+    body.rotation.z = Math.PI / 2;
+    const wings = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.08, 1.45), pteroMat);
+    g.add(body, wings);
+  }
+  return g;
 }
 
-const CANVAS_WIDTH = 600;
-const CANVAS_HEIGHT = 280;
-const GROUND_Y = 220;
-const DINO_X = 70;
-const DINO_STAND_HEIGHT = 44;
-const DINO_DUCK_HEIGHT = 24;
-const DINO_WIDTH = 34;
-const GRAVITY = 0.54;
-const JUMP_FORCE = -10.0;
-
-export default function PixelDinoGame({ onScoreUpdate, onGameOver, highScore }: GameProps) {
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+export default function PixelDinoGame({
+  onGameOver,
+  onScoreUpdate,
+  highScore
+}: GameComponentProps) {
+  const mountRef = useRef<HTMLDivElement | null>(null);
+  const stageRef = useRef<ThreeStageController | null>(null);
 
   const {
     gameState,
     score,
-    updateScore,
-    startLoop,
-    triggerGameOver,
+    addScore,
     startWithCountdown,
     countdown,
-    setupCanvasContext
+    triggerGameOver,
+    scoreRef
   } = useGameEngine({
     gameId: 'pixel-dino',
     onGameOver,
     onScoreUpdate
   });
 
-  // Game Loop Refs
-  const dinoYRef = useRef(GROUND_Y - DINO_STAND_HEIGHT);
-  const dinoVyRef = useRef(0);
-  const isGroundedRef = useRef(true);
-  const isDuckingRef = useRef(false);
-  const obstaclesRef = useRef<Obstacle[]>([]);
-  const particlesRef = useRef<Particle[]>([]);
-  const floatingTextsRef = useRef<FloatingText[]>([]);
-  const speedRef = useRef(5.2);
-  const spawnTimerRef = useRef(0);
-  const scoreAccumulatorRef = useRef(0);
-  const runAnimFrameRef = useRef(0);
-  const groundOffsetRef = useRef(0);
-  const shakeRef = useRef(0);
+  const [speedMultiplier, setSpeedMultiplier] = useState('1.0x');
+  const [cameraPreset, setCameraPreset] = useState<CameraPreset3D>('chase');
+  const [quality, setQuality] = useState<QualityLevel3D>('ultra');
 
-  // Jump action
-  const jump = useCallback(() => {
-    if (gameState !== 'playing') return;
-    if (isGroundedRef.current && !isDuckingRef.current) {
-      dinoVyRef.current = JUMP_FORCE;
-      isGroundedRef.current = false;
-      audio.playJump();
-      inputManager.vibrateGamepad(40, 0.25);
-
-      for (let i = 0; i < 5; i++) {
-        particlesRef.current.push({
-          x: DINO_X + (Math.random() - 0.5) * DINO_WIDTH,
-          y: GROUND_Y,
-          vx: (Math.random() - 0.5) * 3,
-          vy: -Math.random() * 2,
-          size: Math.random() * 3 + 1,
-          color: '#22c55e',
-          alpha: 0.8,
-          decay: 0.05
-        });
-      }
-    }
-  }, [gameState]);
-
-  // Duck action
-  const setDucking = useCallback((ducking: boolean) => {
-    if (gameState !== 'playing') return;
-    isDuckingRef.current = ducking;
-    if (ducking && !isGroundedRef.current) {
-      // Fast drop
-      dinoVyRef.current += 6.0;
-    }
-  }, [gameState]);
-
-  // Unified keyboard and touch
+  const gameStateRef = useRef(gameState);
   useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (gameState !== 'playing') return;
-      if (e.code === 'Space' || e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W') {
-        e.preventDefault();
-        jump();
-      } else if (e.key === 'ArrowDown' || e.key === 's' || e.key === 'S') {
-        e.preventDefault();
-        setDucking(true);
-      }
+    gameStateRef.current = gameState;
+  }, [gameState]);
+
+  const dinoStateRef = useRef({
+    y: 0,
+    vy: 0,
+    jumping: false,
+    ducking: false,
+    speed: 13,
+    spawnTimer: 0,
+    distAcc: 0
+  });
+
+  const keysRef = useRef<Record<string, boolean>>({});
+  const hazardsRef = useRef<DinoObstacle3D[]>([]);
+
+  const handleStart = useCallback(() => {
+    const stage = stageRef.current;
+    if (stage) {
+      hazardsRef.current.forEach((h) => stage.scene.remove(h.mesh));
+    }
+    hazardsRef.current = [];
+    dinoStateRef.current = {
+      y: 0,
+      vy: 0,
+      jumping: false,
+      ducking: false,
+      speed: 13,
+      spawnTimer: 0.7,
+      distAcc: 0
     };
+    setSpeedMultiplier('1.0x');
+    startWithCountdown();
+  }, [startWithCountdown]);
 
-    const handleKeyUp = (e: KeyboardEvent) => {
-      if (e.key === 'ArrowDown' || e.key === 's' || e.key === 'S') {
-        setDucking(false);
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    window.addEventListener('keyup', handleKeyUp);
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-      window.removeEventListener('keyup', handleKeyUp);
-    };
-  }, [gameState, jump, setDucking]);
-
-  // Render Frame
-  const draw = useCallback(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    ctx.save();
-
-    // Screen Shake
-    if (shakeRef.current > 0) {
-      const sx = (Math.random() - 0.5) * shakeRef.current;
-      const sy = (Math.random() - 0.5) * shakeRef.current;
-      ctx.translate(sx, sy);
-      shakeRef.current = Math.max(0, shakeRef.current - 0.5);
+  const jump = useCallback(() => {
+    if (gameStateRef.current !== 'playing') return;
+    const d = dinoStateRef.current;
+    if (!d.jumping) {
+      d.jumping = true;
+      d.vy = 12.2;
+      audio.playJump?.();
     }
-
-    // Sky Background
-    ctx.fillStyle = '#0a0d18';
-    ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
-
-    // Subtle Stars / Grid
-    ctx.strokeStyle = 'rgba(34, 197, 94, 0.08)';
-    ctx.lineWidth = 1;
-    for (let x = 0; x < CANVAS_WIDTH; x += 40) {
-      ctx.beginPath();
-      ctx.moveTo(x, 0);
-      ctx.lineTo(x, CANVAS_HEIGHT);
-      ctx.stroke();
-    }
-
-    // Moving Ground Line
-    groundOffsetRef.current = (groundOffsetRef.current + speedRef.current) % 30;
-    ctx.fillStyle = '#111827';
-    ctx.fillRect(0, GROUND_Y, CANVAS_WIDTH, CANVAS_HEIGHT - GROUND_Y);
-
-    ctx.shadowBlur = 8;
-    ctx.shadowColor = '#22c55e';
-    ctx.strokeStyle = '#22c55e';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(0, GROUND_Y);
-    ctx.lineTo(CANVAS_WIDTH, GROUND_Y);
-    ctx.stroke();
-    ctx.shadowBlur = 0;
-
-    // Ground texture dashes
-    ctx.strokeStyle = 'rgba(34, 197, 94, 0.3)';
-    ctx.lineWidth = 2;
-    ctx.setLineDash([12, 18]);
-    ctx.lineDashOffset = -groundOffsetRef.current;
-    ctx.beginPath();
-    ctx.moveTo(0, GROUND_Y + 6);
-    ctx.lineTo(CANVAS_WIDTH, GROUND_Y + 6);
-    ctx.stroke();
-    ctx.setLineDash([]);
-
-    // Obstacles
-    for (const obs of obstaclesRef.current) {
-      if (obs.type === 'cactus') {
-        ctx.shadowBlur = 10;
-        ctx.shadowColor = '#ef4444';
-        ctx.fillStyle = '#ef4444';
-        ctx.beginPath();
-        ctx.roundRect(obs.x, obs.y, obs.width, obs.height, 4);
-        ctx.fill();
-
-        // Cactus side arms
-        ctx.fillRect(obs.x - 4, obs.y + 8, 4, 10);
-        ctx.fillRect(obs.x + obs.width, obs.y + 12, 4, 10);
-        ctx.shadowBlur = 0;
-      } else {
-        // Drone Obstacle
-        ctx.shadowBlur = 12;
-        ctx.shadowColor = '#f59e0b';
-        ctx.fillStyle = '#f59e0b';
-        ctx.beginPath();
-        ctx.roundRect(obs.x, obs.y, obs.width, obs.height, 5);
-        ctx.fill();
-
-        // Propeller flash
-        ctx.fillStyle = '#38bdf8';
-        ctx.fillRect(obs.x + 2, obs.y - 3, obs.width - 4, 2);
-        ctx.shadowBlur = 0;
-      }
-    }
-
-    // Particles
-    for (let i = particlesRef.current.length - 1; i >= 0; i--) {
-      const p = particlesRef.current[i];
-      p.x += p.vx;
-      p.y += p.vy;
-      p.alpha -= p.decay;
-      if (p.alpha <= 0) {
-        particlesRef.current.splice(i, 1);
-        continue;
-      }
-      ctx.globalAlpha = Math.max(0, p.alpha);
-      ctx.fillStyle = p.color;
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
-      ctx.fill();
-    }
-    ctx.globalAlpha = 1.0;
-
-    // Dino Player
-    const currentHeight = isDuckingRef.current ? DINO_DUCK_HEIGHT : DINO_STAND_HEIGHT;
-    const dy = isDuckingRef.current ? GROUND_Y - DINO_DUCK_HEIGHT : dinoYRef.current;
-    const dx = DINO_X;
-
-    ctx.shadowBlur = 14;
-    ctx.shadowColor = '#22c55e';
-    ctx.fillStyle = '#22c55e';
-    ctx.beginPath();
-    ctx.roundRect(dx, dy, DINO_WIDTH, currentHeight, 6);
-    ctx.fill();
-
-    // Dino Eye
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(dx + DINO_WIDTH - 9, dy + 6, 4, 4);
-
-    // Running legs animation
-    if (isGroundedRef.current) {
-      runAnimFrameRef.current += 0.2;
-      const legOffset = Math.sin(runAnimFrameRef.current) * 4;
-      ctx.fillStyle = '#15803d';
-      ctx.fillRect(dx + 6, dy + currentHeight, 5, 4 + legOffset);
-      ctx.fillRect(dx + DINO_WIDTH - 12, dy + currentHeight, 5, 4 - legOffset);
-    }
-    ctx.shadowBlur = 0;
-
-    // Floating Texts
-    for (let i = floatingTextsRef.current.length - 1; i >= 0; i--) {
-      const ft = floatingTextsRef.current[i];
-      ft.y += ft.vy;
-      ft.alpha -= 0.02;
-      if (ft.alpha <= 0) {
-        floatingTextsRef.current.splice(i, 1);
-        continue;
-      }
-      ctx.save();
-      ctx.globalAlpha = Math.max(0, ft.alpha);
-      ctx.font = 'bold 12px monospace';
-      ctx.fillStyle = ft.color;
-      ctx.textAlign = 'center';
-      ctx.fillText(ft.text, ft.x, ft.y);
-      ctx.restore();
-    }
-
-    ctx.restore();
   }, []);
 
-  // Main Loop Game Step
-  const gameStep = useCallback((timestamp: number, deltaTime: number) => {
-    const dt = Math.min(deltaTime / 16.666, 3.0); // normalized to 60fps unit
-
-    // 1. Update Dino Physics
-    if (!isGroundedRef.current) {
-      dinoVyRef.current += GRAVITY * dt;
-      dinoYRef.current += dinoVyRef.current * dt;
-
-      if (dinoYRef.current >= GROUND_Y - DINO_STAND_HEIGHT) {
-        dinoYRef.current = GROUND_Y - DINO_STAND_HEIGHT;
-        dinoVyRef.current = 0;
-        isGroundedRef.current = true;
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      keysRef.current[e.key.toLowerCase()] = true;
+      if (e.key === ' ' || e.key === 'ArrowUp' || e.key.toLowerCase() === 'w') {
+        jump();
       }
-    }
+    };
+    const onKeyUp = (e: KeyboardEvent) => {
+      keysRef.current[e.key.toLowerCase()] = false;
+    };
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('keyup', onKeyUp);
 
-    // 2. Accumulate Score smoothly by delta-time seconds (not frame count)
-    scoreAccumulatorRef.current += (deltaTime / 1000) * 12 * (speedRef.current / 5.0);
-    const calculatedScore = Math.floor(scoreAccumulatorRef.current);
-    if (calculatedScore !== (score || 0)) {
-      updateScore(calculatedScore);
-    }
-
-    // 3. Accelerate gently
-    speedRef.current = Math.min(10.5, 5.2 + (calculatedScore / 250));
-
-    // 4. Spawn Obstacles based on distance timer
-    spawnTimerRef.current += dt;
-    const spawnThreshold = Math.max(45, 90 - calculatedScore / 30);
-    if (spawnTimerRef.current >= spawnThreshold) {
-      spawnTimerRef.current = 0;
-      const isDrone = calculatedScore > 30 && Math.random() < 0.35;
-
-      if (isDrone) {
-        obstaclesRef.current.push({
-          x: CANVAS_WIDTH + 20,
-          y: GROUND_Y - DINO_STAND_HEIGHT - 6, // Head height, must duck!
-          width: 30,
-          height: 20,
-          type: 'drone',
-          speed: speedRef.current * 1.08,
-          passed: false
-        });
-      } else {
-        const height = Math.random() < 0.5 ? 36 : 46;
-        obstaclesRef.current.push({
-          x: CANVAS_WIDTH + 20,
-          y: GROUND_Y - height,
-          width: 22,
-          height: height,
-          type: 'cactus',
-          speed: speedRef.current,
-          passed: false
-        });
+    const unsub = inputManager.subscribe({
+      onActionDown: (action) => {
+        if (action === 'UP' || action === 'ACTION_PRIMARY') jump();
+        if (action === 'DOWN') keysRef.current['arrowdown'] = true;
+      },
+      onActionUp: (action) => {
+        if (action === 'DOWN') keysRef.current['arrowdown'] = false;
       }
+    });
+
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('keyup', onKeyUp);
+      unsub();
+    };
+  }, [jump]);
+
+  const handleSelectPreset = useCallback((preset: CameraPreset3D) => {
+    setCameraPreset(preset);
+    stageRef.current?.setCameraPreset(preset);
+  }, []);
+
+  const handleCycleQuality = useCallback(() => {
+    setQuality((prev) => {
+      const next: QualityLevel3D =
+        prev === 'ultra' ? 'balanced' : prev === 'balanced' ? 'performance' : 'ultra';
+      stageRef.current?.setQualityLevel(next);
+      return next;
+    });
+  }, []);
+
+  useEffect(() => {
+    const container = mountRef.current;
+    if (!container) return;
+
+    let stage: ThreeStageController;
+    try {
+      stage = new ThreeStageController({
+        container,
+        backgroundColor: 0x0b0f19,
+        fogColor: 0x0b0f19,
+        fogDensity: 0.018,
+        initialPreset: 'chase',
+        gridPrimaryColor: '#eab308',
+        gridSecondaryColor: '#0e1320',
+        cameraPresets: {
+          chase: { position: [-2.5, 3.6, 10.5], lookAt: [1.5, 1.1, 0], fov: 50 },
+          isometric: { position: [-8.5, 6.2, 8.5], lookAt: [1.5, 0.9, 0], fov: 46 },
+          diorama: { position: [0, 2.4, 13.5], lookAt: [0, 1.2, 0], fov: 44 }
+        }
+      });
+    } catch {
+      return;
     }
 
-    // 5. Move Obstacles & Collision Check
-    const currentHeight = isDuckingRef.current ? DINO_DUCK_HEIGHT : DINO_STAND_HEIGHT;
-    const dy = isDuckingRef.current ? GROUND_Y - DINO_DUCK_HEIGHT : dinoYRef.current;
-    const dx = DINO_X;
+    stageRef.current = stage;
+    setQuality(stage.getQualityLevel());
 
-    for (let i = obstaclesRef.current.length - 1; i >= 0; i--) {
-      const obs = obstaclesRef.current[i];
-      obs.x -= obs.speed * dt;
+    const dino = buildVoxelDino3D();
+    dino.group.position.set(-4.2, 0, 0);
+    stage.scene.add(dino.group);
 
-      // AABB Box Collision with inset margin for forgiveness
-      const dinoLeft = dx + 4;
-      const dinoRight = dx + DINO_WIDTH - 4;
-      const dinoTop = dy + 4;
-      const dinoBottom = dy + currentHeight;
+    stage.startLoop((dt, elapsed) => {
+      if (gameStateRef.current !== 'playing') return;
 
-      const obsLeft = obs.x + 3;
-      const obsRight = obs.x + obs.width - 3;
-      const obsTop = obs.y + 3;
-      const obsBottom = obs.y + obs.height;
+      const d = dinoStateRef.current;
+      d.speed = Math.min(26, d.speed + dt * 0.35);
+      d.distAcc += d.speed * dt;
+      if (d.distAcc >= 2.2) {
+        const pts = Math.floor(d.distAcc / 2.2);
+        d.distAcc -= pts * 2.2;
+        addScore(pts);
+        setSpeedMultiplier(`${(d.speed / 13).toFixed(1)}x`);
+      }
 
-      const isColliding = (
-        dinoRight > obsLeft &&
-        dinoLeft < obsRight &&
-        dinoBottom > obsTop &&
-        dinoTop < obsBottom
-      );
+      d.ducking = Boolean(keysRef.current['arrowdown'] || keysRef.current['s']);
 
-      if (isColliding) {
-        audio.playExplosion();
-        shakeRef.current = 16;
-        inputManager.vibrateGamepad(200, 0.8);
+      if (d.jumping) {
+        d.y += d.vy * dt;
+        d.vy -= (d.ducking ? 48 : 28) * dt;
+        if (d.y <= 0) {
+          d.y = 0;
+          d.vy = 0;
+          d.jumping = false;
+        }
+      }
 
-        for (let j = 0; j < 20; j++) {
-          particlesRef.current.push({
-            x: dx + DINO_WIDTH / 2,
-            y: dy + currentHeight / 2,
-            vx: (Math.random() - 0.5) * 8,
-            vy: (Math.random() - 0.5) * 8,
-            size: Math.random() * 3 + 2,
-            color: j % 2 === 0 ? '#ef4444' : '#22c55e',
-            alpha: 1.0,
-            decay: 0.04
-          });
+      dino.group.position.set(-4.2, d.y, 0);
+      dino.group.scale.y = d.ducking && !d.jumping ? 0.58 : 1.0;
+
+      const stride = Math.sin(elapsed * d.speed * 1.4) * 0.5;
+      dino.legL.rotation.z = d.jumping ? 0.3 : stride;
+      dino.legR.rotation.z = d.jumping ? -0.3 : -stride;
+
+      // Spawn cacti & pterodactyls
+      d.spawnTimer -= dt;
+      if (d.spawnTimer <= 0) {
+        d.spawnTimer = Math.max(0.45, 1.25 - (d.speed - 13) * 0.04) + Math.random() * 0.35;
+        const type: 'cactus' | 'ptero' = d.speed > 15 && Math.random() < 0.32 ? 'ptero' : 'cactus';
+        const mesh = buildDinoHazard3D(type);
+        const hy = type === 'ptero' ? 1.42 : 0;
+        mesh.position.set(16, hy, 0);
+        stage.scene.add(mesh);
+        hazardsRef.current.push({ mesh, x: 16, type, y: hy });
+      }
+
+      // Update hazards
+      for (let i = hazardsRef.current.length - 1; i >= 0; i--) {
+        const h = hazardsRef.current[i];
+        h.x -= d.speed * dt;
+        h.mesh.position.x = h.x;
+
+        if (Math.abs(h.x - -4.2) < 0.72) {
+          const hitCactus = h.type === 'cactus' && d.y < 1.05;
+          const hitPtero = h.type === 'ptero' && !d.ducking && d.y < 1.6;
+          if (hitCactus || hitPtero) {
+            stage.scene.remove(h.mesh);
+            hazardsRef.current.splice(i, 1);
+            stage.particles.burst(-4.2, d.y + 0.8, 0, 34, 0xef4444, 10);
+            stage.triggerTrauma(0.75);
+            audio.playExplosion?.();
+            triggerGameOver(scoreRef.current);
+            return;
+          }
         }
 
-        draw();
-        triggerGameOver();
-        return;
+        if (h.x < -14) {
+          stage.scene.remove(h.mesh);
+          hazardsRef.current.splice(i, 1);
+        }
       }
-
-      // Check pass
-      if (!obs.passed && obs.x + obs.width < dx) {
-        obs.passed = true;
-      }
-
-      // Remove offscreen
-      if (obs.x < -60) {
-        obstaclesRef.current.splice(i, 1);
-      }
-    }
-
-    draw();
-  }, [draw, score, triggerGameOver, updateScore]);
-
-  // Lifecycle Start
-  const startGame = useCallback(() => {
-    dinoYRef.current = GROUND_Y - DINO_STAND_HEIGHT;
-    dinoVyRef.current = 0;
-    isGroundedRef.current = true;
-    isDuckingRef.current = false;
-    obstaclesRef.current = [];
-    particlesRef.current = [];
-    floatingTextsRef.current = [];
-    speedRef.current = 5.2;
-    spawnTimerRef.current = 0;
-    scoreAccumulatorRef.current = 0;
-    updateScore(0);
-
-    startWithCountdown(() => {
-      startLoop(gameStep);
     });
-  }, [startWithCountdown, startLoop, gameStep, updateScore]);
 
-  // DPR Setup
-  useEffect(() => {
-    setupCanvasContext(canvasRef.current, CANVAS_WIDTH, CANVAS_HEIGHT);
-    draw();
-  }, [setupCanvasContext, draw]);
+    return () => {
+      stage.dispose();
+      stageRef.current = null;
+    };
+  }, [addScore, scoreRef, triggerGameOver]);
 
   return (
-    <div className="relative flex flex-col h-full w-full min-h-0 items-center justify-center overflow-hidden p-2 bg-[#0a0d18]">
-      {/* HUD */}
-      <div className="w-full max-w-[600px] flex-none flex justify-between items-center mb-2 px-3 py-1 bg-[#121622]/80 border border-white/[0.06] rounded-xl text-xs font-mono">
-        <div className="flex items-center gap-1.5">
-          <Zap size={14} className="text-emerald-400" />
-          <span className="text-zinc-400">KECEPATAN:</span>
-          <span className="text-emerald-400 font-bold">{speedRef.current.toFixed(1)}x</span>
-        </div>
+    <div
+      className="relative w-full h-full min-h-[460px] bg-slate-950 overflow-hidden rounded-2xl border border-amber-500/20"
+      onClick={jump}
+    >
+      <div ref={mountRef} className="absolute inset-0 w-full h-full" />
 
-        <div className="flex items-center gap-2">
-          <span className="text-zinc-400">SKOR:</span>
-          <span className="text-white font-bold">{score}</span>
+      <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex flex-wrap items-center justify-between gap-2 p-3.5">
+        <div className="flex items-center gap-3 rounded-xl border border-white/10 bg-slate-950/85 px-3.5 py-2 text-xs text-slate-200 tabular-nums">
+          <span className="flex items-center gap-1 font-semibold text-amber-400">
+            <Sun className="w-3.5 h-3.5" /> KECEPATAN {speedMultiplier}
+          </span>
+          <span aria-hidden="true">·</span>
+          <span>SKOR: <strong className="text-white">{score}</strong></span>
         </div>
       </div>
 
-      {/* Canvas container */}
-      <div 
-        className="relative flex-1 min-h-0 w-full max-w-[600px] max-h-[280px] flex items-center justify-center bg-[#0a0d18] rounded-2xl border border-white/[0.08] shadow-2xl overflow-hidden cursor-pointer select-none"
-        onClick={jump}
-      >
-        <canvas
-          ref={canvasRef}
-          style={{ width: '100%', height: '100%' }}
-          className="object-contain block touch-none"
-        />
+      <ThreeDockOverlay
+        cameraPreset={cameraPreset}
+        onSelectPreset={handleSelectPreset}
+        quality={quality}
+        onCycleQuality={handleCycleQuality}
+        extraControls={
+          <span className="hidden sm:inline-flex items-center gap-1 text-[11px] text-slate-400 px-2 whitespace-nowrap shrink-0">
+            <Zap className="w-3 h-3 text-amber-400" /> Space / W: Lompat · S / Panah Bawah: Menunduk
+          </span>
+        }
+      />
 
-        <GameOverlay
-          gameState={gameState}
-          score={score}
-          highScore={highScore}
-          countdown={countdown}
-          onStart={startGame}
-          onRestart={startGame}
-          instructions="Lompati kaktus laser dan merunduk di bawah drone siber! Tekan SPASI/Atas untuk melompat, Bawah untuk merunduk."
-        />
-      </div>
-
-      {/* Mobile Controls */}
-      {gameState === 'playing' && (
-        <div className="flex-none mt-2 w-full max-w-[600px] flex gap-2 md:hidden">
-          <button
-            onTouchStart={(e) => { e.preventDefault(); setDucking(true); }}
-            onTouchEnd={(e) => { e.preventDefault(); setDucking(false); }}
-            onMouseDown={() => setDucking(true)}
-            onMouseUp={() => setDucking(false)}
-            className="flex-1 py-3.5 bg-zinc-800 active:bg-zinc-700 rounded-xl text-zinc-200 font-bold text-sm tracking-wider uppercase select-none min-h-[44px]"
-          >
-            ⬇ MERUNDUK
-          </button>
-          <button
-            onTouchStart={(e) => { e.preventDefault(); jump(); }}
-            onClick={jump}
-            className="flex-2 py-3.5 bg-emerald-600 active:bg-emerald-500 rounded-xl text-white font-bold text-sm tracking-wider uppercase select-none min-h-[44px]"
-          >
-            ⬆ LOMPAT
-          </button>
-        </div>
-      )}
+      <GameOverlay
+        gameState={gameState}
+        score={score}
+        highScore={highScore}
+        countdown={countdown}
+        onStart={handleStart}
+        onRestart={handleStart}
+        title="Pixel Dino 3D"
+        description="Bantu Voxel T-Rex 3D melompati kaktus gurun dan menunduk menghindari Pterodactyl!"
+        themeColor="amber"
+      />
     </div>
   );
 }

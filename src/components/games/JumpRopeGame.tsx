@@ -1,421 +1,272 @@
-import React, { useRef, useEffect, useCallback } from 'react';
-import { useGameEngine } from '../../hooks/useGameEngine';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
+import * as THREE from 'three';
+import { GameComponentProps } from '../../types';
 import { audio } from '../../utils/audio';
+import { useGameEngine } from '../../hooks/useGameEngine';
 import { inputManager } from '../../services/inputService';
 import { GameOverlay } from '../gameplay/GameOverlay';
-import { Sparkles } from 'lucide-react';
+import { ThreeDockOverlay } from '../gameplay/ThreeDockOverlay';
+import {
+  ThreeStageController,
+  CameraPreset3D,
+  QualityLevel3D,
+  buildCyberActionHero3D
+} from '../../utils/threeStage';
+import { Zap, Flame } from 'lucide-react';
 
-interface GameProps {
-  onScoreUpdate: (score: number) => void;
-  onGameOver: (score: number) => void;
-  highScore: number;
-}
-
-interface Particle {
-  x: number;
-  y: number;
-  vx: number;
-  vy: number;
-  size: number;
-  color: string;
-  alpha: number;
-  decay: number;
-}
-
-interface FloatingText {
-  x: number;
-  y: number;
-  text: string;
-  color: string;
-  alpha: number;
-  vy: number;
-}
-
-const CANVAS_WIDTH = 500;
-const CANVAS_HEIGHT = 280;
-const GROUND_Y = 210;
-const PLAYER_X = 250;
-const PLAYER_WIDTH = 26;
-const PLAYER_HEIGHT = 38;
-const GRAVITY = 0.52;
-const JUMP_FORCE = -9.2;
-
-export default function JumpRopeGame({ onScoreUpdate, onGameOver, highScore }: GameProps) {
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+export default function JumpRopeGame({
+  onGameOver,
+  onScoreUpdate,
+  highScore
+}: GameComponentProps) {
+  const mountRef = useRef<HTMLDivElement | null>(null);
+  const stageRef = useRef<ThreeStageController | null>(null);
 
   const {
     gameState,
     score,
-    updateScore,
-    startLoop,
-    triggerGameOver,
+    addScore,
     startWithCountdown,
     countdown,
-    setupCanvasContext
+    triggerGameOver,
+    scoreRef
   } = useGameEngine({
     gameId: 'jump-rope',
     onGameOver,
     onScoreUpdate
   });
 
-  // Game state refs (60-144Hz delta-time physics)
-  const playerYRef = useRef(GROUND_Y - PLAYER_HEIGHT);
-  const playerVyRef = useRef(0);
-  const isGroundedRef = useRef(true);
-  const ropePosRef = useRef(CANVAS_WIDTH + 50); // X position of obstacle
-  const ropeSpeedRef = useRef(4.0);
-  const jumpsMadeRef = useRef(0);
-  const comboRef = useRef(0);
-  const particlesRef = useRef<Particle[]>([]);
-  const floatingTextsRef = useRef<FloatingText[]>([]);
-  const shakeRef = useRef(0);
+  const [jumps, setJumps] = useState(0);
+  const [rpm, setRpm] = useState(60);
+  const [cameraPreset, setCameraPreset] = useState<CameraPreset3D>('chase');
+  const [quality, setQuality] = useState<QualityLevel3D>('ultra');
 
-  // Jump trigger
-  const jump = useCallback(() => {
-    if (gameState !== 'playing') return;
-    if (isGroundedRef.current) {
-      playerVyRef.current = JUMP_FORCE;
-      isGroundedRef.current = false;
-      audio.playJump();
-      inputManager.vibrateGamepad(50, 0.3);
-
-      // Jump dust particles
-      for (let i = 0; i < 6; i++) {
-        particlesRef.current.push({
-          x: PLAYER_X + (Math.random() - 0.5) * PLAYER_WIDTH,
-          y: GROUND_Y,
-          vx: (Math.random() - 0.5) * 3,
-          vy: -Math.random() * 2,
-          size: Math.random() * 3 + 1,
-          color: '#818cf8',
-          alpha: 0.8,
-          decay: 0.05
-        });
-      }
-    }
+  const gameStateRef = useRef(gameState);
+  useEffect(() => {
+    gameStateRef.current = gameState;
   }, [gameState]);
 
-  // Unified input listener
+  const ropeStateRef = useRef({
+    y: 0,
+    vy: 0,
+    jumping: false,
+    ropeAngle: 0,
+    ropeSpeed: 3.4,
+    jumps: 0,
+    scoredThisCycle: false
+  });
+
+  const jump = useCallback(() => {
+    if (gameStateRef.current !== 'playing') return;
+    const st = ropeStateRef.current;
+    if (!st.jumping) {
+      st.jumping = true;
+      st.vy = 9.8;
+      audio.playJump?.();
+    }
+  }, []);
+
+  const handleStart = useCallback(() => {
+    ropeStateRef.current = {
+      y: 0,
+      vy: 0,
+      jumping: false,
+      ropeAngle: Math.PI, // Start at top of arc
+      ropeSpeed: 3.4,
+      jumps: 0,
+      scoredThisCycle: false
+    };
+    setJumps(0);
+    setRpm(60);
+    startWithCountdown();
+  }, [startWithCountdown]);
+
   useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === ' ' || e.key === 'ArrowUp' || e.key.toLowerCase() === 'w') {
+        jump();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+
     const unsub = inputManager.subscribe({
       onActionDown: (action) => {
-        if (action === 'UP' || action === 'PRIMARY') {
-          jump();
+        if (action === 'ACTION_PRIMARY' || action === 'UP') jump();
+      }
+    });
+
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      unsub();
+    };
+  }, [jump]);
+
+  const handleSelectPreset = useCallback((preset: CameraPreset3D) => {
+    setCameraPreset(preset);
+    stageRef.current?.setCameraPreset(preset);
+  }, []);
+
+  const handleCycleQuality = useCallback(() => {
+    setQuality((prev) => {
+      const next: QualityLevel3D =
+        prev === 'ultra' ? 'balanced' : prev === 'balanced' ? 'performance' : 'ultra';
+      stageRef.current?.setQualityLevel(next);
+      return next;
+    });
+  }, []);
+
+  useEffect(() => {
+    const container = mountRef.current;
+    if (!container) return;
+
+    let stage: ThreeStageController;
+    try {
+      stage = new ThreeStageController({
+        container,
+        backgroundColor: 0x05100a,
+        fogColor: 0x05100a,
+        fogDensity: 0.016,
+        initialPreset: 'chase',
+        gridPrimaryColor: '#22c55e',
+        gridSecondaryColor: '#07170e',
+        cameraPresets: {
+          chase: { position: [0, 3.8, 9.2], lookAt: [0, 1.4, 0], fov: 50 },
+          isometric: { position: [6.8, 6.8, 7.8], lookAt: [0, 1.2, 0], fov: 46 },
+          diorama: { position: [0, 9.5, 5.5], lookAt: [0, 0.8, 0], fov: 46 }
+        }
+      });
+    } catch {
+      return;
+    }
+
+    stageRef.current = stage;
+    setQuality(stage.getQualityLevel());
+
+    // Build Left & Right Automated Rope Turret Pylons
+    const pylonMat = new THREE.MeshStandardMaterial({
+      color: 0x334155,
+      metalness: 0.8,
+      roughness: 0.25
+    });
+    const pylonL = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.35, 2.2, 12), pylonMat);
+    pylonL.position.set(-3.4, 1.1, 0);
+    const pylonR = pylonL.clone();
+    pylonR.position.x = 3.4;
+    stage.scene.add(pylonL, pylonR);
+
+    // Build 360-degree Swinging Plasma Laser Rope Arc
+    const ropePivot = new THREE.Group();
+    ropePivot.position.set(0, 1.45, 0);
+    const ropeArc = new THREE.Mesh(
+      new THREE.TorusGeometry(2.8, 0.07, 10, 36, Math.PI),
+      new THREE.MeshStandardMaterial({
+        color: 0x22c55e,
+        emissive: 0x4ade80,
+        emissiveIntensity: 1.1
+      })
+    );
+    ropeArc.rotation.z = Math.PI; // Hang downward at angle = 0
+    ropePivot.add(ropeArc);
+    stage.scene.add(ropePivot);
+
+    const hero = buildCyberActionHero3D(0x22c55e, 0xfacc15);
+    hero.group.position.set(0, 0, 0);
+    stage.scene.add(hero.group);
+
+    stage.startLoop((dt) => {
+      if (gameStateRef.current !== 'playing') return;
+
+      const st = ropeStateRef.current;
+      st.ropeSpeed = Math.min(8.5, st.ropeSpeed + dt * 0.09);
+      const prevAngle = st.ropeAngle;
+      st.ropeAngle = (st.ropeAngle + st.ropeSpeed * dt) % (Math.PI * 2);
+
+      ropePivot.rotation.x = st.ropeAngle;
+
+      if (st.jumping) {
+        st.y += st.vy * dt;
+        st.vy -= 26 * dt;
+        if (st.y <= 0) {
+          st.y = 0;
+          st.vy = 0;
+          st.jumping = false;
+        }
+      }
+
+      hero.group.position.set(0, st.y, 0);
+      hero.armL.rotation.x = st.jumping ? -0.9 : 0;
+      hero.armR.rotation.x = st.jumping ? -0.9 : 0;
+
+      // Rope passes bottom of arc when angle crosses 0 / 2PI
+      if (prevAngle > Math.PI * 1.5 && st.ropeAngle < Math.PI * 0.5) {
+        if (st.y < 0.48) {
+          stage.particles.burst(0, 0.4, 0, 36, 0xef4444, 9);
+          stage.triggerTrauma(0.75);
+          audio.playExplosion?.();
+          triggerGameOver(scoreRef.current);
+          return;
+        } else {
+          st.jumps += 1;
+          setJumps(st.jumps);
+          setRpm(Math.round(st.ropeSpeed * 18));
+          addScore(20 + st.jumps * 2);
+          stage.particles.burst(0, 0.2, 0, 18, 0x22c55e, 6.5);
+          stage.triggerTrauma(0.18);
+          audio.playCoin?.();
         }
       }
     });
 
-    const handleKey = (e: KeyboardEvent) => {
-      if (gameState === 'playing' && (e.code === 'Space' || e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W')) {
-        e.preventDefault();
-        jump();
-      }
-    };
-
-    window.addEventListener('keydown', handleKey);
     return () => {
-      unsub();
-      window.removeEventListener('keydown', handleKey);
+      stage.dispose();
+      stageRef.current = null;
     };
-  }, [gameState, jump]);
-
-  // Draw frame
-  const draw = useCallback(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    ctx.save();
-
-    // Screen Shake
-    if (shakeRef.current > 0) {
-      const sx = (Math.random() - 0.5) * shakeRef.current;
-      const sy = (Math.random() - 0.5) * shakeRef.current;
-      ctx.translate(sx, sy);
-      shakeRef.current = Math.max(0, shakeRef.current - 0.4);
-    }
-
-    // Background
-    ctx.fillStyle = '#090a10';
-    ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
-
-    // Neon grid lines
-    ctx.strokeStyle = 'rgba(99, 102, 241, 0.08)';
-    ctx.lineWidth = 1;
-    for (let x = 0; x < CANVAS_WIDTH; x += 30) {
-      ctx.beginPath();
-      ctx.moveTo(x, 0);
-      ctx.lineTo(x, CANVAS_HEIGHT);
-      ctx.stroke();
-    }
-
-    // Ground platform
-    ctx.fillStyle = '#111526';
-    ctx.fillRect(0, GROUND_Y, CANVAS_WIDTH, CANVAS_HEIGHT - GROUND_Y);
-    ctx.strokeStyle = '#6366f1';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(0, GROUND_Y);
-    ctx.lineTo(CANVAS_WIDTH, GROUND_Y);
-    ctx.stroke();
-
-    // Ground glow line
-    ctx.shadowBlur = 10;
-    ctx.shadowColor = '#6366f1';
-    ctx.strokeStyle = 'rgba(99, 102, 241, 0.4)';
-    ctx.lineWidth = 4;
-    ctx.beginPath();
-    ctx.moveTo(0, GROUND_Y);
-    ctx.lineTo(CANVAS_WIDTH, GROUND_Y);
-    ctx.stroke();
-    ctx.shadowBlur = 0;
-
-    // Moving Laser / Rope Obstacle
-    const ropeX = ropePosRef.current;
-    const ropeWidth = 14;
-    const ropeHeight = 28;
-    const ropeY = GROUND_Y - ropeHeight;
-
-    ctx.shadowBlur = 12;
-    ctx.shadowColor = '#f43f5e';
-    ctx.fillStyle = '#f43f5e';
-    ctx.beginPath();
-    ctx.roundRect(ropeX - ropeWidth / 2, ropeY, ropeWidth, ropeHeight, 3);
-    ctx.fill();
-
-    // Laser core light
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(ropeX - 2, ropeY + 2, 4, ropeHeight - 4);
-    ctx.shadowBlur = 0;
-
-    // Player Neon Robot / Runner
-    const pX = PLAYER_X - PLAYER_WIDTH / 2;
-    const pY = playerYRef.current;
-
-    ctx.shadowBlur = 14;
-    ctx.shadowColor = '#818cf8';
-    ctx.fillStyle = '#818cf8';
-    ctx.beginPath();
-    ctx.roundRect(pX, pY, PLAYER_WIDTH, PLAYER_HEIGHT, 6);
-    ctx.fill();
-
-    // Player Visor
-    ctx.fillStyle = '#38bdf8';
-    ctx.fillRect(pX + 4, pY + 6, PLAYER_WIDTH - 8, 8);
-
-    // Player Thruster spark when in air
-    if (!isGroundedRef.current) {
-      ctx.fillStyle = '#f59e0b';
-      ctx.fillRect(pX + 6, pY + PLAYER_HEIGHT, PLAYER_WIDTH - 12, 6);
-    }
-    ctx.shadowBlur = 0;
-
-    // Particles
-    for (let i = particlesRef.current.length - 1; i >= 0; i--) {
-      const p = particlesRef.current[i];
-      p.x += p.vx;
-      p.y += p.vy;
-      p.alpha -= p.decay;
-      if (p.alpha <= 0) {
-        particlesRef.current.splice(i, 1);
-        continue;
-      }
-      ctx.globalAlpha = Math.max(0, p.alpha);
-      ctx.fillStyle = p.color;
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
-      ctx.fill();
-    }
-    ctx.globalAlpha = 1.0;
-
-    // Floating texts
-    for (let i = floatingTextsRef.current.length - 1; i >= 0; i--) {
-      const ft = floatingTextsRef.current[i];
-      ft.y += ft.vy;
-      ft.alpha -= 0.02;
-      if (ft.alpha <= 0) {
-        floatingTextsRef.current.splice(i, 1);
-        continue;
-      }
-      ctx.save();
-      ctx.globalAlpha = Math.max(0, ft.alpha);
-      ctx.font = 'bold 12px monospace';
-      ctx.fillStyle = ft.color;
-      ctx.textAlign = 'center';
-      ctx.fillText(ft.text, ft.x, ft.y);
-      ctx.restore();
-    }
-
-    ctx.restore();
-  }, []);
-
-  // Main game step
-  const gameStep = useCallback((timestamp: number, deltaTime: number) => {
-    const dt = Math.min(deltaTime / 16.666, 3.0); // normalized to 60fps units
-
-    // 1. Update Player Physics
-    if (!isGroundedRef.current) {
-      playerVyRef.current += GRAVITY * dt;
-      playerYRef.current += playerVyRef.current * dt;
-
-      if (playerYRef.current >= GROUND_Y - PLAYER_HEIGHT) {
-        playerYRef.current = GROUND_Y - PLAYER_HEIGHT;
-        playerVyRef.current = 0;
-        isGroundedRef.current = true;
-      }
-    }
-
-    // 2. Move Obstacle with delta-time
-    ropePosRef.current -= ropeSpeedRef.current * dt;
-
-    // 3. Collision Check
-    const ropeX = ropePosRef.current;
-    const ropeWidth = 14;
-    const ropeHeight = 28;
-    const ropeY = GROUND_Y - ropeHeight;
-
-    const pX = PLAYER_X - PLAYER_WIDTH / 2;
-    const pY = playerYRef.current;
-
-    const isColliding = (
-      ropeX + ropeWidth / 2 > pX &&
-      ropeX - ropeWidth / 2 < pX + PLAYER_WIDTH &&
-      ropeY < pY + PLAYER_HEIGHT &&
-      ropeY + ropeHeight > pY
-    );
-
-    if (isColliding) {
-      audio.playExplosion();
-      shakeRef.current = 16;
-      inputManager.vibrateGamepad(200, 0.8);
-
-      // Spawn crash explosion
-      for (let i = 0; i < 20; i++) {
-        particlesRef.current.push({
-          x: PLAYER_X,
-          y: pY + PLAYER_HEIGHT / 2,
-          vx: (Math.random() - 0.5) * 8,
-          vy: (Math.random() - 0.5) * 8,
-          size: Math.random() * 3 + 2,
-          color: i % 2 === 0 ? '#f43f5e' : '#fbbf24',
-          alpha: 1.0,
-          decay: 0.04
-        });
-      }
-
-      draw();
-      triggerGameOver();
-      return;
-    }
-
-    // 4. Obstacle Reset & Score Point
-    if (ropePosRef.current < -30) {
-      jumpsMadeRef.current += 1;
-      comboRef.current += 1;
-      const pts = 10 * Math.min(5, Math.floor(comboRef.current / 3) + 1);
-      
-      updateScore((score || 0) + pts);
-      audio.playScore();
-
-      floatingTextsRef.current.push({
-        x: PLAYER_X,
-        y: playerYRef.current - 10,
-        text: `+${pts}`,
-        color: '#34d399',
-        alpha: 1.0,
-        vy: -1.0
-      });
-
-      // Reset rope to right side with dynamic acceleration
-      ropePosRef.current = CANVAS_WIDTH + 30;
-      ropeSpeedRef.current = Math.min(8.5, 4.0 + (jumpsMadeRef.current * 0.15));
-    }
-
-    draw();
-  }, [draw, score, triggerGameOver, updateScore]);
-
-  // Start game lifecycle
-  const startGame = useCallback(() => {
-    playerYRef.current = GROUND_Y - PLAYER_HEIGHT;
-    playerVyRef.current = 0;
-    isGroundedRef.current = true;
-    ropePosRef.current = CANVAS_WIDTH + 50;
-    ropeSpeedRef.current = 4.0;
-    jumpsMadeRef.current = 0;
-    comboRef.current = 0;
-    particlesRef.current = [];
-    floatingTextsRef.current = [];
-    updateScore(0);
-
-    startWithCountdown(() => {
-      startLoop(gameStep);
-    });
-  }, [startWithCountdown, startLoop, gameStep, updateScore]);
-
-  // DPR setup
-  useEffect(() => {
-    setupCanvasContext(canvasRef.current, CANVAS_WIDTH, CANVAS_HEIGHT);
-    draw();
-  }, [setupCanvasContext, draw]);
+  }, [addScore, scoreRef, triggerGameOver]);
 
   return (
-    <div className="relative flex flex-col h-full w-full min-h-0 items-center justify-center overflow-hidden p-2 bg-[#090b10]">
-      {/* HUD */}
-      <div className="w-full max-w-[500px] flex-none flex justify-between items-center mb-2 px-3 py-1 bg-[#121622]/80 border border-white/[0.06] rounded-xl text-xs font-mono">
-        <div className="flex items-center gap-2">
-          <span className="text-zinc-400">LOMPATAN:</span>
-          <span className="text-indigo-400 font-bold">{jumpsMadeRef.current}</span>
+    <div
+      className="relative w-full h-full min-h-[460px] bg-slate-950 overflow-hidden rounded-2xl border border-emerald-500/20"
+      onClick={jump}
+    >
+      <div ref={mountRef} className="absolute inset-0 w-full h-full cursor-pointer" />
+
+      <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex flex-wrap items-center justify-between gap-2 p-3.5">
+        <div className="flex items-center gap-3 rounded-xl border border-white/10 bg-slate-950/85 px-3.5 py-2 text-xs text-slate-200 tabular-nums">
+          <span className="flex items-center gap-1 font-semibold text-emerald-400">
+            <Flame className="w-3.5 h-3.5" /> LOMPATAN: {jumps}
+          </span>
+          <span aria-hidden="true">·</span>
+          <span>SKOR: <strong className="text-white">{score}</strong></span>
         </div>
 
-        {comboRef.current > 3 && (
-          <div className="flex items-center gap-1 text-amber-400 font-bold animate-pulse">
-            <Sparkles size={12} />
-            <span>KOMBO {comboRef.current}x</span>
-          </div>
-        )}
-
-        <div className="flex items-center gap-2">
-          <span className="text-zinc-400">SKOR:</span>
-          <span className="text-white font-bold">{score}</span>
+        <div className="rounded-xl border border-white/10 bg-slate-950/85 px-3.5 py-2 text-xs font-semibold text-amber-400 tabular-nums">
+          KECEPATAN: {rpm} RPM
         </div>
       </div>
 
-      {/* Canvas container */}
-      <div 
-        className="relative flex-1 min-h-0 w-full max-w-[500px] max-h-[280px] flex items-center justify-center bg-[#090b10] rounded-2xl border border-white/[0.08] shadow-2xl overflow-hidden cursor-pointer select-none"
-        onClick={jump}
-        onTouchStart={(e) => { e.preventDefault(); jump(); }}
-      >
-        <canvas
-          ref={canvasRef}
-          style={{ width: '100%', height: '100%' }}
-          className="object-contain block touch-none"
-        />
+      <ThreeDockOverlay
+        cameraPreset={cameraPreset}
+        onSelectPreset={handleSelectPreset}
+        quality={quality}
+        onCycleQuality={handleCycleQuality}
+        extraControls={
+          <span className="hidden sm:inline-flex items-center gap-1 text-[11px] text-slate-400 px-2 whitespace-nowrap shrink-0">
+            <Zap className="w-3 h-3 text-emerald-400" /> Space / Klik Tepat Saat Tali Plasma Mengayun ke Bawah
+          </span>
+        }
+      />
 
-        <GameOverlay
-          gameState={gameState}
-          score={score}
-          highScore={highScore}
-          countdown={countdown}
-          onStart={startGame}
-          onRestart={startGame}
-          instructions="Lompati laser neon yang meluncur cepat! Tekan SPASI, panah ATAS, atau ketuk layar."
-        />
-      </div>
-
-      {/* Mobile action button */}
-      {gameState === 'playing' && (
-        <div className="flex-none mt-2 w-full max-w-[500px] md:hidden">
-          <button
-            onTouchStart={(e) => { e.preventDefault(); jump(); }}
-            onClick={jump}
-            className="w-full py-3.5 bg-indigo-600 hover:bg-indigo-500 active:bg-indigo-400 rounded-xl text-white font-bold text-sm tracking-wider uppercase shadow-lg shadow-indigo-600/30 select-none touch-none min-h-[44px]"
-          >
-            ⬆️ LOMPAT (KETUK / SPASI)
-          </button>
-        </div>
-      )}
+      <GameOverlay
+        gameState={gameState}
+        score={score}
+        highScore={highScore}
+        countdown={countdown}
+        onStart={handleStart}
+        onRestart={handleStart}
+        title="Neon Jump Rope 3D"
+        description="Lompati ayunan tali laser 360 derajat di panggung 3D dengan ketepatan waktu sempurna!"
+        themeColor="emerald"
+      />
     </div>
   );
 }

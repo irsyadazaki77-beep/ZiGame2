@@ -1,6 +1,5 @@
 import React from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { motion } from 'motion/react';
 import { Gamepad2, Trophy, Target, Award, User } from 'lucide-react';
 
 export interface MobileNavItem {

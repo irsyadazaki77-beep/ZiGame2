@@ -1,480 +1,360 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
+import * as THREE from 'three';
+import { GameComponentProps } from '../../types';
 import { audio } from '../../utils/audio';
 import { useGameEngine } from '../../hooks/useGameEngine';
 import { inputManager } from '../../services/inputService';
 import { GameOverlay } from '../gameplay/GameOverlay';
-import { Sparkles, Trophy } from 'lucide-react';
+import { ThreeDockOverlay } from '../gameplay/ThreeDockOverlay';
+import {
+  ThreeStageController,
+  CameraPreset3D,
+  QualityLevel3D
+} from '../../utils/threeStage';
+import { Zap, Sparkles } from 'lucide-react';
 
-interface FlappyPixelProps {
-  onGameOver: (score: number) => void;
-  onScoreUpdate: (score: number) => void;
-  highScore: number;
-}
-
-interface Pipe {
+interface PipeGate3D {
+  group: THREE.Group;
   x: number;
-  topHeight: number;
-  bottomY: number;
+  gapY: number;
   passed: boolean;
-  nearMissAwarded?: boolean;
+  coinMesh: THREE.Mesh;
+  coinCollected: boolean;
 }
 
-interface Particle {
-  x: number;
-  y: number;
-  vx: number;
-  vy: number;
-  size: number;
-  color: string;
-  alpha: number;
-  decay: number;
-}
-
-interface FloatingText {
-  x: number;
-  y: number;
-  text: string;
-  color: string;
-  alpha: number;
-  vy: number;
-}
-
-const CANVAS_WIDTH = 400;
-const CANVAS_HEIGHT = 500;
-const GRAVITY = 0.46;
-const JUMP_STRENGTH = -7.6;
-const BASE_PIPE_SPEED = 2.8;
-const PIPE_WIDTH = 58;
-const BIRD_SIZE = 22;
-
-export default function FlappyPixelGame({ onGameOver, onScoreUpdate, highScore }: FlappyPixelProps) {
-  const {
-    gameState,
-    setGameState,
-    score,
-    updateScore,
-    addScore,
-    startLoop,
-    stopLoop,
-    triggerGameOver,
-    startWithCountdown,
-    countdown,
-    scoreRef,
-  } = useGameEngine({
-    gameId: 'flappypixel',
-    onGameOver,
-    onScoreUpdate,
+function buildCyberBird3D(): {
+  group: THREE.Group;
+  wingL: THREE.Mesh;
+  wingR: THREE.Mesh;
+} {
+  const group = new THREE.Group();
+  const bodyMat = new THREE.MeshPhysicalMaterial({
+    color: 0xfacc15,
+    metalness: 0.45,
+    roughness: 0.22,
+    clearcoat: 0.85
+  });
+  const beakMat = new THREE.MeshStandardMaterial({
+    color: 0xf97316,
+    roughness: 0.3
+  });
+  const eyeMat = new THREE.MeshStandardMaterial({
+    color: 0x38bdf8,
+    emissive: 0x06b6d4,
+    emissiveIntensity: 0.9
   });
 
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
+  const body = new THREE.Mesh(new THREE.SphereGeometry(0.38, 14, 14), bodyMat);
+  body.scale.set(1.25, 0.95, 0.9);
+  body.castShadow = true;
+  group.add(body);
+
+  const beak = new THREE.Mesh(new THREE.ConeGeometry(0.16, 0.38, 6), beakMat);
+  beak.rotation.z = -Math.PI / 2;
+  beak.position.set(0.52, 0, 0);
+  group.add(beak);
+
+  const eye = new THREE.Mesh(new THREE.SphereGeometry(0.09, 8, 8), eyeMat);
+  eye.position.set(0.28, 0.14, 0.28);
+  const eye2 = eye.clone();
+  eye2.position.z = -0.28;
+  group.add(eye, eye2);
+
+  const wingGeo = new THREE.BoxGeometry(0.38, 0.08, 0.55);
+  const wingL = new THREE.Mesh(wingGeo, bodyMat);
+  wingL.position.set(0, 0.05, 0.42);
+  const wingR = wingL.clone();
+  wingR.position.z = -0.42;
+  group.add(wingL, wingR);
+
+  return { group, wingL, wingR };
+}
+
+export default function FlappyPixelGame({
+  onGameOver,
+  onScoreUpdate,
+  highScore
+}: GameComponentProps) {
+  const mountRef = useRef<HTMLDivElement | null>(null);
+  const stageRef = useRef<ThreeStageController | null>(null);
+
+  const {
+    gameState,
+    score,
+    addScore,
+    startWithCountdown,
+    countdown,
+    triggerGameOver,
+    scoreRef
+  } = useGameEngine({
+    gameId: 'flappy-pixel',
+    onGameOver,
+    onScoreUpdate
+  });
+
+  const [gatesPassed, setGatesPassed] = useState(0);
+  const [cameraPreset, setCameraPreset] = useState<CameraPreset3D>('chase');
+  const [quality, setQuality] = useState<QualityLevel3D>('ultra');
+
   const gameStateRef = useRef(gameState);
-  const birdYRef = useRef(CANVAS_HEIGHT / 2);
-  const birdVelocityRef = useRef(0);
-  const pipesRef = useRef<Pipe[]>([]);
-  const particlesRef = useRef<Particle[]>([]);
-  const floatingTextsRef = useRef<FloatingText[]>([]);
-  const shakeRef = useRef(0);
-  const hitStopRef = useRef(0);
-
-  const frameTimerRef = useRef<number>(0);
-
   useEffect(() => {
     gameStateRef.current = gameState;
-    scoreRef.current = score;
-  }, [gameState, score]);
+  }, [gameState]);
 
-  // Auto-pause when tab is hidden
-  useEffect(() => {
-    const handleVisibilityChange = () => {
-      if (document.hidden && gameStateRef.current === 'playing') {
-        setGameState('paused');
-      }
-    };
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
-  }, []);
+  const birdStateRef = useRef({
+    y: 4.0,
+    vy: 0,
+    gates: 0,
+    spawnTimer: 0.4
+  });
 
-  const getDynamicGap = (currentScore: number) => {
-    // Easy onboarding: 160px gap for score 0-4, scaling down to 125px minimum
-    return Math.max(125, 160 - Math.floor(currentScore / 4) * 5);
-  };
+  const pipesRef = useRef<PipeGate3D[]>([]);
 
-  const createPipe = (startX: number, currentScore: number): Pipe => {
-    const gap = getDynamicGap(currentScore);
-    const minHeight = 60;
-    const maxHeight = CANVAS_HEIGHT - gap - minHeight;
-    const topHeight = Math.floor(Math.random() * (maxHeight - minHeight + 1)) + minHeight;
-
-    return {
-      x: startX,
-      topHeight,
-      bottomY: topHeight + gap,
-      passed: false,
-    };
-  };
-
-  const spawnParticles = (x: number, y: number, color: string, count = 8, speed = 2) => {
-    for (let i = 0; i < count; i++) {
-      const angle = (Math.PI * 2 * i) / count + (Math.random() - 0.5);
-      const spd = Math.random() * speed + 0.8;
-      particlesRef.current.push({
-        x,
-        y,
-        vx: Math.cos(angle) * spd,
-        vy: Math.sin(angle) * spd,
-        size: Math.random() * 2.5 + 1.5,
-        color,
-        alpha: 1.0,
-        decay: 0.04 + Math.random() * 0.02,
-      });
-    }
-  };
-
-  const spawnFloatingText = (x: number, y: number, text: string, color = '#fbbf24') => {
-    floatingTextsRef.current.push({
-      x,
-      y,
-      text,
-      color,
-      alpha: 1.0,
-      vy: -1.0,
-    });
-  };
-
-  const resetGame = useCallback(() => {
-    birdYRef.current = CANVAS_HEIGHT / 2 - 30;
-    birdVelocityRef.current = 0;
-    updateScore(0);
-    particlesRef.current = [];
-    floatingTextsRef.current = [];
-    shakeRef.current = 0;
-    hitStopRef.current = 0;
-
-    pipesRef.current = [
-      createPipe(CANVAS_WIDTH + 50, 0),
-      createPipe(CANVAS_WIDTH + 310, 0),
-    ];
-    draw();
-  }, [updateScore]);
-
-  const jump = useCallback(() => {
-    if (gameStateRef.current === 'playing') {
-      birdVelocityRef.current = JUMP_STRENGTH;
-      audio.playLaser();
-      inputManager.vibrateGamepad(35, 0.2);
-
-      // Flap exhaust sparks
-      spawnParticles(50 + BIRD_SIZE / 2, birdYRef.current + BIRD_SIZE, '#f59e0b', 5, 1.5);
-    }
-  }, []);
-
-  const startGame = useCallback(() => {
-    resetGame();
-    startWithCountdown(() => {
-      startLoop(gameStep);
-    });
-  }, [resetGame, startWithCountdown, startLoop]);
-
-  const resumeGame = useCallback(() => {
-    startWithCountdown(() => {
-      startLoop(gameStep);
-    });
-  }, [startWithCountdown, startLoop]);
-
-  const gameStep = useCallback((timestamp: number, dt: number) => {
+  const flap = useCallback(() => {
     if (gameStateRef.current !== 'playing') return;
+    birdStateRef.current.vy = 8.4;
+    audio.playJump?.();
+  }, []);
 
-    if (hitStopRef.current > 0) {
-      hitStopRef.current -= dt;
-      draw();
+  const handleStart = useCallback(() => {
+    const stage = stageRef.current;
+    if (stage) {
+      pipesRef.current.forEach((p) => stage.scene.remove(p.group));
+    }
+    pipesRef.current = [];
+    birdStateRef.current = {
+      y: 4.0,
+      vy: 4.5,
+      gates: 0,
+      spawnTimer: 0.4
+    };
+    setGatesPassed(0);
+    startWithCountdown();
+  }, [startWithCountdown]);
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === ' ' || e.key === 'ArrowUp' || e.key.toLowerCase() === 'w') {
+        flap();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+
+    const unsub = inputManager.subscribe({
+      onActionDown: (action) => {
+        if (action === 'ACTION_PRIMARY' || action === 'UP') flap();
+      }
+    });
+
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      unsub();
+    };
+  }, [flap]);
+
+  const handleSelectPreset = useCallback((preset: CameraPreset3D) => {
+    setCameraPreset(preset);
+    stageRef.current?.setCameraPreset(preset);
+  }, []);
+
+  const handleCycleQuality = useCallback(() => {
+    setQuality((prev) => {
+      const next: QualityLevel3D =
+        prev === 'ultra' ? 'balanced' : prev === 'balanced' ? 'performance' : 'ultra';
+      stageRef.current?.setQualityLevel(next);
+      return next;
+    });
+  }, []);
+
+  useEffect(() => {
+    const container = mountRef.current;
+    if (!container) return;
+
+    let stage: ThreeStageController;
+    try {
+      stage = new ThreeStageController({
+        container,
+        backgroundColor: 0x060a17,
+        fogColor: 0x060a17,
+        fogDensity: 0.018,
+        initialPreset: 'chase',
+        gridPrimaryColor: '#eab308',
+        gridSecondaryColor: '#090f22',
+        cameraPresets: {
+          chase: { position: [-1.5, 4.2, 11.2], lookAt: [1.0, 4.0, 0], fov: 50 },
+          isometric: { position: [-6.5, 6.2, 9.5], lookAt: [1.0, 4.0, 0], fov: 48 },
+          diorama: { position: [0, 4.2, 13.5], lookAt: [0, 4.0, 0], fov: 45 }
+        }
+      });
+    } catch {
       return;
     }
 
-    const safeDelta = Math.min(dt, 100);
-    frameTimerRef.current += safeDelta;
+    stageRef.current = stage;
+    setQuality(stage.getQualityLevel());
 
-    const targetFrameTime = 1000 / 60;
-    while (frameTimerRef.current >= targetFrameTime) {
-      updatePhysics();
-      frameTimerRef.current -= targetFrameTime;
-    }
+    const bird = buildCyberBird3D();
+    bird.group.position.set(-2.5, 4.0, 0);
+    stage.scene.add(bird.group);
 
-    draw();
-  }, []);
+    const pipeMat = new THREE.MeshPhysicalMaterial({
+      color: 0x10b981,
+      emissive: 0x059669,
+      emissiveIntensity: 0.35,
+      metalness: 0.65,
+      roughness: 0.25,
+      clearcoat: 0.8
+    });
+    const coinMat = new THREE.MeshStandardMaterial({
+      color: 0xfacc15,
+      emissive: 0xeab308,
+      emissiveIntensity: 0.85
+    });
 
-  const updatePhysics = () => {
-    // Bird physics
-    birdVelocityRef.current += GRAVITY;
-    birdYRef.current += birdVelocityRef.current;
+    const GAP_HALF = 1.65;
 
-    // Floor / Ceiling collision
-    if (birdYRef.current > CANVAS_HEIGHT - BIRD_SIZE || birdYRef.current < 0) {
-      handleGameOver();
-      return;
-    }
+    stage.startLoop((dt, elapsed) => {
+      const wingAngle = Math.sin(elapsed * 18) * 0.55;
+      bird.wingL.rotation.x = wingAngle;
+      bird.wingR.rotation.x = -wingAngle;
 
-    const birdRect = {
-      x: 50,
-      y: birdYRef.current,
-      width: BIRD_SIZE,
-      height: BIRD_SIZE,
-    };
+      if (gameStateRef.current !== 'playing') return;
 
-    let needsNewPipe = false;
-    const currentScore = score;
-    const pipeSpeed = BASE_PIPE_SPEED + Math.min(1.2, currentScore * 0.04);
+      const b = birdStateRef.current;
+      b.vy -= 21.5 * dt;
+      b.y += b.vy * dt;
 
-    pipesRef.current.forEach(pipe => {
-      pipe.x -= pipeSpeed;
+      bird.group.position.set(-2.5, b.y, 0);
+      bird.group.rotation.z = THREE.MathUtils.clamp(b.vy * 0.06, -0.65, 0.55);
 
-      // Scoring
-      if (!pipe.passed && pipe.x + PIPE_WIDTH < birdRect.x) {
-        pipe.passed = true;
-        addScore(1);
-        audio.playCoin();
-        spawnFloatingText(birdRect.x + 20, birdRect.y - 15, `+1`, '#10b981');
+      if (b.y < 0.35 || b.y > 8.2) {
+        stage.particles.burst(-2.5, Math.max(0.5, b.y), 0, 32, 0xef4444, 9);
+        stage.triggerTrauma(0.75);
+        audio.playExplosion?.();
+        triggerGameOver(scoreRef.current);
+        return;
       }
 
-      // Near-miss detection (bonus points if grazed closely without dying!)
-      if (!pipe.nearMissAwarded && pipe.x < birdRect.x + birdRect.width && pipe.x + PIPE_WIDTH > birdRect.x) {
-        const distToTop = Math.abs(birdRect.y - pipe.topHeight);
-        const distToBottom = Math.abs(birdRect.y + birdRect.height - pipe.bottomY);
-        if (distToTop < 10 || distToBottom < 10) {
-          pipe.nearMissAwarded = true;
-          audio.playNearMiss();
-          addScore(1);
-          spawnFloatingText(birdRect.x + 25, birdRect.y - 25, 'NEAR MISS! +1', '#38bdf8');
-          shakeRef.current = 2;
+      // Spawn 3D Pipe Gates
+      b.spawnTimer -= dt;
+      if (b.spawnTimer <= 0) {
+        b.spawnTimer = 1.55;
+        const gapY = 2.4 + Math.random() * 3.2;
+        const g = new THREE.Group();
+
+        const botH = Math.max(0.5, gapY - GAP_HALF);
+        const botPipe = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.55, botH, 14), pipeMat);
+        botPipe.position.y = botH / 2;
+        botPipe.castShadow = true;
+
+        const topYStart = gapY + GAP_HALF;
+        const topH = Math.max(0.5, 9.0 - topYStart);
+        const topPipe = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.55, topH, 14), pipeMat);
+        topPipe.position.y = topYStart + topH / 2;
+        topPipe.castShadow = true;
+
+        const coinMesh = new THREE.Mesh(new THREE.OctahedronGeometry(0.35, 0), coinMat);
+        coinMesh.position.y = gapY;
+
+        g.add(botPipe, topPipe, coinMesh);
+        g.position.set(10, 0, 0);
+        stage.scene.add(g);
+
+        pipesRef.current.push({
+          group: g,
+          x: 10,
+          gapY,
+          passed: false,
+          coinMesh,
+          coinCollected: false
+        });
+      }
+
+      for (let i = pipesRef.current.length - 1; i >= 0; i--) {
+        const p = pipesRef.current[i];
+        p.x -= 5.4 * dt;
+        p.group.position.x = p.x;
+        p.coinMesh.rotation.y += dt * 4;
+
+        // Check collision at bird x = -2.5
+        if (Math.abs(p.x - -2.5) < 0.78) {
+          if (!p.coinCollected && Math.abs(b.y - p.gapY) < 0.95) {
+            p.coinCollected = true;
+            p.coinMesh.visible = false;
+            addScore(15);
+            audio.playCoin?.();
+            stage.particles.burst(-2.5, p.gapY, 0, 14, 0xfacc15, 6);
+          }
+
+          if (Math.abs(b.y - p.gapY) > GAP_HALF - 0.3) {
+            stage.particles.burst(-2.5, b.y, 0, 34, 0xef4444, 10);
+            stage.triggerTrauma(0.75);
+            audio.playExplosion?.();
+            triggerGameOver(scoreRef.current);
+            return;
+          }
+        }
+
+        if (!p.passed && p.x < -2.5) {
+          p.passed = true;
+          b.gates += 1;
+          setGatesPassed(b.gates);
+          addScore(10);
+        }
+
+        if (p.x < -10) {
+          stage.scene.remove(p.group);
+          pipesRef.current.splice(i, 1);
         }
       }
-
-      // Strict hit-box collision
-      const margin = 3; // Forgiving pixel margin
-      if (
-        birdRect.x + birdRect.width - margin > pipe.x &&
-        birdRect.x + margin < pipe.x + PIPE_WIDTH &&
-        (birdRect.y + margin < pipe.topHeight || birdRect.y + birdRect.height - margin > pipe.bottomY)
-      ) {
-        handleGameOver();
-      }
-
-      if (pipe.x + PIPE_WIDTH < 0) {
-        needsNewPipe = true;
-      }
     });
 
-    if (needsNewPipe) {
-      pipesRef.current.shift();
-      const lastPipeX = pipesRef.current.length > 0 ? pipesRef.current[pipesRef.current.length - 1].x : CANVAS_WIDTH;
-      pipesRef.current.push(createPipe(lastPipeX + 250, score));
-    }
-
-    // Update Particles
-    for (let i = particlesRef.current.length - 1; i >= 0; i--) {
-      const p = particlesRef.current[i];
-      p.x += p.vx;
-      p.y += p.vy;
-      p.alpha -= p.decay;
-      if (p.alpha <= 0) particlesRef.current.splice(i, 1);
-    }
-
-    // Update Floating Texts
-    for (let i = floatingTextsRef.current.length - 1; i >= 0; i--) {
-      const t = floatingTextsRef.current[i];
-      t.y += t.vy;
-      t.alpha -= 0.025;
-      if (t.alpha <= 0) floatingTextsRef.current.splice(i, 1);
-    }
-  };
-
-  const handleGameOver = () => {
-    audio.playExplosion();
-    shakeRef.current = 10;
-    hitStopRef.current = 70;
-    inputManager.vibrateGamepad(180, 0.7);
-
-    spawnParticles(50 + BIRD_SIZE / 2, birdYRef.current + BIRD_SIZE / 2, '#f43f5e', 22, 3);
-    triggerGameOver();
-  };
-
-  const draw = () => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    ctx.save();
-
-    // Decaying Screen Shake
-    if (shakeRef.current > 0) {
-      const sx = (Math.random() - 0.5) * shakeRef.current;
-      const sy = (Math.random() - 0.5) * shakeRef.current;
-      ctx.translate(sx, sy);
-      shakeRef.current = Math.max(0, shakeRef.current - 0.4);
-    }
-
-    // Atmospheric Dark Matrix Canvas
-    ctx.fillStyle = '#080a0f';
-    ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
-
-    // Subtle Neon Cyber Grid
-    ctx.strokeStyle = '#121622';
-    ctx.lineWidth = 1;
-    for (let x = 0; x < CANVAS_WIDTH; x += 40) {
-      ctx.beginPath();
-      ctx.moveTo(x, 0);
-      ctx.lineTo(x, CANVAS_HEIGHT);
-      ctx.stroke();
-    }
-    for (let y = 0; y < CANVAS_HEIGHT; y += 40) {
-      ctx.beginPath();
-      ctx.moveTo(0, y);
-      ctx.lineTo(CANVAS_WIDTH, y);
-      ctx.stroke();
-    }
-
-    // Neon Pillars / Pipes
-    pipesRef.current.forEach(pipe => {
-      // Pipe Glow
-      ctx.fillStyle = '#10b981';
-      ctx.fillRect(pipe.x, 0, PIPE_WIDTH, pipe.topHeight);
-      ctx.fillRect(pipe.x, pipe.bottomY, PIPE_WIDTH, CANVAS_HEIGHT - pipe.bottomY);
-
-      // Pipe Highlights & Caps
-      ctx.fillStyle = '#34d399';
-      ctx.fillRect(pipe.x - 2, pipe.topHeight - 18, PIPE_WIDTH + 4, 18);
-      ctx.fillRect(pipe.x - 2, pipe.bottomY, PIPE_WIDTH + 4, 18);
-
-      // Energy Ring inside the gap
-      ctx.strokeStyle = 'rgba(16, 185, 129, 0.25)';
-      ctx.lineWidth = 2;
-      ctx.strokeRect(pipe.x + 4, pipe.topHeight + 4, PIPE_WIDTH - 8, pipe.bottomY - pipe.topHeight - 8);
-    });
-
-    // Bird
-    ctx.save();
-    const bx = 50 + BIRD_SIZE / 2;
-    const by = birdYRef.current + BIRD_SIZE / 2;
-    ctx.translate(bx, by);
-
-    const rotation = Math.min(Math.max(birdVelocityRef.current * 0.08, -0.4), 0.5);
-    ctx.rotate(rotation);
-
-    // Cyber Bird Body
-    ctx.fillStyle = '#f59e0b';
-    ctx.beginPath();
-    ctx.roundRect(-BIRD_SIZE / 2, -BIRD_SIZE / 2, BIRD_SIZE, BIRD_SIZE, 5);
-    ctx.fill();
-
-    // Wing
-    ctx.fillStyle = '#fbbf24';
-    ctx.beginPath();
-    ctx.roundRect(-BIRD_SIZE / 2 + 2, 0, BIRD_SIZE / 2, BIRD_SIZE / 3, 2);
-    ctx.fill();
-
-    // Visor Eye
-    ctx.fillStyle = '#38bdf8';
-    ctx.fillRect(BIRD_SIZE / 4, -BIRD_SIZE / 4, 6, 5);
-
-    ctx.restore();
-
-    // Particles
-    particlesRef.current.forEach(p => {
-      ctx.fillStyle = p.color;
-      ctx.globalAlpha = p.alpha;
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
-      ctx.fill();
-    });
-    ctx.globalAlpha = 1;
-
-    // Floating Texts
-    floatingTextsRef.current.forEach(t => {
-      ctx.fillStyle = t.color;
-      ctx.globalAlpha = t.alpha;
-      ctx.font = 'bold 11px monospace';
-      ctx.textAlign = 'center';
-      ctx.fillText(t.text, t.x, t.y);
-    });
-    ctx.globalAlpha = 1;
-
-    ctx.restore();
-  };
-
-  // Keyboard controls
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.code === 'Space' || e.key === 'ArrowUp' || e.key === 'w') {
-        if (gameStateRef.current === 'playing') {
-          e.preventDefault();
-          jump();
-        } else if (gameStateRef.current === 'ready' || gameStateRef.current === 'gameover') {
-          e.preventDefault();
-          startGame();
-        }
-      } else if (e.key === 'Escape' && gameStateRef.current === 'playing') {
-        setGameState('paused');
-      }
+    return () => {
+      stage.dispose();
+      stageRef.current = null;
     };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [jump, startGame]);
-
-  useEffect(() => {
-    draw();
-  }, []);
+  }, [addScore, scoreRef, triggerGameOver]);
 
   return (
-    <div 
-      ref={containerRef}
-      className="relative flex flex-col h-full w-full min-h-0 items-center justify-center overflow-hidden p-2 bg-[#090b10]"
+    <div
+      className="relative w-full h-full min-h-[460px] bg-slate-950 overflow-hidden rounded-2xl border border-amber-500/20"
+      onClick={flap}
     >
-      {/* Clean HUD Bar */}
-      <div className="w-full max-w-[400px] flex-none flex justify-between items-center mb-2 px-3 py-1 bg-[#121622]/80 border border-white/[0.06] rounded-xl text-xs font-mono">
-        <div className="flex items-center gap-1.5 text-emerald-400 font-bold">
-          <Sparkles size={12} />
-          <span>CYBER FLAP</span>
-        </div>
+      <div ref={mountRef} className="absolute inset-0 w-full h-full cursor-pointer" />
 
-        <div className="flex items-center gap-1.5 text-zinc-400">
-          <Trophy size={12} className="text-amber-400" />
-          <span>BEST: <strong className="text-white">{highScore}</strong></span>
-        </div>
-
-        <div className="flex items-center gap-1.5">
-          <span className="text-zinc-400">SKOR:</span>
-          <span className="text-yellow-400 font-bold">{score}</span>
+      <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex flex-wrap items-center justify-between gap-2 p-3.5">
+        <div className="flex items-center gap-3 rounded-xl border border-white/10 bg-slate-950/85 px-3.5 py-2 text-xs text-slate-200 tabular-nums">
+          <span className="flex items-center gap-1 font-semibold text-amber-400">
+            <Sparkles className="w-3.5 h-3.5" /> GERBANG: {gatesPassed}
+          </span>
+          <span aria-hidden="true">·</span>
+          <span>SKOR: <strong className="text-white">{score}</strong></span>
         </div>
       </div>
 
-      {/* Canvas Wrapper */}
-      <div 
-        className="relative flex-1 min-h-0 w-full max-w-[400px] max-h-[500px] flex items-center justify-center bg-[#090b10] rounded-2xl border border-white/[0.08] shadow-2xl overflow-hidden cursor-pointer touch-none select-none"
-        onPointerDown={(e) => {
-          e.preventDefault();
-          if (gameState === 'playing') jump();
-          else if (gameState === 'ready' || gameState === 'gameover') startGame();
-        }}
-      >
-        <canvas
-          ref={canvasRef}
-          width={CANVAS_WIDTH}
-          height={CANVAS_HEIGHT}
-          className="w-full h-full object-contain block"
-        />
+      <ThreeDockOverlay
+        cameraPreset={cameraPreset}
+        onSelectPreset={handleSelectPreset}
+        quality={quality}
+        onCycleQuality={handleCycleQuality}
+        extraControls={
+          <span className="hidden sm:inline-flex items-center gap-1 text-[11px] text-slate-400 px-2 whitespace-nowrap shrink-0">
+            <Zap className="w-3 h-3 text-amber-400" /> Space / Klik: Kepakkan Sayap 3D
+          </span>
+        }
+      />
 
-        <GameOverlay
-          gameState={gameState}
-          score={score}
-          highScore={highScore}
-          onStart={startGame}
-          onRestart={startGame}
-          onResume={resumeGame}
-          countdown={countdown}
-          instructions="Ketuk di mana saja pada layar atau tekan SPASI untuk melompat melintasi gerbang neon!"
-        />
-      </div>
+      <GameOverlay
+        gameState={gameState}
+        score={score}
+        highScore={highScore}
+        countdown={countdown}
+        onStart={handleStart}
+        onRestart={handleStart}
+        title="Flappy Pixel 3D"
+        description="Kepakkan sayap burung mekanik 3D melewati gerbang turbin neon dan kumpulkan kristal emas!"
+        themeColor="amber"
+      />
     </div>
   );
 }

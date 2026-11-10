@@ -1,734 +1,448 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
+import * as THREE from 'three';
+import { GameComponentProps } from '../../types';
 import { audio } from '../../utils/audio';
 import { useGameEngine } from '../../hooks/useGameEngine';
 import { inputManager } from '../../services/inputService';
 import { GameOverlay } from '../gameplay/GameOverlay';
-import { Sparkles, Trophy, Zap } from 'lucide-react';
+import { ThreeDockOverlay } from '../gameplay/ThreeDockOverlay';
+import {
+  ThreeStageController,
+  CameraPreset3D,
+  QualityLevel3D,
+  buildCyberActionHero3D
+} from '../../utils/threeStage';
+import { Zap, Shield, Flame } from 'lucide-react';
 
-interface CyberRunnerGameProps {
-  onGameOver: (score: number) => void;
-  onScoreUpdate: (score: number) => void;
-  highScore: number;
-}
-
-interface RunnerObstacle {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  type: 'spike' | 'drone' | 'laser_gate';
-  speed: number;
+interface RunnerObstacle3D {
+  mesh: THREE.Group;
+  lane: number; // -1, 0, 1
+  z: number;
+  type: 'hurdle' | 'drone' | 'coin' | 'boost';
   passed: boolean;
-  nearMissed?: boolean;
 }
 
-interface RunnerCoin {
-  x: number;
-  y: number;
-  radius: number;
-  value: number;
-  collected: boolean;
+const LANE_WIDTH = 2.4;
+
+function buildObstacleMesh3D(type: RunnerObstacle3D['type']): THREE.Group {
+  const g = new THREE.Group();
+  if (type === 'hurdle') {
+    const postMat = new THREE.MeshStandardMaterial({ color: 0x334155, metalness: 0.8, roughness: 0.3 });
+    const laserMat = new THREE.MeshStandardMaterial({
+      color: 0xef4444,
+      emissive: 0xef4444,
+      emissiveIntensity: 0.95
+    });
+    const postL = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.12, 1.1, 8), postMat);
+    postL.position.set(-0.85, 0.55, 0);
+    const postR = postL.clone();
+    postR.position.x = 0.85;
+    const beam1 = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 1.7, 8), laserMat);
+    beam1.rotation.z = Math.PI / 2;
+    beam1.position.y = 0.45;
+    const beam2 = beam1.clone();
+    beam2.position.y = 0.88;
+    g.add(postL, postR, beam1, beam2);
+  } else if (type === 'drone') {
+    const bodyMat = new THREE.MeshStandardMaterial({ color: 0xf97316, metalness: 0.7, roughness: 0.25 });
+    const eyeMat = new THREE.MeshStandardMaterial({
+      color: 0xfef08a,
+      emissive: 0xfacc15,
+      emissiveIntensity: 0.95
+    });
+    const hull = new THREE.Mesh(new THREE.OctahedronGeometry(0.52, 1), bodyMat);
+    hull.position.y = 1.65;
+    const eye = new THREE.Mesh(new THREE.SphereGeometry(0.2, 10, 10), eyeMat);
+    eye.position.set(0, 1.65, 0.42);
+    const ring = new THREE.Mesh(
+      new THREE.TorusGeometry(0.7, 0.05, 8, 20),
+      new THREE.MeshBasicMaterial({ color: 0xf97316 })
+    );
+    ring.rotation.x = Math.PI / 2;
+    ring.position.y = 1.65;
+    g.add(hull, eye, ring);
+  } else if (type === 'coin') {
+    const coinMat = new THREE.MeshStandardMaterial({
+      color: 0xfacc15,
+      emissive: 0xeab308,
+      emissiveIntensity: 0.8,
+      metalness: 0.85,
+      roughness: 0.15
+    });
+    const coin = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.42, 0.12, 16), coinMat);
+    coin.rotation.x = Math.PI / 2;
+    coin.position.y = 0.85;
+    g.add(coin);
+  } else {
+    const boostMat = new THREE.MeshStandardMaterial({
+      color: 0x22d3ee,
+      emissive: 0x06b6d4,
+      emissiveIntensity: 0.9
+    });
+    const orb = new THREE.Mesh(new THREE.OctahedronGeometry(0.45, 0), boostMat);
+    orb.position.y = 0.9;
+    g.add(orb);
+  }
+  return g;
 }
 
-interface Particle {
-  x: number;
-  y: number;
-  vx: number;
-  vy: number;
-  size: number;
-  color: string;
-  alpha: number;
-  decay: number;
-}
-
-interface FloatingText {
-  x: number;
-  y: number;
-  text: string;
-  color: string;
-  alpha: number;
-  vy: number;
-}
-
-const CANVAS_WIDTH = 600;
-const CANVAS_HEIGHT = 320;
-const GROUND_Y = 240;
-
-export default function CyberRunnerGame({ onGameOver, onScoreUpdate, highScore }: CyberRunnerGameProps) {
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const containerRef = useRef<HTMLDivElement | null>(null);
+export default function CyberRunnerGame({
+  onGameOver,
+  onScoreUpdate,
+  highScore
+}: GameComponentProps) {
+  const mountRef = useRef<HTMLDivElement | null>(null);
+  const stageRef = useRef<ThreeStageController | null>(null);
 
   const {
     gameState,
-    setGameState,
     score,
-    updateScore,
     addScore,
-    startLoop,
-    stopLoop,
-    triggerGameOver,
     startWithCountdown,
     countdown,
-    gameLoopRef
+    triggerGameOver,
+    scoreRef
   } = useGameEngine({
-    gameId: 'cyberrunner',
+    gameId: 'cyber-runner',
     onGameOver,
-    onScoreUpdate,
+    onScoreUpdate
   });
 
-  const [combo, setCombo] = useState(0);
-  const [distance, setDistance] = useState(0);
+  const [speedKmh, setSpeedKmh] = useState(120);
+  const [hasShield, setHasShield] = useState(false);
+  const [cameraPreset, setCameraPreset] = useState<CameraPreset3D>('chase');
+  const [quality, setQuality] = useState<QualityLevel3D>('ultra');
 
   const gameStateRef = useRef(gameState);
-  const comboRef = useRef(0);
-  const comboTimerRef = useRef(0);
-  const hitStopRef = useRef<number>(0);
-  const shakeRef = useRef<number>(0);
-
   useEffect(() => {
     gameStateRef.current = gameState;
   }, [gameState]);
 
-  // Player physics
-  const playerRef = useRef({
-    x: 60,
-    y: GROUND_Y - 36,
-    width: 22,
-    height: 36,
+  const runnerRef = useRef({
+    lane: 0,
+    x: 0,
+    y: 0,
     vy: 0,
-    gravity: 0.58,
-    jumpForce: -10.2,
-    isGrounded: true,
-    isDucking: false,
-    duckHeight: 20,
-    normalHeight: 36,
-    doubleJumpAvailable: true,
-    runFrame: 0,
+    isJumping: false,
+    isSliding: false,
+    slideTimer: 0,
+    speed: 15,
+    shield: false,
+    spawnTimer: 0,
+    distanceAcc: 0
   });
 
-  const obstaclesRef = useRef<RunnerObstacle[]>([]);
-  const coinsRef = useRef<RunnerCoin[]>([]);
-  const particlesRef = useRef<Particle[]>([]);
-  const floatingTextsRef = useRef<FloatingText[]>([]);
-  const buildingsRef = useRef<{ x: number; width: number; height: number; lights: boolean[] }[]>([]);
-  const activeKeysRef = useRef<{ [key: string]: boolean }>({});
-  const speedMultRef = useRef<number>(1);
-  const spawnTimerRef = useRef<number>(0);
-  const coinTimerRef = useRef<number>(0);
+  const obstaclesRef = useRef<RunnerObstacle3D[]>([]);
 
-  // Background neon skyline
-  const initSkyline = useCallback(() => {
-    const buildings = [];
-    let curX = 0;
-    while (curX < CANVAS_WIDTH * 1.5) {
-      const w = 40 + Math.random() * 50;
-      const h = 70 + Math.random() * 110;
-      const lights = Array.from({ length: 12 }, () => Math.random() > 0.4);
-      buildings.push({ x: curX, width: w, height: h, lights });
-      curX += w + 6;
+  const handleStart = useCallback(() => {
+    const stage = stageRef.current;
+    if (stage) {
+      obstaclesRef.current.forEach((o) => stage.scene.remove(o.mesh));
     }
-    buildingsRef.current = buildings;
-  }, []);
-
-  useEffect(() => {
-    initSkyline();
-    draw();
-    return () => {
-      if (gameLoopRef?.current) cancelAnimationFrame(gameLoopRef.current);
-    };
-  }, [initSkyline]);
-
-  // Auto-pause when tab hidden
-  useEffect(() => {
-    const handleVis = () => {
-      if (document.hidden && gameStateRef.current === 'playing') {
-        setGameState('paused');
-      }
-    };
-    document.addEventListener('visibilitychange', handleVis);
-    return () => document.removeEventListener('visibilitychange', handleVis);
-  }, []);
-
-  const spawnParticles = (x: number, y: number, color: string, count = 8, speed = 2) => {
-    for (let i = 0; i < count; i++) {
-      const angle = (Math.PI * 2 * i) / count + (Math.random() - 0.5);
-      const spd = Math.random() * speed + 0.8;
-      particlesRef.current.push({
-        x,
-        y,
-        vx: Math.cos(angle) * spd,
-        vy: Math.sin(angle) * spd,
-        size: Math.random() * 2.5 + 1.5,
-        color,
-        alpha: 1.0,
-        decay: 0.04 + Math.random() * 0.02,
-      });
-    }
-  };
-
-  const spawnFloatingText = (x: number, y: number, text: string, color = '#fbbf24') => {
-    floatingTextsRef.current.push({
-      x,
-      y,
-      text,
-      color,
-      alpha: 1.0,
-      vy: -1.0,
-    });
-  };
-
-  const handleJump = useCallback(() => {
-    const p = playerRef.current;
-    if (gameStateRef.current !== 'playing') return;
-
-    if (p.isGrounded) {
-      p.vy = p.jumpForce;
-      p.isGrounded = false;
-      p.doubleJumpAvailable = true;
-      audio.playLaser();
-      inputManager.vibrateGamepad(30, 0.25);
-      spawnParticles(p.x + p.width / 2, GROUND_Y, '#38bdf8', 6, 1.8);
-    } else if (p.doubleJumpAvailable) {
-      // Sonic Double Jump
-      p.vy = p.jumpForce * 0.88;
-      p.doubleJumpAvailable = false;
-      audio.playPowerup();
-      inputManager.vibrateGamepad(45, 0.4);
-      spawnParticles(p.x + p.width / 2, p.y + p.height, '#a855f7', 10, 2.4);
-      spawnFloatingText(p.x + p.width / 2, p.y - 12, 'DOUBLE JUMP!', '#c084fc');
-    }
-  }, []);
-
-  const handleDuck = useCallback((duck: boolean) => {
-    const p = playerRef.current;
-    if (gameStateRef.current !== 'playing') return;
-    p.isDucking = duck;
-    if (duck && p.isGrounded) {
-      // Slide sparks
-      spawnParticles(p.x, GROUND_Y - 2, '#f59e0b', 3, 1.2);
-    }
-  }, []);
-
-  const resetGame = useCallback(() => {
-    updateScore(0);
-    setDistance(0);
-    comboRef.current = 0;
-    setCombo(0);
-    comboTimerRef.current = 0;
-    speedMultRef.current = 1;
-
-    playerRef.current = {
-      x: 60,
-      y: GROUND_Y - 36,
-      width: 22,
-      height: 36,
-      vy: 0,
-      gravity: 0.58,
-      jumpForce: -10.2,
-      isGrounded: true,
-      isDucking: false,
-      duckHeight: 20,
-      normalHeight: 36,
-      doubleJumpAvailable: true,
-      runFrame: 0,
-    };
-
     obstaclesRef.current = [];
-    coinsRef.current = [];
-    particlesRef.current = [];
-    floatingTextsRef.current = [];
-    spawnTimerRef.current = 0;
-    coinTimerRef.current = 0;
-    shakeRef.current = 0;
-    hitStopRef.current = 0;
-
-    initSkyline();
-    draw();
-  }, [initSkyline, updateScore]);
-
-  const startGame = useCallback(() => {
-    resetGame();
-    startWithCountdown(() => {
-      startLoop(gameStep);
-    });
-  }, [resetGame, startWithCountdown, startLoop]);
-
-  // Keyboard controls
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (['Space', 'ArrowUp', 'KeyW'].includes(e.code)) {
-        e.preventDefault();
-        if (gameStateRef.current === 'playing') handleJump();
-        else if (gameStateRef.current === 'ready' || gameStateRef.current === 'gameover') startGame();
-      } else if (['ArrowDown', 'KeyS'].includes(e.code)) {
-        e.preventDefault();
-        handleDuck(true);
-      } else if (e.key === 'Escape' && gameStateRef.current === 'playing') {
-        setGameState('paused');
-      }
+    runnerRef.current = {
+      lane: 0,
+      x: 0,
+      y: 0,
+      vy: 0,
+      isJumping: false,
+      isSliding: false,
+      slideTimer: 0,
+      speed: 15,
+      shield: false,
+      spawnTimer: 0.4,
+      distanceAcc: 0
     };
+    setSpeedKmh(120);
+    setHasShield(false);
+    startWithCountdown();
+  }, [startWithCountdown]);
 
-    const handleKeyUp = (e: KeyboardEvent) => {
-      if (['ArrowDown', 'KeyS'].includes(e.code)) {
-        e.preventDefault();
-        handleDuck(false);
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    window.addEventListener('keyup', handleKeyUp);
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-      window.removeEventListener('keyup', handleKeyUp);
-    };
-  }, [handleDuck, handleJump, startGame]);
-
-  const spawnObstacle = () => {
-    const r = Math.random();
-    let type: RunnerObstacle['type'] = 'spike';
-    let width = 22;
-    let height = 28;
-    let y = GROUND_Y - height;
-
-    if (r < 0.45) {
-      // Flying Cyber Drone (requires ducking or jumping over)
-      type = 'drone';
-      width = 28;
-      height = 18;
-      y = GROUND_Y - 48; // Positioned right at head height when running upright!
-    } else if (r < 0.7) {
-      // Laser gate
-      type = 'laser_gate';
-      width = 16;
-      height = 36;
-      y = GROUND_Y - height;
-    }
-
-    obstaclesRef.current.push({
-      x: CANVAS_WIDTH + 20,
-      y,
-      width,
-      height,
-      type,
-      speed: 4.8 * speedMultRef.current,
-      passed: false,
-    });
-  };
-
-  const spawnCoins = () => {
-    const count = 3 + Math.floor(Math.random() * 3);
-    const startX = CANVAS_WIDTH + 20;
-    const y = Math.random() > 0.5 ? GROUND_Y - 60 : GROUND_Y - 20;
-
-    for (let i = 0; i < count; i++) {
-      coinsRef.current.push({
-        x: startX + i * 26,
-        y,
-        radius: 6,
-        value: 5,
-        collected: false,
-      });
-    }
-  };
-
-  const gameStep = useCallback((timestamp: number, dt: number) => {
+  const shiftLane = useCallback((dir: -1 | 1) => {
     if (gameStateRef.current !== 'playing') return;
+    const r = runnerRef.current;
+    r.lane = Math.max(-1, Math.min(1, r.lane + dir));
+  }, []);
 
-    if (hitStopRef.current > 0) {
-      hitStopRef.current -= dt;
-      draw();
+  const triggerJump = useCallback(() => {
+    if (gameStateRef.current !== 'playing') return;
+    const r = runnerRef.current;
+    if (!r.isJumping) {
+      r.isJumping = true;
+      r.isSliding = false;
+      r.vy = 11.5;
+      audio.playJump?.();
+    }
+  }, []);
+
+  const triggerSlide = useCallback(() => {
+    if (gameStateRef.current !== 'playing') return;
+    const r = runnerRef.current;
+    r.isSliding = true;
+    r.slideTimer = 0.65;
+    if (r.isJumping) {
+      r.vy = -14;
+    }
+  }, []);
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      const k = e.key.toLowerCase();
+      if (k === 'arrowleft' || k === 'a') shiftLane(-1);
+      else if (k === 'arrowright' || k === 'd') shiftLane(1);
+      else if (k === 'arrowup' || k === 'w' || k === ' ') triggerJump();
+      else if (k === 'arrowdown' || k === 's') triggerSlide();
+    };
+    window.addEventListener('keydown', onKeyDown);
+
+    const unsub = inputManager.subscribe({
+      onActionDown: (action) => {
+        if (action === 'LEFT') shiftLane(-1);
+        if (action === 'RIGHT') shiftLane(1);
+        if (action === 'UP' || action === 'ACTION_PRIMARY') triggerJump();
+        if (action === 'DOWN') triggerSlide();
+      }
+    });
+
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      unsub();
+    };
+  }, [shiftLane, triggerJump, triggerSlide]);
+
+  const handleSelectPreset = useCallback((preset: CameraPreset3D) => {
+    setCameraPreset(preset);
+    stageRef.current?.setCameraPreset(preset);
+  }, []);
+
+  const handleCycleQuality = useCallback(() => {
+    setQuality((prev) => {
+      const next: QualityLevel3D =
+        prev === 'ultra' ? 'balanced' : prev === 'balanced' ? 'performance' : 'ultra';
+      stageRef.current?.setQualityLevel(next);
+      return next;
+    });
+  }, []);
+
+  useEffect(() => {
+    const container = mountRef.current;
+    if (!container) return;
+
+    let stage: ThreeStageController;
+    try {
+      stage = new ThreeStageController({
+        container,
+        backgroundColor: 0x090714,
+        fogColor: 0x090714,
+        fogDensity: 0.022,
+        initialPreset: 'chase',
+        gridPrimaryColor: '#f97316',
+        gridSecondaryColor: '#0c0a1a',
+        cameraPresets: {
+          chase: { position: [0, 4.2, 8.2], lookAt: [0, 1.2, -6], fov: 60 },
+          isometric: { position: [7.5, 8.5, 7.5], lookAt: [0, 0.8, -3], fov: 48 },
+          diorama: { position: [0, 14.5, 4.0], lookAt: [0, 0, -4], fov: 50 }
+        }
+      });
+    } catch {
       return;
     }
 
-    updatePhysics(dt);
-    draw();
-  }, []);
+    stageRef.current = stage;
+    setQuality(stage.getQualityLevel());
 
-  const updatePhysics = (dt: number) => {
-    const p = playerRef.current;
-
-    // Decay Combo
-    if (comboTimerRef.current > 0) {
-      comboTimerRef.current -= dt;
-      if (comboTimerRef.current <= 0) {
-        comboRef.current = 0;
-        setCombo(0);
-      }
-    }
-
-    // Distance progression & gradual speed increase
-    setDistance(d => d + 1);
-    speedMultRef.current = Math.min(1.75, 1 + score * 0.003);
-
-    // Player Height based on ducking
-    p.height = p.isDucking ? p.duckHeight : p.normalHeight;
-
-    // Gravity & Jump Physics
-    p.vy += p.gravity;
-    p.y += p.vy;
-
-    if (p.y + p.height >= GROUND_Y) {
-      p.y = GROUND_Y - p.height;
-      p.vy = 0;
-      p.isGrounded = true;
-      p.doubleJumpAvailable = true;
-    } else {
-      p.isGrounded = false;
-    }
-
-    p.runFrame += 0.25;
-
-    // Move Skyline Parallax
-    const bgSpeed = 0.8 * speedMultRef.current;
-    buildingsRef.current.forEach(b => {
-      b.x -= bgSpeed;
-      if (b.x + b.width < 0) {
-        b.x = CANVAS_WIDTH + Math.random() * 20;
-      }
+    // Build 3-Lane Highway Guide Rails
+    const railMat = new THREE.MeshStandardMaterial({
+      color: 0xf97316,
+      emissive: 0xf97316,
+      emissiveIntensity: 0.75
+    });
+    [-3.8, -1.2, 1.2, 3.8].forEach((rx) => {
+      const rail = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.06, 60), railMat);
+      rail.position.set(rx, 0.03, -15);
+      stage.scene.add(rail);
     });
 
-    // Spawning logic
-    spawnTimerRef.current += dt;
-    const spawnInterval = Math.max(900, 1900 - score * 8);
-    if (spawnTimerRef.current >= spawnInterval) {
-      spawnObstacle();
-      spawnTimerRef.current = 0;
-    }
+    // Build 8-part Cyber Hero
+    const hero = buildCyberActionHero3D(0xf97316, 0x22d3ee);
+    hero.group.rotation.y = Math.PI; // Face forward (-Z)
+    hero.group.position.set(0, 0, 2.5);
+    stage.scene.add(hero.group);
 
-    coinTimerRef.current += dt;
-    if (coinTimerRef.current >= 2400) {
-      spawnCoins();
-      coinTimerRef.current = 0;
-    }
+    stage.startLoop((dt, elapsed) => {
+      if (gameStateRef.current !== 'playing') return;
 
-    // Update Obstacles
-    const playerBox = {
-      x: p.x + 3,
-      y: p.y + 3,
-      w: p.width - 6,
-      h: p.height - 4,
-    };
-
-    for (let i = obstaclesRef.current.length - 1; i >= 0; i--) {
-      const obs = obstaclesRef.current[i];
-      obs.x -= obs.speed;
-
-      // Clean out of bounds
-      if (obs.x + obs.width < 0) {
-        obstaclesRef.current.splice(i, 1);
-        continue;
+      const r = runnerRef.current;
+      r.speed = Math.min(32, r.speed + dt * 0.45);
+      r.distanceAcc += r.speed * dt;
+      if (r.distanceAcc >= 3) {
+        const pts = Math.floor(r.distanceAcc / 3);
+        r.distanceAcc -= pts * 3;
+        addScore(pts);
+        setSpeedKmh(Math.round(r.speed * 8.5));
       }
 
-      // Near-miss detection for drones
-      if (!obs.nearMissed && obs.type === 'drone' && p.isDucking && p.isGrounded) {
-        if (p.x > obs.x - 10 && p.x < obs.x + obs.width + 10) {
-          obs.nearMissed = true;
-          audio.playNearMiss();
-          const bonus = 10;
-          addScore(bonus);
-          spawnFloatingText(p.x + 20, p.y - 12, 'SLIDE BONUS! +10', '#38bdf8');
-          shakeRef.current = 2;
+      // Smooth lateral lane transition
+      const targetX = r.lane * LANE_WIDTH;
+      r.x = THREE.MathUtils.damp(r.x, targetX, 12, dt);
+
+      // Jump physics
+      if (r.isJumping) {
+        r.y += r.vy * dt;
+        r.vy -= 28 * dt;
+        if (r.y <= 0) {
+          r.y = 0;
+          r.vy = 0;
+          r.isJumping = false;
         }
       }
 
-      // AABB Collision
-      if (
-        playerBox.x < obs.x + obs.width &&
-        playerBox.x + playerBox.w > obs.x &&
-        playerBox.y < obs.y + obs.height &&
-        playerBox.y + playerBox.h > obs.y
-      ) {
-        handleCrash();
-        return;
+      // Slide timer
+      if (r.isSliding) {
+        r.slideTimer -= dt;
+        if (r.slideTimer <= 0) {
+          r.isSliding = false;
+        }
       }
 
-      // Passing score reward
-      if (!obs.passed && obs.x + obs.width < p.x) {
-        obs.passed = true;
-        const passBonus = 5;
-        addScore(passBonus);
+      // Animate Hero
+      hero.group.position.set(r.x, r.y, 2.5);
+      hero.group.scale.y = r.isSliding ? 0.52 : 1.0;
+      hero.group.rotation.z = (targetX - r.x) * -0.18;
+
+      const stride = Math.sin(elapsed * r.speed * 1.1) * 0.65;
+      hero.legL.rotation.x = r.isJumping ? 0.4 : stride;
+      hero.legR.rotation.x = r.isJumping ? -0.4 : -stride;
+      hero.armL.rotation.x = -stride * 0.8;
+      hero.armR.rotation.x = stride * 0.8;
+
+      stage.setFollowTarget(r.x, r.y * 0.3, 0, 0.45);
+
+      // Spawn obstacles & coins
+      r.spawnTimer -= dt;
+      if (r.spawnTimer <= 0) {
+        r.spawnTimer = Math.max(0.32, 0.95 - (r.speed - 15) * 0.025);
+        const lane = Math.floor(Math.random() * 3) - 1;
+        const roll = Math.random();
+        const type: RunnerObstacle3D['type'] =
+          roll < 0.42 ? 'hurdle' : roll < 0.72 ? 'drone' : roll < 0.92 ? 'coin' : 'boost';
+
+        const mesh = buildObstacleMesh3D(type);
+        mesh.position.set(lane * LANE_WIDTH, 0, -34);
+        stage.scene.add(mesh);
+        obstaclesRef.current.push({ mesh, lane, z: -34, type, passed: false });
       }
-    }
 
-    // Update Coins
-    for (let i = coinsRef.current.length - 1; i >= 0; i--) {
-      const c = coinsRef.current[i];
-      c.x -= 4.8 * speedMultRef.current;
+      // Update obstacles
+      for (let i = obstaclesRef.current.length - 1; i >= 0; i--) {
+        const o = obstaclesRef.current[i];
+        o.z += r.speed * dt;
+        o.mesh.position.z = o.z;
+        if (o.type === 'coin' || o.type === 'boost') {
+          o.mesh.rotation.y += dt * 4;
+        }
 
-      if (c.x < -10) {
-        coinsRef.current.splice(i, 1);
-        continue;
-      }
+        // Collision check around z = 2.5
+        if (Math.abs(o.z - 2.5) < 0.72 && Math.abs(o.lane * LANE_WIDTH - r.x) < 0.85) {
+          if (o.type === 'coin') {
+            stage.scene.remove(o.mesh);
+            obstaclesRef.current.splice(i, 1);
+            addScore(25);
+            audio.playCoin?.();
+            stage.particles.burst(r.x, r.y + 0.9, 2.5, 16, 0xfacc15, 6);
+            continue;
+          }
+          if (o.type === 'boost') {
+            stage.scene.remove(o.mesh);
+            obstaclesRef.current.splice(i, 1);
+            r.shield = true;
+            setHasShield(true);
+            addScore(40);
+            audio.playPowerUp?.();
+            stage.particles.burst(r.x, r.y + 0.9, 2.5, 22, 0x22d3ee, 8);
+            stage.kickFov(6);
+            continue;
+          }
 
-      // Collect coin
-      const dist = Math.hypot(c.x - (p.x + p.width / 2), c.y - (p.y + p.height / 2));
-      if (dist < c.radius + p.width / 2) {
-        const newCombo = Math.min(5, comboRef.current + 1);
-        comboRef.current = newCombo;
-        comboTimerRef.current = 3000;
-        setCombo(newCombo);
+          // Hurdle requires jumping (y > 0.75); Drone requires sliding (isSliding)
+          const hitHurdle = o.type === 'hurdle' && r.y < 0.72;
+          const hitDrone = o.type === 'drone' && !r.isSliding;
 
-        const earned = c.value * newCombo;
-        addScore(earned);
-
-        audio.playCombo(newCombo);
-        inputManager.vibrateGamepad(40, 0.3);
-        spawnParticles(c.x, c.y, '#f59e0b', 8, 1.6);
-        spawnFloatingText(c.x, c.y - 10, `+${earned} ${newCombo > 1 ? `(${newCombo}x)` : ''}`, '#f59e0b');
-
-        coinsRef.current.splice(i, 1);
-      }
-    }
-
-    // Particles
-    for (let i = particlesRef.current.length - 1; i >= 0; i--) {
-      const pt = particlesRef.current[i];
-      pt.x += pt.vx;
-      pt.y += pt.vy;
-      pt.alpha -= pt.decay;
-      if (pt.alpha <= 0) particlesRef.current.splice(i, 1);
-    }
-
-    // Floating Texts
-    for (let i = floatingTextsRef.current.length - 1; i >= 0; i--) {
-      const ft = floatingTextsRef.current[i];
-      ft.y += ft.vy;
-      ft.alpha -= 0.025;
-      if (ft.alpha <= 0) floatingTextsRef.current.splice(i, 1);
-    }
-  };
-
-  const handleCrash = () => {
-    audio.playExplosion();
-    shakeRef.current = 12;
-    hitStopRef.current = 70;
-    inputManager.vibrateGamepad(200, 0.8);
-
-    const p = playerRef.current;
-    spawnParticles(p.x + p.width / 2, p.y + p.height / 2, '#f43f5e', 24, 3.5);
-
-    triggerGameOver();
-  };
-
-  const draw = () => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    ctx.save();
-
-    // Screen Shake
-    if (shakeRef.current > 0) {
-      const sx = (Math.random() - 0.5) * shakeRef.current;
-      const sy = (Math.random() - 0.5) * shakeRef.current;
-      ctx.translate(sx, sy);
-      shakeRef.current = Math.max(0, shakeRef.current - 0.4);
-    }
-
-    // Night Sky
-    ctx.fillStyle = '#07090e';
-    ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
-
-    // Parallax City Skyline
-    buildingsRef.current.forEach(b => {
-      ctx.fillStyle = '#0f1422';
-      ctx.fillRect(b.x, GROUND_Y - b.height, b.width, b.height);
-
-      // Building lights
-      ctx.fillStyle = 'rgba(56, 189, 248, 0.18)';
-      for (let row = 0; row < 4; row++) {
-        for (let col = 0; col < 3; col++) {
-          if (b.lights[(row * 3 + col) % b.lights.length]) {
-            ctx.fillRect(b.x + 6 + col * 10, GROUND_Y - b.height + 12 + row * 16, 5, 8);
+          if (hitHurdle || hitDrone) {
+            stage.scene.remove(o.mesh);
+            obstaclesRef.current.splice(i, 1);
+            if (r.shield) {
+              r.shield = false;
+              setHasShield(false);
+              stage.particles.burst(r.x, r.y + 0.8, 2.5, 28, 0x22d3ee, 9);
+              stage.triggerTrauma(0.45);
+            } else {
+              stage.particles.burst(r.x, r.y + 0.8, 2.5, 38, 0xef4444, 11);
+              stage.triggerTrauma(0.75);
+              audio.playExplosion?.();
+              triggerGameOver(scoreRef.current);
+              return;
+            }
+            continue;
           }
         }
+
+        if (o.z > 8) {
+          stage.scene.remove(o.mesh);
+          obstaclesRef.current.splice(i, 1);
+        }
       }
     });
 
-    // Neon Floor Grid
-    ctx.fillStyle = '#0a0d14';
-    ctx.fillRect(0, GROUND_Y, CANVAS_WIDTH, CANVAS_HEIGHT - GROUND_Y);
-
-    ctx.strokeStyle = '#1e293b';
-    ctx.lineWidth = 1;
-    for (let x = 0; x < CANVAS_WIDTH; x += 40) {
-      ctx.beginPath();
-      ctx.moveTo(x, GROUND_Y);
-      ctx.lineTo(x - 30, CANVAS_HEIGHT);
-      ctx.stroke();
-    }
-
-    // Neon Floor Border
-    ctx.strokeStyle = '#38bdf8';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(0, GROUND_Y);
-    ctx.lineTo(CANVAS_WIDTH, GROUND_Y);
-    ctx.stroke();
-
-    // Coins
-    coinsRef.current.forEach(c => {
-      ctx.fillStyle = '#f59e0b';
-      ctx.beginPath();
-      ctx.arc(c.x, c.y, c.radius, 0, Math.PI * 2);
-      ctx.fill();
-
-      // Coin Sparkle Ring
-      ctx.strokeStyle = '#fef08a';
-      ctx.lineWidth = 1.5;
-      ctx.stroke();
-    });
-
-    // Obstacles
-    obstaclesRef.current.forEach(obs => {
-      if (obs.type === 'spike') {
-        // Red Plasma Spikes
-        ctx.fillStyle = '#f43f5e';
-        ctx.beginPath();
-        ctx.moveTo(obs.x, GROUND_Y);
-        ctx.lineTo(obs.x + obs.width / 2, obs.y);
-        ctx.lineTo(obs.x + obs.width, GROUND_Y);
-        ctx.closePath();
-        ctx.fill();
-      } else if (obs.type === 'drone') {
-        // Flying Drone
-        ctx.fillStyle = '#a855f7';
-        ctx.beginPath();
-        ctx.roundRect(obs.x, obs.y, obs.width, obs.height, 4);
-        ctx.fill();
-
-        // Drone Red Scanner Eye
-        ctx.fillStyle = '#ef4444';
-        ctx.fillRect(obs.x + 4, obs.y + 4, 6, 6);
-
-        // Drone laser pointer downward
-        ctx.strokeStyle = 'rgba(239, 68, 68, 0.4)';
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.moveTo(obs.x + obs.width / 2, obs.y + obs.height);
-        ctx.lineTo(obs.x + obs.width / 2, GROUND_Y);
-        ctx.stroke();
-      } else {
-        // Laser Gate
-        ctx.fillStyle = '#e11d48';
-        ctx.fillRect(obs.x, obs.y, obs.width, obs.height);
-      }
-    });
-
-    // Player (Cyber Ninja)
-    const p = playerRef.current;
-    ctx.fillStyle = p.isDucking ? '#38bdf8' : '#6366f1';
-    ctx.beginPath();
-    ctx.roundRect(p.x, p.y, p.width, p.height, 4);
-    ctx.fill();
-
-    // Visor
-    ctx.fillStyle = '#38bdf8';
-    ctx.fillRect(p.x + p.width - 7, p.y + 4, 5, 5);
-
-    // Running dust / footstep spark
-    if (p.isGrounded && !p.isDucking) {
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
-      ctx.fillRect(p.x - 4, GROUND_Y - 2, 4, 2);
-    }
-
-    // Particles
-    particlesRef.current.forEach(pt => {
-      ctx.fillStyle = pt.color;
-      ctx.globalAlpha = pt.alpha;
-      ctx.beginPath();
-      ctx.arc(pt.x, pt.y, pt.size, 0, Math.PI * 2);
-      ctx.fill();
-    });
-    ctx.globalAlpha = 1;
-
-    // Floating Texts
-    floatingTextsRef.current.forEach(ft => {
-      ctx.fillStyle = ft.color;
-      ctx.globalAlpha = ft.alpha;
-      ctx.font = 'bold 11px monospace';
-      ctx.textAlign = 'center';
-      ctx.fillText(ft.text, ft.x, ft.y);
-    });
-    ctx.globalAlpha = 1;
-
-    ctx.restore();
-  };
+    return () => {
+      stage.dispose();
+      stageRef.current = null;
+    };
+  }, [addScore, scoreRef, triggerGameOver]);
 
   return (
-    <div 
-      ref={containerRef}
-      className="relative flex flex-col h-full w-full min-h-0 items-center justify-center overflow-hidden p-2 bg-[#090b10]"
-    >
-      {/* Dynamic Runner HUD */}
-      <div className="w-full max-w-[600px] flex-none flex justify-between items-center mb-2 px-3 py-1 bg-[#121622]/80 border border-white/[0.06] rounded-xl text-xs font-mono">
-        <div className="flex items-center gap-1.5 text-zinc-400">
-          <Trophy size={12} className="text-amber-400" />
-          <span>BEST: <strong className="text-white">{highScore}</strong></span>
+    <div className="relative w-full h-full min-h-[460px] bg-slate-950 overflow-hidden rounded-2xl border border-orange-500/20">
+      <div ref={mountRef} className="absolute inset-0 w-full h-full" />
+
+      <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex flex-wrap items-center justify-between gap-2 p-3.5">
+        <div className="flex items-center gap-3 rounded-xl border border-white/10 bg-slate-950/85 px-3.5 py-2 text-xs text-slate-200 tabular-nums">
+          <span className="flex items-center gap-1 font-semibold text-orange-400">
+            <Flame className="w-3.5 h-3.5" /> {speedKmh} KM/H
+          </span>
+          <span aria-hidden="true">·</span>
+          <span>SKOR: <strong className="text-white">{score}</strong></span>
         </div>
 
-        {combo > 1 && (
-          <div className="flex items-center gap-1 text-amber-400 font-bold animate-pulse">
-            <Sparkles size={12} />
-            <span>{combo}x COMBO</span>
+        {hasShield && (
+          <div className="flex items-center gap-1.5 rounded-xl border border-cyan-500/30 bg-slate-950/85 px-3.5 py-2 text-xs font-semibold text-cyan-400">
+            <Shield className="w-3.5 h-3.5" /> PERISAI AKTIF
           </div>
         )}
-
-        <div className="flex items-center gap-1.5 text-sky-400">
-          <Zap size={12} />
-          <span>SPEED: {(speedMultRef.current).toFixed(1)}x</span>
-        </div>
-
-        <div className="flex items-center gap-1.5">
-          <span className="text-zinc-400">SKOR:</span>
-          <span className="text-yellow-400 font-bold">{score}</span>
-        </div>
       </div>
 
-      {/* Canvas Stage */}
-      <div 
-        className="relative flex-1 min-h-0 w-full max-w-[600px] max-h-[320px] flex items-center justify-center bg-[#07090e] rounded-2xl border border-white/[0.08] shadow-2xl overflow-hidden touch-none select-none"
-      >
-        <canvas
-          ref={canvasRef}
-          width={CANVAS_WIDTH}
-          height={CANVAS_HEIGHT}
-          className="w-full h-full object-contain block"
-        />
+      <ThreeDockOverlay
+        cameraPreset={cameraPreset}
+        onSelectPreset={handleSelectPreset}
+        quality={quality}
+        onCycleQuality={handleCycleQuality}
+        extraControls={
+          <span className="hidden sm:inline-flex items-center gap-1 text-[11px] text-slate-400 px-2 whitespace-nowrap shrink-0">
+            <Zap className="w-3 h-3 text-orange-400" /> A/D: Jalur · W/Space: Lompat · S: Meluncur
+          </span>
+        }
+      />
 
-        {/* Ergonomic on-canvas mobile touch buttons */}
-        {gameState === 'playing' && (
-          <div className="absolute inset-x-3 bottom-3 flex justify-between pointer-events-auto">
-            <button
-              onTouchStart={(e) => { e.preventDefault(); handleDuck(true); }}
-              onTouchEnd={(e) => { e.preventDefault(); handleDuck(false); }}
-              onMouseDown={() => handleDuck(true)}
-              onMouseUp={() => handleDuck(false)}
-              className="px-5 py-3 bg-white/10 active:bg-white/20 backdrop-blur-md border border-white/20 rounded-xl text-white font-mono text-xs font-bold shadow-lg"
-            >
-              TUNDUK
-            </button>
-            <button
-              onTouchStart={(e) => { e.preventDefault(); handleJump(); }}
-              onMouseDown={handleJump}
-              className="px-6 py-3 bg-sky-500/20 active:bg-sky-500/30 backdrop-blur-md border border-sky-400/30 rounded-xl text-sky-300 font-mono text-xs font-bold shadow-lg"
-            >
-              LOMPAT
-            </button>
-          </div>
-        )}
-
-        <GameOverlay
-          gameState={gameState}
-          score={score}
-          highScore={highScore}
-          countdown={countdown}
-          onStart={startGame}
-          onRestart={startGame}
-          instructions="Hindari paku plasma & drone laser! Tekan LOMPAT (SPASI/W) atau TUNDUK (S). Ketuk tombol LOMPAT dua kali untuk Double Jump!"
-        />
-      </div>
+      <GameOverlay
+        gameState={gameState}
+        score={score}
+        highScore={highScore}
+        countdown={countdown}
+        onStart={handleStart}
+        onRestart={handleStart}
+        title="Cyber Runner 3D"
+        description="Berlari di jalan layang siber 3D! Lompati pagar laser merah dan meluncur di bawah drone patroli."
+        themeColor="orange"
+      />
     </div>
   );
 }

@@ -16,6 +16,8 @@ export interface PooledParticle {
   maxLife: number;
 }
 
+import { performanceService } from '../services/performanceService';
+
 export class ParticlePool {
   private pool: PooledParticle[];
   private maxSize: number;
@@ -46,6 +48,12 @@ export class ParticlePool {
     alpha: number = 1,
     maxLife: number = 30
   ): PooledParticle | null {
+    // Adaptive particle throttling based on active performance tier
+    const mult = performanceService.getFastSettings().particlesMultiplier ?? 1.0;
+    if (mult < 1.0 && Math.random() > mult) {
+      return null;
+    }
+
     // Find first inactive slot
     for (let i = 0; i < this.pool.length; i++) {
       const p = this.pool[i];
@@ -86,6 +94,8 @@ export class ParticlePool {
   }
 
   public draw(ctx: CanvasRenderingContext2D, customDraw?: (ctx: CanvasRenderingContext2D, p: PooledParticle) => void): void {
+    const isLowTier = performanceService.getFastSettings().tier === 'low';
+
     for (let i = 0; i < this.pool.length; i++) {
       const p = this.pool[i];
       if (!p.active || p.alpha <= 0) continue;
@@ -95,9 +105,15 @@ export class ParticlePool {
       } else {
         ctx.globalAlpha = p.alpha;
         ctx.fillStyle = p.color;
-        ctx.beginPath();
-        ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
-        ctx.fill();
+
+        // Fast rectangle rendering for small particles on low tier / battery saver
+        if (isLowTier && p.size <= 4) {
+          ctx.fillRect(p.x - p.size, p.y - p.size, p.size * 2, p.size * 2);
+        } else {
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+          ctx.fill();
+        }
       }
     }
     ctx.globalAlpha = 1.0;

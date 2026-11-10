@@ -70,12 +70,20 @@ export const ProfileHeader: React.FC<ProfileHeaderProps> = ({
       </div>
 
       {/* Tab Navigation */}
-      <div className="flex items-center gap-1.5 overflow-x-auto pb-1 border-b border-border-subtle scrollbar-none">
+      <div 
+        role="tablist"
+        aria-label="Navigasi Profil"
+        className="flex items-center gap-1.5 overflow-x-auto no-scrollbar snap-x flex-nowrap pb-1 border-b border-border-subtle"
+      >
         {tabs.map((tab) => (
           <button
             key={tab.id}
+            role="tab"
+            aria-selected={activeTab === tab.id}
+            aria-controls={`profile-tabpanel-${tab.id}`}
+            id={`profile-tab-${tab.id}`}
             onClick={() => setActiveTab(tab.id as any)}
-            className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-mono font-bold uppercase tracking-wider transition-all whitespace-nowrap cursor-pointer ${
+            className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-mono font-bold uppercase tracking-wider transition-all whitespace-nowrap shrink-0 snap-start cursor-pointer ${
               activeTab === tab.id
                 ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-600/20'
                 : 'text-text-secondary hover:text-text-primary hover:bg-surface-subtle'

@@ -58,9 +58,11 @@ class PerformanceService {
   private currentFps = 60;
   private activeEntityCount = 0;
 
-  // Real Frame-Time Profiling Buffer (last 180 frames ≈ 3s at 60fps)
-  private frameTimesBuffer: number[] = [];
-  private maxFrameBufferSize = 180;
+  // Zero-allocation Circular Frame-Time Profiling Buffer (last 180 frames ≈ 3s at 60fps)
+  private readonly maxFrameBufferSize = 180;
+  private frameTimesBuffer: Float32Array = new Float32Array(180);
+  private frameBufferIndex = 0;
+  private frameBufferCount = 0;
   private droppedFramesCounter = 0;
   private jankFramesCounter = 0;
   private isTabVisible = true;
@@ -71,22 +73,28 @@ class PerformanceService {
     this.setupVisibilityListener();
   }
 
-  public getAdaptiveDPR(): number {
+  public getAdaptiveDPR(maxDpr?: number): number {
     if (typeof window === 'undefined') return 1;
     const rawDpr = window.devicePixelRatio || 1;
-    return Math.min(rawDpr, this.settings.dprCap || 1.0);
+    const cap = maxDpr !== undefined ? maxDpr : (this.settings.dprCap || 1.0);
+    return Math.min(rawDpr, cap);
+  }
+
+  public getFastSettings(): Readonly<PerformanceSettings> {
+    return this.settings;
   }
 
   /**
-   * Records a single frame duration for sub-millisecond frame-time profiling
+   * Records a single frame duration for sub-millisecond frame-time profiling without array reallocations
    */
   public recordFrameTime(durationMs: number): void {
     if (!this.isTabVisible) return;
 
-    if (this.frameTimesBuffer.length >= this.maxFrameBufferSize) {
-      this.frameTimesBuffer.shift();
+    this.frameTimesBuffer[this.frameBufferIndex] = durationMs;
+    this.frameBufferIndex = (this.frameBufferIndex + 1) % this.maxFrameBufferSize;
+    if (this.frameBufferCount < this.maxFrameBufferSize) {
+      this.frameBufferCount++;
     }
-    this.frameTimesBuffer.push(durationMs);
 
     // Jank threshold: frame taking longer than 25ms (> 1.5x of 16.67ms)
     if (durationMs > 25) {
@@ -106,14 +114,14 @@ class PerformanceService {
     if (!this.settings.autoDetect || !this.isTabVisible) return;
 
     const now = Date.now();
-    // Cooldown 12s between tier downgrades, 20s between upgrades
+    // Cooldown 10s between tier downgrades, 18s between upgrades
     const elapsedSinceLastChange = now - this.lastTierChangeTime;
 
-    if (fps < 32) {
+    if (fps < 38) {
       this.lowFpsStreak++;
       this.highFpsStreak = 0;
-      // Sustained low FPS for ~3 consecutive seconds
-      if (this.lowFpsStreak >= 3 && elapsedSinceLastChange >= 12000) {
+      // Sustained low FPS for ~3 consecutive cycles
+      if (this.lowFpsStreak >= 3 && elapsedSinceLastChange >= 10000) {
         if (this.settings.tier === 'high') {
           this.setTier('medium', true);
         } else if (this.settings.tier === 'medium') {
@@ -122,11 +130,11 @@ class PerformanceService {
         this.lowFpsStreak = 0;
         this.lastTierChangeTime = now;
       }
-    } else if (fps >= 58) {
+    } else if (fps >= 57) {
       this.highFpsStreak++;
       this.lowFpsStreak = 0;
-      // Sustained healthy FPS for ~8 consecutive seconds before cautious recovery
-      if (this.highFpsStreak >= 8 && elapsedSinceLastChange >= 20000) {
+      // Sustained healthy FPS for ~7 consecutive cycles before cautious recovery
+      if (this.highFpsStreak >= 7 && elapsedSinceLastChange >= 18000) {
         if (this.settings.tier === 'low') {
           this.setTier('medium', true);
         } else if (this.settings.tier === 'medium') {
@@ -145,18 +153,38 @@ class PerformanceService {
    * Generates a statistically accurate snapshot of frame time distribution
    */
   public getPerformanceSnapshot(gameId: string = 'global'): PerformanceSnapshot {
-    const sorted = [...this.frameTimesBuffer].sort((a, b) => a - b);
-    const count = sorted.length;
+    const count = this.frameBufferCount;
+    if (count === 0) {
+      return {
+        gameId,
+        fps: this.currentFps,
+        frameTimeAvg: 16.67,
+        frameTimeP50: 16.67,
+        frameTimeP95: 16.67,
+        frameTimeP99: 16.67,
+        droppedFrames: this.droppedFramesCounter,
+        jankCount: this.jankFramesCounter,
+        devicePixelRatio: this.getAdaptiveDPR(),
+        performanceTier: this.settings.tier,
+        timestamp: Date.now()
+      };
+    }
+
+    const samples: number[] = new Array(count);
+    let sum = 0;
+    for (let i = 0; i < count; i++) {
+      const val = this.frameTimesBuffer[i];
+      samples[i] = val;
+      sum += val;
+    }
+    samples.sort((a, b) => a - b);
 
     const getPercentile = (p: number): number => {
-      if (count === 0) return 16.67;
       const index = Math.min(count - 1, Math.floor((p / 100) * count));
-      return Number(sorted[index].toFixed(2));
+      return Number(samples[index].toFixed(2));
     };
 
-    const avg = count > 0 
-      ? Number((sorted.reduce((acc, curr) => acc + curr, 0) / count).toFixed(2))
-      : 16.67;
+    const avg = Number((sum / count).toFixed(2));
 
     return {
       gameId,

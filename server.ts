@@ -5,6 +5,7 @@ import { initializeApp, cert, getApps } from "firebase-admin/app";
 import { apiRouter } from "./src/server/apiRouter";
 import { serverLogger } from "./src/server/logger";
 import { requestCorrelationMiddleware, handleServerException } from "./src/server/requestContext";
+import { securityHeadersMiddleware, sanitizePayloadMiddleware } from "./src/server/securityMiddleware";
 import { APP_VERSION } from "./src/config/version";
 import firebaseAppletConfig from "./firebase-applet-config.json";
 
@@ -63,22 +64,15 @@ export async function createExpressApp() {
   // Request correlation tracking
   app.use(requestCorrelationMiddleware);
 
-  // Security headers
-  app.use((_req: Request, res: Response, next: NextFunction) => {
-    res.setHeader('X-Content-Type-Options', 'nosniff');
-    res.setHeader('X-Frame-Options', 'SAMEORIGIN');
-    res.setHeader('X-XSS-Protection', '1; mode=block');
-    res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
-    res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
-    if (process.env.NODE_ENV === 'production') {
-      res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
-    }
-    next();
-  });
+  // Hardened HTTP & CSP security headers
+  app.use(securityHeadersMiddleware);
 
-  // Body parsing
-  app.use(express.json({ limit: '1mb' }));
-  app.use(express.urlencoded({ extended: true, limit: '1mb' }));
+  // Body parsing with strict size limits
+  app.use(express.json({ limit: '512kb' }));
+  app.use(express.urlencoded({ extended: true, limit: '512kb' }));
+
+  // Deep payload sanitization (anti-prototype pollution, NoSQL operator block, XSS strip)
+  app.use(sanitizePayloadMiddleware);
 
   // Mount API router
   app.use('/api', apiRouter);

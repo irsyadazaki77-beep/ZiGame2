@@ -1,525 +1,458 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { useGameEngine } from '../../hooks/useGameEngine';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
+import * as THREE from 'three';
+import { GameComponentProps } from '../../types';
 import { audio } from '../../utils/audio';
-import { Particle } from '../../types';
-import { GameContainer } from '../gameplay/GameContainer';
-import { GameHUD } from '../gameplay/GameHUD';
+import { useGameEngine } from '../../hooks/useGameEngine';
+import { inputManager } from '../../services/inputService';
 import { GameOverlay } from '../gameplay/GameOverlay';
-import { MobileControls } from '../gameplay/MobileControls';
+import { ThreeDockOverlay } from '../gameplay/ThreeDockOverlay';
+import {
+  ThreeStageController,
+  CameraPreset3D,
+  QualityLevel3D,
+  buildStarfighter3D
+} from '../../utils/threeStage';
+import { Flame, Compass, Sparkles } from 'lucide-react';
 
-interface CosmicAsteroidGameProps {
-  onGameOver: (score: number) => void;
-  onScoreUpdate: (score: number) => void;
-  highScore: number;
-}
-
-interface AsteroidItem {
-  id: number;
+interface Asteroid3D {
+  mesh: THREE.Group;
   x: number;
-  y: number;
+  z: number;
   vx: number;
-  vy: number;
+  vz: number;
+  sizeTier: 3 | 2 | 1; // 3=Large, 2=Medium, 1=Small
   radius: number;
-  color: string;
+  rotVel: THREE.Vector3;
 }
 
-interface BulletItem {
+interface PlasmaShot3D {
+  mesh: THREE.Mesh;
   x: number;
-  y: number;
+  z: number;
   vx: number;
-  vy: number;
+  vz: number;
+  life: number;
 }
 
-export default function CosmicAsteroidGame({ onGameOver, onScoreUpdate, highScore }: CosmicAsteroidGameProps) {
+const WRAP_X = 11.5;
+const WRAP_Z = 8.5;
+
+function buildAsteroidGroup3D(sizeTier: 3 | 2 | 1): THREE.Group {
+  const g = new THREE.Group();
+  const radius = sizeTier === 3 ? 1.35 : sizeTier === 2 ? 0.82 : 0.45;
+  const rockMat = new THREE.MeshStandardMaterial({
+    color: sizeTier === 3 ? 0x64748b : sizeTier === 2 ? 0x94a3b8 : 0xcbd5e1,
+    roughness: 0.78,
+    metalness: 0.22,
+    flatShading: true
+  });
+  const veinMat = new THREE.MeshBasicMaterial({
+    color: 0x06b6d4,
+    wireframe: true
+  });
+
+  // 1. Primary Cratered Core
+  const core = new THREE.Mesh(new THREE.DodecahedronGeometry(radius, 1), rockMat);
+  core.castShadow = true;
+  g.add(core);
+
+  // 2. Secondary Sub-Boulder Lobe
+  const lobe = new THREE.Mesh(new THREE.IcosahedronGeometry(radius * 0.65, 0), rockMat);
+  lobe.position.set(radius * 0.45, radius * 0.2, 0);
+  g.add(lobe);
+
+  // 3. Glowing Mineral Vein Cage
+  const cage = new THREE.Mesh(new THREE.DodecahedronGeometry(radius * 1.02, 0), veinMat);
+  g.add(cage);
+
+  return g;
+}
+
+export default function CosmicAsteroidGame({
+  onGameOver,
+  onScoreUpdate,
+  highScore
+}: GameComponentProps) {
+  const mountRef = useRef<HTMLDivElement | null>(null);
+  const stageRef = useRef<ThreeStageController | null>(null);
+
   const {
     gameState,
     score,
-    updateScore,
-    startLoop,
-    stopLoop,
+    addScore,
     startWithCountdown,
-    setupCanvasContext,
+    countdown,
     triggerGameOver,
-    resumeGame,
-    countdown
+    scoreRef
   } = useGameEngine({
-    onScoreUpdate,
+    gameId: 'cosmic-asteroid',
     onGameOver,
-    maxDpr: 2
+    onScoreUpdate
   });
-  const gameLoopRef = useRef<number | null>(null);
-  const scoreRef = useRef(0);
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
+  const [lives, setLives] = useState(3);
+  const [sector, setSector] = useState(1);
+  const [cameraPreset, setCameraPreset] = useState<CameraPreset3D>('diorama');
+  const [quality, setQuality] = useState<QualityLevel3D>('ultra');
 
+  const gameStateRef = useRef(gameState);
+  useEffect(() => {
+    gameStateRef.current = gameState;
+  }, [gameState]);
 
-  const [muted, setMuted] = useState(audio.getMuteState());
+  const shipStateRef = useRef({
+    x: 0,
+    z: 0,
+    vx: 0,
+    vz: 0,
+    angle: 0,
+    lives: 3,
+    sector: 1,
+    invuln: 0,
+    fireCooldown: 0
+  });
 
-  const CANVAS_WIDTH = 400;
-  const CANVAS_HEIGHT = 500;
+  const keysRef = useRef<Record<string, boolean>>({});
+  const asteroidsRef = useRef<Asteroid3D[]>([]);
+  const shotsRef = useRef<PlasmaShot3D[]>([]);
+  const spawnSectorRef = useRef<(sec: number) => void>(() => {});
 
-  // Ship State
-  const shipAngleRef = useRef(-Math.PI / 2); // default facing up
-  const shipX = CANVAS_WIDTH / 2;
-  const shipY = CANVAS_HEIGHT / 2;
+  const handleStart = useCallback(() => {
+    const stage = stageRef.current;
+    if (stage) {
+      asteroidsRef.current.forEach((a) => stage.scene.remove(a.mesh));
+      shotsRef.current.forEach((s) => stage.scene.remove(s.mesh));
+    }
+    asteroidsRef.current = [];
+    shotsRef.current = [];
+    shipStateRef.current = {
+      x: 0,
+      z: 0,
+      vx: 0,
+      vz: 0,
+      angle: 0,
+      lives: 3,
+      sector: 1,
+      invuln: 2.0,
+      fireCooldown: 0
+    };
+    setLives(3);
+    setSector(1);
+    spawnSectorRef.current(1);
+    startWithCountdown();
+  }, [startWithCountdown]);
 
-  const asteroidsRef = useRef<AsteroidItem[]>([]);
-  const bulletsRef = useRef<BulletItem[]>([]);
-  const particlesRef = useRef<Particle[]>([]);
-  const shakeRef = useRef<number>(0);
-  const floatingTextsRef = useRef<{ x: number; y: number; text: string; color: string; alpha: number; vy: number }[]>([]);
-  const lastFpsTimeRef = useRef(0);
-  const spawnTimerRef = useRef(0);
+  const handleSelectPreset = useCallback((preset: CameraPreset3D) => {
+    setCameraPreset(preset);
+    stageRef.current?.setCameraPreset(preset);
+  }, []);
 
-  const keysPressedRef = useRef<{ [key: string]: boolean }>({});
+  const handleCycleQuality = useCallback(() => {
+    setQuality((prev) => {
+      const next: QualityLevel3D =
+        prev === 'ultra' ? 'balanced' : prev === 'balanced' ? 'performance' : 'ultra';
+      stageRef.current?.setQualityLevel(next);
+      return next;
+    });
+  }, []);
 
   useEffect(() => {
-    drawStatic();
+    const onKeyDown = (e: KeyboardEvent) => {
+      keysRef.current[e.key.toLowerCase()] = true;
+      keysRef.current[e.code] = true;
+    };
+    const onKeyUp = (e: KeyboardEvent) => {
+      keysRef.current[e.key.toLowerCase()] = false;
+      keysRef.current[e.code] = false;
+    };
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('keyup', onKeyUp);
+
+    const unsub = inputManager.subscribe({
+      onActionDown: (action) => {
+        if (action === 'LEFT') keysRef.current['arrowleft'] = true;
+        if (action === 'RIGHT') keysRef.current['arrowright'] = true;
+        if (action === 'UP') keysRef.current['arrowup'] = true;
+        if (action === 'ACTION_PRIMARY') keysRef.current['Space'] = true;
+      },
+      onActionUp: (action) => {
+        if (action === 'LEFT') keysRef.current['arrowleft'] = false;
+        if (action === 'RIGHT') keysRef.current['arrowright'] = false;
+        if (action === 'UP') keysRef.current['arrowup'] = false;
+        if (action === 'ACTION_PRIMARY') keysRef.current['Space'] = false;
+      }
+    });
+
     return () => {
-      if (gameLoopRef?.current) cancelAnimationFrame(gameLoopRef.current);
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('keyup', onKeyUp);
+      unsub();
     };
   }, []);
 
-  const drawStatic = () => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    ctx.fillStyle = '#09090b';
-    ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
-
-    // Grid lines
-    ctx.strokeStyle = '#111827';
-    ctx.lineWidth = 1;
-    for (let x = 0; x < CANVAS_WIDTH; x += 40) {
-      ctx.beginPath();
-      ctx.moveTo(x, 0);
-      ctx.lineTo(x, CANVAS_HEIGHT);
-      ctx.stroke();
-    }
-
-    // Title
-    ctx.fillStyle = '#ffffff';
-    ctx.font = "bold 20px 'Space Grotesk', sans-serif";
-    ctx.textAlign = 'center';
-    ctx.fillText('360° COSMIC ASTEROID', CANVAS_WIDTH / 2, 180);
-
-    ctx.fillStyle = '#6366f1';
-    ctx.font = "12px 'JetBrains Mono', monospace";
-    ctx.fillText('PUTAR KAPAL DAN TEMBAK METEOR DRIFTING', CANVAS_WIDTH / 2, 205);
-
-    ctx.fillStyle = '#71717a';
-    ctx.font = "11px 'JetBrains Mono', monospace";
-    ctx.fillText('Gunakan PANAH KIRI / KANAN untuk memutar, SPASI tembak', CANVAS_WIDTH / 2, 230);
-  };
-
-  const startNewGame = () => {
-    startWithCountdown(() => {
-      shipAngleRef.current = -Math.PI / 2;
-      asteroidsRef.current = [];
-      bulletsRef.current = [];
-      particlesRef.current = [];
-      shakeRef.current = 0;
-      floatingTextsRef.current = [];
-      spawnTimerRef.current = 0;
-      startLoop(update);
-    });
-  };
-
-  // Keyboard controls
   useEffect(() => {
-    if (gameState !== 'playing') return;
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'a' || e.key === 'd') {
-        e.preventDefault();
-        keysPressedRef.current[e.key] = true;
-      }
-      if (e.key === ' ' || e.key === 'ArrowUp') {
-        e.preventDefault();
-        shootBullet();
-      }
-    };
-    const handleKeyUp = (e: KeyboardEvent) => {
-      if (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'a' || e.key === 'd') {
-        e.preventDefault();
-        keysPressedRef.current[e.key] = false;
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    window.addEventListener('keyup', handleKeyUp);
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-      window.removeEventListener('keyup', handleKeyUp);
-    };
-  }, [gameState]);
+    const container = mountRef.current;
+    if (!container) return;
 
-  const rotateLeft = () => {
-    shipAngleRef.current -= 0.28;
-  };
-
-  const rotateRight = () => {
-    shipAngleRef.current += 0.28;
-  };
-
-  const shootBullet = () => {
-    if (gameState !== 'playing') return;
-
-    audio.playJump(); // Laser chirp sound
-
-    const speed = 7.0;
-    const vx = Math.cos(shipAngleRef.current) * speed;
-    const vy = Math.sin(shipAngleRef.current) * speed;
-
-    bulletsRef.current.push({
-      x: shipX + Math.cos(shipAngleRef.current) * 15,
-      y: shipY + Math.sin(shipAngleRef.current) * 15,
-      vx,
-      vy,
-    });
-  };
-
-  const createExplosion = (x: number, y: number, color: string) => {
-    for (let i = 0; i < 15; i++) {
-      particlesRef.current.push({
-        x,
-        y,
-        vx: (Math.random() - 0.5) * 6,
-        vy: (Math.random() - 0.5) * 6,
-        color,
-        radius: Math.random() * 2.5 + 1,
-        alpha: 1,
-        decay: Math.random() * 0.05 + 0.02,
-      });
-    }
-  };
-
-  const update = (timestamp: number, dtMs: number) => {
-    const canvas = canvasRef.current;
-    if (!canvas || gameState !== 'playing') return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    // FPS Limiter implementation
-    const fpsPref = localStorage.getItem('zigame-fps') || 'auto';
-    if (fpsPref !== 'auto') {
-      const targetFps = parseInt(fpsPref, 10);
-      const interval = 1000 / targetFps;
-      const elapsed = timestamp - lastFpsTimeRef.current;
-      
-      if (elapsed < interval - 1) {
-        return;
-      }
-      
-      lastFpsTimeRef.current = timestamp - (elapsed % interval);
-    } else {
-      lastFpsTimeRef.current = timestamp;
-    }
-
-    const delta = dtMs / 16.666;
-
-    // HD Canvas scale and shadow setting based on graphics setting
-    const graphicsQuality = localStorage.getItem('zigame-graphics') || 'high';
-    const dpr = graphicsQuality === 'low' ? 1.0 : graphicsQuality === 'medium' ? 1.5 : Math.max(window.devicePixelRatio || 2, 2.5);
-
-    const targetWidth = Math.round(CANVAS_WIDTH * dpr);
-    const targetHeight = Math.round(CANVAS_HEIGHT * dpr);
-    if (canvas.width !== targetWidth || canvas.height !== targetHeight) {
-      canvas.width = targetWidth;
-      canvas.height = targetHeight;
-    }
-
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.scale(dpr, dpr);
-
-    if (shakeRef.current > 0) {
-      const dx = (Math.random() - 0.5) * shakeRef.current;
-      const dy = (Math.random() - 0.5) * shakeRef.current;
-      ctx.translate(dx, dy);
-      shakeRef.current *= 0.88;
-      if (shakeRef.current < 0.5) shakeRef.current = 0;
-    }
-
-    const enableShadows = graphicsQuality !== 'low';
-    const shadowScale = graphicsQuality === 'medium' ? 0.4 : 1.0;
-
-    const setShadow = (blur: number, color: string) => {
-      if (!enableShadows) {
-        ctx.shadowBlur = 0;
-        return;
-      }
-      ctx.shadowBlur = blur * shadowScale;
-      ctx.shadowColor = color;
-    };
-
-    const asteroidSpeed = 1.0 + score * 0.002;
-
-    // Rotate Ship
-    if (keysPressedRef.current['ArrowLeft'] || keysPressedRef.current['a']) {
-      shipAngleRef.current -= 0.07 * delta;
-    }
-    if (keysPressedRef.current['ArrowRight'] || keysPressedRef.current['d']) {
-      shipAngleRef.current += 0.07 * delta;
-    }
-
-    // Spawn drifting asteroids from outer screen boundaries
-    spawnTimerRef.current += delta;
-    if (spawnTimerRef.current > Math.max(25, 55 - score * 0.05)) {
-      spawnTimerRef.current = 0;
-
-      // Pick random outer wall edge
-      let startX = 0;
-      let startY = 0;
-      const edge = Math.floor(Math.random() * 4);
-      if (edge === 0) { // Top
-        startX = Math.random() * CANVAS_WIDTH;
-        startY = -20;
-      } else if (edge === 1) { // Bottom
-        startX = Math.random() * CANVAS_WIDTH;
-        startY = CANVAS_HEIGHT + 20;
-      } else if (edge === 2) { // Left
-        startX = -20;
-        startY = Math.random() * CANVAS_HEIGHT;
-      } else { // Right
-        startX = CANVAS_WIDTH + 20;
-        startY = Math.random() * CANVAS_HEIGHT;
-      }
-
-      // Angle towards center ship
-      const angleToCenter = Math.atan2(shipY - startY, shipX - startX) + (Math.random() - 0.5) * 0.4;
-      const speed = asteroidSpeed * (0.6 + Math.random() * 0.8);
-
-      asteroidsRef.current.push({
-        id: Math.random(),
-        x: startX,
-        y: startY,
-        vx: Math.cos(angleToCenter) * speed,
-        vy: Math.sin(angleToCenter) * speed,
-        radius: 12 + Math.random() * 12,
-        color: '#6366f1',
-      });
-    }
-
-    // Move bullets
-    bulletsRef.current.forEach(bullet => {
-      bullet.x += bullet.vx * delta;
-      bullet.y += bullet.vy * delta;
-    });
-
-    // Cleanup offscreen bullets
-    bulletsRef.current = bulletsRef.current.filter(b => b.x > -10 && b.x < CANVAS_WIDTH + 10 && b.y > -10 && b.y < CANVAS_HEIGHT + 10);
-
-    // Move and test asteroid collisions
-    asteroidsRef.current.forEach(ast => {
-      ast.x += ast.vx * delta;
-      ast.y += ast.vy * delta;
-
-      // Bullet Hit Asteroid Check
-      bulletsRef.current.forEach(bullet => {
-        const dist = Math.hypot(bullet.x - ast.x, bullet.y - ast.y);
-        if (dist < ast.radius + 3) {
-          // Destory!
-          audio.playExplosion();
-          createExplosion(ast.x, ast.y, '#818cf8');
-          shakeRef.current = Math.max(shakeRef.current, 6);
-          floatingTextsRef.current.push({
-            x: ast.x,
-            y: ast.y - 10,
-            text: "+20",
-            color: '#818cf8',
-            alpha: 1.0,
-            vy: -0.8
-          });
-          
-          // Delete bullet and asteroid by pushing away
-          bullet.x = -1000;
-          ast.x = -1000;
-
-          updateScore(score + 20);
+    let stage: ThreeStageController;
+    try {
+      stage = new ThreeStageController({
+        container,
+        backgroundColor: 0x040711,
+        fogColor: 0x040711,
+        fogDensity: 0.014,
+        initialPreset: 'diorama',
+        gridPrimaryColor: '#06b6d4',
+        gridSecondaryColor: '#070c18',
+        cameraPresets: {
+          diorama: { position: [0, 19.5, 2.2], lookAt: [0, 0, 0], fov: 48 },
+          isometric: { position: [10.5, 14.5, 10.5], lookAt: [0, 0, 0], fov: 46 },
+          chase: { position: [0, 9.5, 13.5], lookAt: [0, 0, 0], fov: 54 }
         }
       });
+    } catch {
+      return;
+    }
 
-      // Ship Collision Check
-      const shipDist = Math.hypot(shipX - ast.x, shipY - ast.y);
-      if (shipDist < ast.radius + 12) {
-        audio.playExplosion();
-        triggerGameOver();
+    stageRef.current = stage;
+    setQuality(stage.getQualityLevel());
+
+    const ship = buildStarfighter3D(0x06b6d4, 0xf59e0b, stage.isSoftwareGl);
+    ship.group.position.set(0, 0.7, 0);
+    stage.scene.add(ship.group);
+
+    const spawnAsteroid = (x: number, z: number, tier: 3 | 2 | 1) => {
+      const mesh = buildAsteroidGroup3D(tier);
+      mesh.position.set(x, 0.7, z);
+      stage.scene.add(mesh);
+      const angle = Math.random() * Math.PI * 2;
+      const spd = (4 - tier) * 1.85 + Math.random() * 1.5;
+      asteroidsRef.current.push({
+        mesh,
+        x,
+        z,
+        vx: Math.cos(angle) * spd,
+        vz: Math.sin(angle) * spd,
+        sizeTier: tier,
+        radius: tier === 3 ? 1.3 : tier === 2 ? 0.8 : 0.45,
+        rotVel: new THREE.Vector3(
+          (Math.random() - 0.5) * 2.5,
+          (Math.random() - 0.5) * 2.5,
+          (Math.random() - 0.5) * 2.5
+        )
+      });
+    };
+
+    spawnSectorRef.current = (sec: number) => {
+      const count = 4 + sec;
+      for (let i = 0; i < count; i++) {
+        const angle = (i / count) * Math.PI * 2;
+        const ax = Math.cos(angle) * 7.5;
+        const az = Math.sin(angle) * 5.8;
+        spawnAsteroid(ax, az, 3);
+      }
+    };
+
+    const shotGeo = new THREE.SphereGeometry(0.15, 8, 8);
+    const shotMat = new THREE.MeshStandardMaterial({
+      color: 0x22d3ee,
+      emissive: 0x06b6d4,
+      emissiveIntensity: 0.95
+    });
+
+    stage.startLoop((dt) => {
+      if (gameStateRef.current !== 'playing') return;
+
+      const s = shipStateRef.current;
+      const keys = keysRef.current;
+
+      if (keys['arrowleft'] || keys['a']) s.angle += 4.2 * dt;
+      if (keys['arrowright'] || keys['d']) s.angle -= 4.2 * dt;
+
+      const thrusting = keys['arrowup'] || keys['w'];
+      if (thrusting) {
+        s.vx += -Math.sin(s.angle) * 14 * dt;
+        s.vz += -Math.cos(s.angle) * 14 * dt;
+      }
+
+      // Zero-G damping
+      s.vx *= Math.pow(0.985, dt * 60);
+      s.vz *= Math.pow(0.985, dt * 60);
+
+      s.x += s.vx * dt;
+      s.z += s.vz * dt;
+
+      // Toroidal screen wrap
+      if (s.x > WRAP_X) s.x = -WRAP_X;
+      if (s.x < -WRAP_X) s.x = WRAP_X;
+      if (s.z > WRAP_Z) s.z = -WRAP_Z;
+      if (s.z < -WRAP_Z) s.z = WRAP_Z;
+
+      ship.group.position.set(s.x, 0.7, s.z);
+      ship.group.rotation.y = s.angle;
+      ship.thrusterL.visible = Boolean(thrusting);
+      ship.thrusterR.visible = Boolean(thrusting);
+      ship.shieldMesh.visible = s.invuln > 0;
+
+      if (s.invuln > 0) s.invuln -= dt;
+
+      stage.setFollowTarget(s.x, 0, s.z, 0.25);
+
+      // Firing plasma cannon
+      s.fireCooldown -= dt;
+      if ((keys[' '] || keys['Space'] || keys['z']) && s.fireCooldown <= 0) {
+        s.fireCooldown = 0.2;
+        const dirX = -Math.sin(s.angle);
+        const dirZ = -Math.cos(s.angle);
+        const mesh = new THREE.Mesh(shotGeo, shotMat);
+        mesh.position.set(s.x + dirX * 0.9, 0.7, s.z + dirZ * 0.9);
+        stage.scene.add(mesh);
+        shotsRef.current.push({
+          mesh,
+          x: s.x + dirX * 0.9,
+          z: s.z + dirZ * 0.9,
+          vx: dirX * 20 + s.vx * 0.3,
+          vz: dirZ * 20 + s.vz * 0.3,
+          life: 1.1
+        });
+        audio.playLaser?.();
+      }
+
+      // Update plasma shots
+      for (let i = shotsRef.current.length - 1; i >= 0; i--) {
+        const sh = shotsRef.current[i];
+        sh.life -= dt;
+        if (sh.life <= 0) {
+          stage.scene.remove(sh.mesh);
+          shotsRef.current.splice(i, 1);
+          continue;
+        }
+        sh.x += sh.vx * dt;
+        sh.z += sh.vz * dt;
+        if (sh.x > WRAP_X) sh.x = -WRAP_X;
+        if (sh.x < -WRAP_X) sh.x = WRAP_X;
+        if (sh.z > WRAP_Z) sh.z = -WRAP_Z;
+        if (sh.z < -WRAP_Z) sh.z = WRAP_Z;
+        sh.mesh.position.set(sh.x, 0.7, sh.z);
+      }
+
+      // Update Asteroids
+      for (let i = asteroidsRef.current.length - 1; i >= 0; i--) {
+        const a = asteroidsRef.current[i];
+        a.x += a.vx * dt;
+        a.z += a.vz * dt;
+        if (a.x > WRAP_X) a.x = -WRAP_X;
+        if (a.x < -WRAP_X) a.x = WRAP_X;
+        if (a.z > WRAP_Z) a.z = -WRAP_Z;
+        if (a.z < -WRAP_Z) a.z = WRAP_Z;
+
+        a.mesh.position.set(a.x, 0.7, a.z);
+        a.mesh.rotation.x += a.rotVel.x * dt;
+        a.mesh.rotation.y += a.rotVel.y * dt;
+
+        // Check shot hits
+        let hit = false;
+        for (let j = shotsRef.current.length - 1; j >= 0; j--) {
+          const sh = shotsRef.current[j];
+          if (Math.hypot(sh.x - a.x, sh.z - a.z) < a.radius + 0.2) {
+            stage.scene.remove(sh.mesh);
+            shotsRef.current.splice(j, 1);
+            hit = true;
+            break;
+          }
+        }
+
+        if (hit) {
+          stage.scene.remove(a.mesh);
+          asteroidsRef.current.splice(i, 1);
+          addScore(a.sizeTier === 3 ? 20 : a.sizeTier === 2 ? 50 : 100);
+          stage.particles.burst(a.x, 0.7, a.z, a.sizeTier * 10, 0x06b6d4, 7.5);
+          stage.triggerTrauma(0.28);
+          audio.playExplosion?.();
+
+          if (a.sizeTier > 1) {
+            const nextTier = (a.sizeTier - 1) as 2 | 1;
+            spawnAsteroid(a.x, a.z, nextTier);
+            spawnAsteroid(a.x, a.z, nextTier);
+          }
+
+          if (asteroidsRef.current.length === 0) {
+            s.sector += 1;
+            setSector(s.sector);
+            s.invuln = 2.0;
+            spawnSectorRef.current(s.sector);
+            stage.kickFov(6);
+          }
+          continue;
+        }
+
+        // Check ship collision
+        if (s.invuln <= 0 && Math.hypot(a.x - s.x, a.z - s.z) < a.radius + 0.55) {
+          s.lives -= 1;
+          setLives(s.lives);
+          s.invuln = 2.2;
+          s.x = 0;
+          s.z = 0;
+          s.vx = 0;
+          s.vz = 0;
+          stage.particles.burst(a.x, 0.7, a.z, 35, 0xef4444, 10);
+          stage.triggerTrauma(0.75);
+          audio.playExplosion?.();
+          if (s.lives <= 0) {
+            triggerGameOver(scoreRef.current);
+            return;
+          }
+        }
       }
     });
 
-    // Cleanup destroyed asteroids
-    asteroidsRef.current = asteroidsRef.current.filter(a => a.x > -30 && a.x < CANVAS_WIDTH + 30 && a.y > -30 && a.y < CANVAS_HEIGHT + 30);
-
-    // DRAW Frame
-    ctx.fillStyle = '#09090b';
-    ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
-
-    // Vectors background grids
-    ctx.strokeStyle = '#1e1b4b';
-    ctx.lineWidth = 0.5;
-    for (let c = 0; c <= CANVAS_WIDTH; c += 40) {
-      ctx.beginPath();
-      ctx.moveTo(c, 0);
-      ctx.lineTo(c, CANVAS_HEIGHT);
-      ctx.stroke();
-    }
-    for (let r = 0; r <= CANVAS_HEIGHT; r += 40) {
-      ctx.beginPath();
-      ctx.moveTo(0, r);
-      ctx.lineTo(CANVAS_WIDTH, r);
-      ctx.stroke();
-    }
-
-    // Draw Asteroids
-    asteroidsRef.current.forEach(ast => {
-      setShadow(10, ast.color);
-      ctx.fillStyle = ast.color;
-      ctx.beginPath();
-      ctx.arc(ast.x, ast.y, ast.radius, 0, Math.PI * 2);
-      ctx.fill();
-      setShadow(0, '');
-
-      // rugged detail lines
-      ctx.strokeStyle = '#020617';
-      ctx.lineWidth = 1.5;
-      ctx.beginPath();
-      ctx.arc(ast.x, ast.y, ast.radius * 0.6, 0, Math.PI * 2);
-      ctx.stroke();
-    });
-
-    // Draw Bullets (glow streaks)
-    bulletsRef.current.forEach(b => {
-      ctx.fillStyle = '#22d3ee';
-      ctx.beginPath();
-      ctx.arc(b.x, b.y, 3.5, 0, Math.PI * 2);
-      ctx.fill();
-    });
-
-    // Draw particle effects
-    particlesRef.current.forEach(p => {
-      p.x += p.vx * delta;
-      p.y += p.vy * delta;
-      p.alpha -= p.decay * delta;
-
-      ctx.fillStyle = p.color;
-      ctx.globalAlpha = Math.max(0, p.alpha);
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
-      ctx.fill();
-    });
-    ctx.globalAlpha = 1.0;
-    particlesRef.current = particlesRef.current.filter(p => p.alpha > 0);
-
-    // Spawn engine propulsion tail sparks
-    const tailX = shipX - Math.cos(shipAngleRef.current) * 10;
-    const tailY = shipY - Math.sin(shipAngleRef.current) * 10;
-    if (Math.random() < 0.6) {
-      particlesRef.current.push({
-        x: tailX,
-        y: tailY,
-        vx: -Math.cos(shipAngleRef.current) * (Math.random() * 2 + 1) + (Math.random() - 0.5) * 1.5,
-        vy: -Math.sin(shipAngleRef.current) * (Math.random() * 2 + 1) + (Math.random() - 0.5) * 1.5,
-        color: Math.random() < 0.6 ? '#f43f5e' : '#fbbf24', // pink/orange engine exhaust
-        radius: Math.random() * 2 + 1,
-        alpha: 0.8,
-        decay: 0.04
-      });
-    }
-
-    // Draw Triangular Ship rotated
-    ctx.save();
-    ctx.translate(shipX, shipY);
-    ctx.rotate(shipAngleRef.current);
-
-    // Glow
-    setShadow(15, '#fb7185');
-    ctx.fillStyle = '#f43f5e';
-    ctx.beginPath();
-    ctx.moveTo(15, 0);
-    ctx.lineTo(-12, -10);
-    ctx.lineTo(-6, 0);
-    ctx.lineTo(-12, 10);
-    ctx.closePath();
-    ctx.fill();
-    setShadow(0, '');
-
-    // Thruster sparks behind ship
-    ctx.fillStyle = '#fbbf24';
-    ctx.fillRect(-14, -3, 6, 6);
-
-    ctx.restore();
-
-    // Draw floating multiplier score/impact texts
-    floatingTextsRef.current.forEach(t => {
-      t.y += t.vy * delta;
-      t.alpha -= 0.025 * delta;
-
-      ctx.fillStyle = t.color;
-      ctx.globalAlpha = Math.max(0, t.alpha);
-      ctx.font = 'bold 9px "Press Start 2P", monospace';
-      ctx.textAlign = 'center';
-      ctx.fillText(t.text, t.x, t.y);
-    });
-    ctx.globalAlpha = 1.0;
-    floatingTextsRef.current = floatingTextsRef.current.filter(t => t.alpha > 0);
-
-    // Top stats
-    ctx.fillStyle = '#ffffff';
-    ctx.font = "bold 11px 'JetBrains Mono', monospace";
-    ctx.textAlign = 'left';
-    ctx.fillText(`ANGLE: ${(shipAngleRef.current * (180 / Math.PI)).toFixed(0)}°`, 15, 30);
-    ctx.textAlign = 'right';
-    ctx.fillText(`SKOR: ${score}`, CANVAS_WIDTH - 15, 30);
-
-  };
-
-  const toggleMute = () => {
-    const nextMuted = audio.toggleMute();
-    setMuted(nextMuted);
-  };
-
-
+    return () => {
+      stage.dispose();
+      stageRef.current = null;
+    };
+  }, [addScore, scoreRef, triggerGameOver]);
 
   return (
-    <GameContainer aspect="portrait" maxWidth="sm">
-      {gameState === 'playing' && (
-        <GameHUD 
-          stats={[
-            { id: 'score', label: 'SKOR', value: score, emphasized: true }
-          ]} 
-        />
-      )}
+    <div className="relative w-full h-full min-h-[460px] bg-slate-950 overflow-hidden rounded-2xl border border-cyan-500/20">
+      <div ref={mountRef} className="absolute inset-0 w-full h-full" />
+
+      <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex flex-wrap items-center justify-between gap-2 p-3.5">
+        <div className="flex items-center gap-3 rounded-xl border border-white/10 bg-slate-950/85 px-3.5 py-2 text-xs text-slate-200 tabular-nums">
+          <span className="flex items-center gap-1 font-semibold text-cyan-400">
+            <Compass className="w-3.5 h-3.5" /> SEKTOR {sector}
+          </span>
+          <span aria-hidden="true">·</span>
+          <span>SKOR: <strong className="text-white">{score}</strong></span>
+        </div>
+
+        <div className="flex items-center gap-2 rounded-xl border border-white/10 bg-slate-950/85 px-3.5 py-2 text-xs text-rose-400 font-semibold tabular-nums">
+          <Flame className="w-3.5 h-3.5" /> NYAWA: {lives}
+        </div>
+      </div>
+
+      <ThreeDockOverlay
+        cameraPreset={cameraPreset}
+        onSelectPreset={handleSelectPreset}
+        quality={quality}
+        onCycleQuality={handleCycleQuality}
+        extraControls={
+          <span className="hidden sm:inline-flex items-center gap-1 text-[11px] text-slate-400 px-2 whitespace-nowrap shrink-0">
+            <Sparkles className="w-3 h-3 text-cyan-400" /> A/D: Putar · W: Dorong · Space: Tembak Plasma
+          </span>
+        }
+      />
 
       <GameOverlay
         gameState={gameState}
         score={score}
         highScore={highScore}
-        onStart={startNewGame}
-        onRestart={startNewGame}
-        onResume={resumeGame}
         countdown={countdown}
-        instructions="PUTAR KAPAL DAN TEMBAK METEOR DRIFTING"
+        onStart={handleStart}
+        onRestart={handleStart}
+        title="Cosmic Asteroid 3D"
+        description="Hancurkan bongkahan asteroid polihedral 3D di gravitasi nol sebelum bertabrakan dengan pesawat Anda!"
+        themeColor="cyan"
       />
-
-      <div className="relative border-4 border-zinc-900 bg-black rounded-2xl overflow-hidden shadow-2xl w-full aspect-[4/5] mx-auto">
-        <canvas
-          ref={canvasRef}
-          width={CANVAS_WIDTH}
-          height={CANVAS_HEIGHT}
-          className="w-full h-full display-block bg-zinc-950"
-        />
-      </div>
-
-      {gameState === 'playing' && (
-        <MobileControls
-          onLeft={() => keysPressedRef.current['ArrowLeft'] = true}
-          onLeftRelease={() => keysPressedRef.current['ArrowLeft'] = false}
-          onRight={() => keysPressedRef.current['ArrowRight'] = true}
-          onRightRelease={() => keysPressedRef.current['ArrowRight'] = false}
-          onA={shootBullet}
-          labelA="TEMBAK"
-        />
-      )}
-    </GameContainer>
+    </div>
   );
 }

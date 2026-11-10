@@ -1,6 +1,6 @@
 {
-  "summary": "Implementation plan for modernizing 3D & Action games (Desk Racer 3D, Wizard Chess 3D, Neon Drift 3D) with particle FX, neon glow lighting, dynamic HUDs, power-ups, obstacle variations, and a combo multiplier system.",
-  "updatedAt": "2026-11-06T00:49:51.365123562Z",
-  "requestFeedback": true,
-  "userFacing": true
+  "summary":  "Rencana komprehensif optimasi web app game ZiGame untuk perangkat mobile Android dan iOS, mencakup safe area notch/island, kontrol sentuh responsif & haptik, audio unlock Safari, orientasi adaptif & toggle fullscreen, serta efisiensi baterai WebGL.",
+  "updatedAt":  "2026-11-08T01:36:09.011356834Z",
+  "requestFeedback":  true,
+  "userFacing":  true
 }

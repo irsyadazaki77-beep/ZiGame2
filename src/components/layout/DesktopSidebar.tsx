@@ -65,11 +65,13 @@ export const DesktopSidebar: React.FC<DesktopSidebarProps> = ({
           {onToggleCollapse && !collapsed && (
             <button
               onClick={onToggleCollapse}
-              className="w-6 h-6 rounded-lg bg-surface-subtle hover:bg-surface-hover text-text-secondary hover:text-text-primary flex items-center justify-center transition cursor-pointer"
+              className="px-1.5 py-1 rounded-lg bg-surface-subtle hover:bg-surface-hover text-text-secondary hover:text-text-primary flex items-center justify-center transition cursor-pointer gap-1"
               title="Kecilkan Sidebar ([)"
-              aria-label="Kecilkan Sidebar"
+              aria-label="Kecilkan Sidebar ([)"
+              aria-expanded={!collapsed}
             >
               <ChevronLeft size={14} />
+              <kbd className="text-[9px] font-mono text-text-muted opacity-70">[</kbd>
             </button>
           )}
         </div>
@@ -109,11 +111,13 @@ export const DesktopSidebar: React.FC<DesktopSidebarProps> = ({
           <div className="my-2 flex justify-center">
             <button
               onClick={onToggleCollapse}
-              className="w-8 h-8 rounded-lg bg-surface-subtle hover:bg-surface-hover text-text-secondary hover:text-text-primary flex items-center justify-center transition cursor-pointer"
+              className="px-2 py-1.5 rounded-lg bg-surface-subtle hover:bg-surface-hover text-text-secondary hover:text-text-primary flex items-center justify-center transition cursor-pointer gap-1"
               title="Perluas Sidebar ([)"
-              aria-label="Perluas Sidebar"
+              aria-label="Perluas Sidebar ([)"
+              aria-expanded={!collapsed}
             >
               <ChevronRight size={14} />
+              <kbd className="text-[9px] font-mono text-text-muted opacity-70">[</kbd>
             </button>
           </div>
         )}

@@ -5,36 +5,12 @@ import { AdminRoute } from './components/AdminRoute';
 
 import Home from './pages/Home';
 import GamesPage from './pages/GamesPage';
-
-// Lazy Loaded Pages with exponential backoff retry on dynamic import failure
-function lazyWithRetry<T extends React.ComponentType<any>>(
-  factory: () => Promise<{ default: T }>,
-  retries = 3,
-  delayMs = 350
-) {
-  return React.lazy(async () => {
-    let currentDelay = delayMs;
-    for (let attempt = 0; attempt <= retries; attempt++) {
-      try {
-        return await factory();
-      } catch (err) {
-        if (attempt === retries) {
-          throw err;
-        }
-        await new Promise((resolve) => setTimeout(resolve, currentDelay));
-        currentDelay *= 1.8;
-      }
-    }
-    return factory();
-  });
-}
-
-const GamePage = lazyWithRetry(() => import('./pages/GamePage'));
-const ChallengesPage = lazyWithRetry(() => import('./pages/ChallengesPage'));
-const LeaderboardPage = lazyWithRetry(() => import('./pages/LeaderboardPage'));
-const ProfilePage = lazyWithRetry(() => import('./pages/ProfilePage'));
-const Shop = lazyWithRetry(() => import('./pages/Shop'));
-const AdminDashboard = lazyWithRetry(() => import('./pages/AdminDashboard'));
+import GamePage from './pages/GamePage';
+import ChallengesPage from './pages/ChallengesPage';
+import LeaderboardPage from './pages/LeaderboardPage';
+import ProfilePage from './pages/ProfilePage';
+import Shop from './pages/Shop';
+import AdminDashboard from './pages/AdminDashboard';
 
 export function AppRoutes() {
   const {

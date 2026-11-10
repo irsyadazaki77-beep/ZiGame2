@@ -25,16 +25,54 @@ export function useGameDisplayMode() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
+  useEffect(() => {
+    const handleFsChange = () => {
+      const isFs = !!(
+        document.fullscreenElement ||
+        (document as any).webkitFullscreenElement
+      );
+      setIsFullscreen(isFs);
+    };
+    document.addEventListener('fullscreenchange', handleFsChange);
+    document.addEventListener('webkitfullscreenchange', handleFsChange);
+    return () => {
+      document.removeEventListener('fullscreenchange', handleFsChange);
+      document.removeEventListener('webkitfullscreenchange', handleFsChange);
+    };
+  }, []);
+
   const toggleFullscreen = useCallback(() => {
-    if (!containerRef.current) return;
-    if (!document.fullscreenElement) {
-      containerRef.current.requestFullscreen().then(() => setIsFullscreen(true)).catch(err => {
-        logger.warn("Fullscreen request failed:", { error: err });
-      });
+    const el = containerRef.current || document.documentElement;
+    const isDocFs = !!(
+      document.fullscreenElement ||
+      (document as any).webkitFullscreenElement
+    );
+
+    if (!isDocFs) {
+      const rfs =
+        el.requestFullscreen ||
+        (el as any).webkitRequestFullscreen ||
+        (el as any).webkitRequestFullScreen;
+
+      if (rfs) {
+        Promise.resolve(rfs.call(el))
+          .then(() => setIsFullscreen(true))
+          .catch(err => {
+            logger.warn("Fullscreen request failed:", { error: err });
+          });
+      }
     } else {
-      document.exitFullscreen().then(() => setIsFullscreen(false)).catch(err => {
-        logger.warn("Exit fullscreen failed:", { error: err });
-      });
+      const efs =
+        document.exitFullscreen ||
+        (document as any).webkitExitFullscreen;
+
+      if (efs) {
+        Promise.resolve(efs.call(document))
+          .then(() => setIsFullscreen(false))
+          .catch(err => {
+            logger.warn("Exit fullscreen failed:", { error: err });
+          });
+      }
     }
   }, []);
 

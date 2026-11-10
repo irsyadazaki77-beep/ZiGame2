@@ -53,7 +53,10 @@ export type ApiErrorCode =
   | 'RANKED_MAINTENANCE'
   | 'INVALID_FEATURE'
   | 'INVALID_VALUE'
-  | 'INVALID_USER_ID';
+  | 'INVALID_USER_ID'
+  | 'ACCOUNT_SUSPENDED'
+  | 'INVALID_SESSION_SIGNATURE'
+  | 'SECURITY_VIOLATION';
 
 export interface ApiErrorResponse {
   success: false;

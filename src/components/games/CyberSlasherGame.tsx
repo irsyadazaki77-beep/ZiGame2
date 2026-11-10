@@ -1,38 +1,79 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
+import * as THREE from 'three';
+import { GameComponentProps } from '../../types';
 import { audio } from '../../utils/audio';
-import { Particle } from '../../types';
-import { GameContainer } from '../gameplay/GameContainer';
-import { GameHUD } from '../gameplay/GameHUD';
+import { useGameEngine } from '../../hooks/useGameEngine';
 import { GameOverlay } from '../gameplay/GameOverlay';
+import { ThreeDockOverlay } from '../gameplay/ThreeDockOverlay';
+import {
+  ThreeStageController,
+  CameraPreset3D,
+  QualityLevel3D
+} from '../../utils/threeStage';
+import { Sword, Flame, AlertTriangle } from 'lucide-react';
 
-interface CyberSlasherGameProps {
-  onGameOver: (score: number) => void;
-  onScoreUpdate: (score: number) => void;
-  highScore: number;
-}
-
-interface SlasherItem {
-  id: number;
+interface SlashTarget3D {
+  mesh: THREE.Group;
   x: number;
   y: number;
+  z: number;
   vx: number;
   vy: number;
-  radius: number;
-  type: 'sphere' | 'star' | 'bomb';
-  color: string;
+  rotSpeed: THREE.Vector3;
+  isBomb: boolean;
   sliced: boolean;
-  sliceAngle: number;
+  color: number;
+  points: number;
 }
 
-interface TrailPoint {
-  x: number;
-  y: number;
-  time: number;
+function buildSlashTargetMesh(isBomb: boolean, color: number): THREE.Group {
+  const g = new THREE.Group();
+  if (isBomb) {
+    const coreMat = new THREE.MeshStandardMaterial({
+      color: 0x1e293b,
+      metalness: 0.85,
+      roughness: 0.25
+    });
+    const spikeMat = new THREE.MeshStandardMaterial({
+      color: 0xef4444,
+      emissive: 0xef4444,
+      emissiveIntensity: 0.9
+    });
+    const core = new THREE.Mesh(new THREE.SphereGeometry(0.55, 14, 14), coreMat);
+    const ring1 = new THREE.Mesh(new THREE.TorusGeometry(0.62, 0.06, 8, 20), spikeMat);
+    const ring2 = ring1.clone();
+    ring2.rotation.x = Math.PI / 2;
+    g.add(core, ring1, ring2);
+  } else {
+    const gemMat = new THREE.MeshPhysicalMaterial({
+      color,
+      emissive: color,
+      emissiveIntensity: 0.45,
+      metalness: 0.2,
+      roughness: 0.15,
+      clearcoat: 0.9
+    });
+    const shellMat = new THREE.MeshBasicMaterial({
+      color: 0xffffff,
+      wireframe: true,
+      transparent: true,
+      opacity: 0.35
+    });
+    const core = new THREE.Mesh(new THREE.OctahedronGeometry(0.62, 0), gemMat);
+    const shell = new THREE.Mesh(new THREE.DodecahedronGeometry(0.72, 0), shellMat);
+    g.add(core, shell);
+  }
+  return g;
 }
 
-import { useGameEngine } from '../../hooks/useGameEngine';
+export default function CyberSlasherGame({
+  onGameOver,
+  onScoreUpdate,
+  highScore
+}: GameComponentProps) {
+  const mountRef = useRef<HTMLDivElement | null>(null);
+  const stageRef = useRef<ThreeStageController | null>(null);
 
-export default function CyberSlasherGame({ onGameOver, onScoreUpdate, highScore }: CyberSlasherGameProps) {
   const {
     gameState,
     score,
@@ -40,424 +81,302 @@ export default function CyberSlasherGame({ onGameOver, onScoreUpdate, highScore 
     startWithCountdown,
     countdown,
     triggerGameOver,
-    pauseGame,
-    resumeGame,
-    startLoop,
-    stopLoop,
-    gameStateRef,
-    scoreRef,
+    scoreRef
   } = useGameEngine({
-    gameId: 'cyberslasher',
+    gameId: 'cyber-slasher',
     onGameOver,
-    onScoreUpdate,
+    onScoreUpdate
   });
 
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const [lives, setLives] = useState(3);
+  const [combo, setCombo] = useState(0);
+  const [cameraPreset, setCameraPreset] = useState<CameraPreset3D>('chase');
+  const [quality, setQuality] = useState<QualityLevel3D>('ultra');
 
-  const CANVAS_WIDTH = 400;
-  const CANVAS_HEIGHT = 500;
-
-  const itemsRef = useRef<SlasherItem[]>([]);
-  const trailRef = useRef<TrailPoint[]>([]);
-  const particlesRef = useRef<Particle[]>([]);
-  const spawnTimerRef = useRef(0);
-  const shakeRef = useRef<number>(0);
-  const floatingTextsRef = useRef<{ x: number; y: number; text: string; color: string; alpha: number; vy: number }[]>([]);
-
+  const gameStateRef = useRef(gameState);
   useEffect(() => {
-    drawStatic();
-    return () => {
-      stopLoop();
+    gameStateRef.current = gameState;
+  }, [gameState]);
+
+  const stateRef = useRef({
+    lives: 3,
+    combo: 0,
+    comboTimer: 0,
+    spawnTimer: 0.4,
+    pointerWorldX: 0,
+    pointerWorldY: 2.5,
+    isSlashing: false
+  });
+
+  const targetsRef = useRef<SlashTarget3D[]>([]);
+
+  const handleStart = useCallback(() => {
+    const stage = stageRef.current;
+    if (stage) {
+      targetsRef.current.forEach((t) => stage.scene.remove(t.mesh));
+    }
+    targetsRef.current = [];
+    stateRef.current = {
+      lives: 3,
+      combo: 0,
+      comboTimer: 0,
+      spawnTimer: 0.4,
+      pointerWorldX: 0,
+      pointerWorldY: 2.5,
+      isSlashing: false
     };
+    setLives(3);
+    setCombo(0);
+    startWithCountdown();
+  }, [startWithCountdown]);
+
+  const handleSelectPreset = useCallback((preset: CameraPreset3D) => {
+    setCameraPreset(preset);
+    stageRef.current?.setCameraPreset(preset);
   }, []);
 
-  const drawStatic = () => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    ctx.fillStyle = '#09090b';
-    ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
-
-    // Grid details
-    ctx.strokeStyle = '#111827';
-    ctx.lineWidth = 1;
-    for (let x = 0; x < CANVAS_WIDTH; x += 40) {
-      ctx.beginPath();
-      ctx.moveTo(x, 0);
-      ctx.lineTo(x, CANVAS_HEIGHT);
-      ctx.stroke();
-    }
-
-    // Title
-    ctx.fillStyle = '#ffffff';
-    ctx.font = "bold 20px 'Space Grotesk', sans-serif";
-    ctx.textAlign = 'center';
-    ctx.fillText('CYBER SLASHER', CANVAS_WIDTH / 2, 180);
-
-    ctx.fillStyle = '#d946ef';
-    ctx.font = "12px 'JetBrains Mono', monospace";
-    ctx.fillText('GESER KURSOR/JARI UNTUK TEBAS NEON', CANVAS_WIDTH / 2, 205);
-
-    ctx.fillStyle = '#71717a';
-    ctx.font = "11px 'JetBrains Mono', monospace";
-    ctx.fillText('Hati-hati jangan sampai menebas BOMB MERAH!', CANVAS_WIDTH / 2, 230);
-  };
-
-  const startNewGame = () => {
-    startWithCountdown(() => {
-      itemsRef.current = [];
-      trailRef.current = [];
-      particlesRef.current = [];
-      spawnTimerRef.current = 0;
-      startLoop(update);
+  const handleCycleQuality = useCallback(() => {
+    setQuality((prev) => {
+      const next: QualityLevel3D =
+        prev === 'ultra' ? 'balanced' : prev === 'balanced' ? 'performance' : 'ultra';
+      stageRef.current?.setQualityLevel(next);
+      return next;
     });
-  };
+  }, []);
 
-  const spawnFruitItem = () => {
-    const isBomb = Math.random() < 0.22;
-    const isStar = !isBomb && Math.random() < 0.25;
+  useEffect(() => {
+    const container = mountRef.current;
+    if (!container) return;
 
-    const startX = 60 + Math.random() * (CANVAS_WIDTH - 120);
-    const startY = CANVAS_HEIGHT + 20;
-
-    // Arch velocities
-    const vy = -11.5 - Math.random() * 4.2;
-    const vx = (CANVAS_WIDTH / 2 - startX) * 0.02 + (Math.random() - 0.5) * 2;
-
-    itemsRef.current.push({
-      id: Math.random(),
-      x: startX,
-      y: startY,
-      vx,
-      vy,
-      radius: isBomb ? 18 : isStar ? 14 : 20,
-      type: isBomb ? 'bomb' : isStar ? 'star' : 'sphere',
-      color: isBomb ? '#ef4444' : isStar ? '#eab308' : '#14b8a6',
-      sliced: false,
-      sliceAngle: 0,
-    });
-  };
-
-  const createSliceSparks = (x: number, y: number, color: string) => {
-    for (let i = 0; i < 15; i++) {
-      particlesRef.current.push({
-        x,
-        y,
-        vx: (Math.random() - 0.5) * 8,
-        vy: (Math.random() - 0.5) * 8,
-        color,
-        radius: Math.random() * 2.5 + 1.5,
-        alpha: 1,
-        decay: Math.random() * 0.05 + 0.02,
+    let stage: ThreeStageController;
+    try {
+      stage = new ThreeStageController({
+        container,
+        backgroundColor: 0x050c12,
+        fogColor: 0x050c12,
+        fogDensity: 0.016,
+        initialPreset: 'chase',
+        gridPrimaryColor: '#10b981',
+        gridSecondaryColor: '#07141e',
+        cameraPresets: {
+          chase: { position: [0, 3.2, 11.5], lookAt: [0, 2.8, 0], fov: 50 },
+          isometric: { position: [5.5, 5.5, 11.5], lookAt: [0, 2.6, 0], fov: 48 },
+          diorama: { position: [0, 4.5, 13.5], lookAt: [0, 2.5, 0], fov: 46 }
+        }
       });
-    }
-  };
-
-  // Drag trail calculation and slicing check
-  const handlePointerMove = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
-    if (gameStateRef.current !== 'playing') return;
-
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const rect = canvas.getBoundingClientRect();
-
-    let clientX = 0;
-    let clientY = 0;
-
-    if ('touches' in e) {
-      if (e.touches.length === 0) return;
-      clientX = e.touches[0].clientX;
-      clientY = e.touches[0].clientY;
-    } else {
-      clientX = e.clientX;
-      clientY = e.clientY;
+    } catch {
+      return;
     }
 
-    const x = ((clientX - rect.left) / rect.width) * CANVAS_WIDTH;
-    const y = ((clientY - rect.top) / rect.height) * CANVAS_HEIGHT;
+    stageRef.current = stage;
+    setQuality(stage.getQualityLevel());
 
-    trailRef.current.push({ x, y, time: performance.now() });
+    // Build Katana Plasma Cursor Orb
+    const bladeTip = new THREE.Mesh(
+      new THREE.OctahedronGeometry(0.24, 0),
+      new THREE.MeshStandardMaterial({
+        color: 0x10b981,
+        emissive: 0x34d399,
+        emissiveIntensity: 1.0
+      })
+    );
+    bladeTip.position.set(0, 2.5, 0.5);
+    stage.scene.add(bladeTip);
 
-    // Limit trail length
-    if (trailRef.current.length > 12) {
-      trailRef.current.shift();
-    }
+    const slashAt = (wx: number, wy: number) => {
+      if (gameStateRef.current !== 'playing') return;
+      const st = stateRef.current;
+      st.pointerWorldX = wx;
+      st.pointerWorldY = wy;
+      bladeTip.position.set(wx, wy, 0.5);
 
-    // Check slicing intersections
-    if (trailRef.current.length > 2) {
-      const p1 = trailRef.current[trailRef.current.length - 2];
-      const p2 = trailRef.current[trailRef.current.length - 1];
+      for (let i = targetsRef.current.length - 1; i >= 0; i--) {
+        const t = targetsRef.current[i];
+        if (t.sliced) continue;
+        if (Math.hypot(t.x - wx, t.y - wy) < 1.15) {
+          t.sliced = true;
+          stage.scene.remove(t.mesh);
+          targetsRef.current.splice(i, 1);
 
-      itemsRef.current.forEach(item => {
-        if (item.sliced) return;
-
-        // Intersection checking from line segment (p1 -> p2) to circle (item.x, item.y)
-        const dX = p2.x - p1.x;
-        const dY = p2.y - p1.y;
-        const len = Math.hypot(dX, dY);
-        if (len === 0) return;
-
-        const u = ((item.x - p1.x) * dX + (item.y - p1.y) * dY) / (len * len);
-        const clampU = Math.max(0, Math.min(1, u));
-        
-        const closestX = p1.x + clampU * dX;
-        const closestY = p1.y + clampU * dY;
-
-        const dist = Math.hypot(item.x - closestX, item.y - closestY);
-
-        if (dist < item.radius + 5) {
-          // SLICED!
-          item.sliced = true;
-          item.sliceAngle = Math.atan2(dY, dX);
-
-          if (item.type === 'bomb') {
-            audio.playExplosion();
-            shakeRef.current = 24;
-            floatingTextsRef.current.push({
-              x: item.x,
-              y: item.y - 12,
-              text: "BOOM!!",
-              color: '#ef4444',
-              alpha: 1.0,
-              vy: -1.2
-            });
-            // Create massive burst of bomb spark particles
-            for (let i = 0; i < 25; i++) {
-              particlesRef.current.push({
-                x: item.x,
-                y: item.y,
-                vx: (Math.random() - 0.5) * 10,
-                vy: (Math.random() - 0.5) * 10,
-                color: i % 2 === 0 ? '#ef4444' : '#f97316',
-                radius: Math.random() * 3 + 1,
-                alpha: 1.0,
-                decay: Math.random() * 0.04 + 0.02
-              });
-            }
+          if (t.isBomb) {
+            stage.particles.burst(t.x, t.y, 0, 42, 0xef4444, 11);
+            stage.triggerTrauma(0.85);
+            audio.playExplosion?.();
             triggerGameOver(scoreRef.current);
+            return;
           } else {
-            audio.playScore();
-            shakeRef.current = 5;
-            const points = item.type === 'star' ? 30 : 10;
-            floatingTextsRef.current.push({
-              x: item.x,
-              y: item.y - 12,
-              text: `+${points}`,
-              color: item.color,
-              alpha: 1.0,
-              vy: -0.8
-            });
-            createSliceSparks(item.x, item.y, item.color);
-            addScore(points);
+            st.combo += 1;
+            st.comboTimer = 1.6;
+            setCombo(st.combo);
+            const mult = Math.min(4, 1 + Math.floor(st.combo / 4));
+            addScore(t.points * mult);
+            stage.particles.burst(t.x, t.y, 0, 22, t.color, 8.5);
+            stage.triggerTrauma(0.2);
+            if (st.combo % 5 === 0) {
+              stage.triggerSlowMo(0.45, 0.22);
+              stage.kickFov(3.5);
+            }
+            audio.playCoin?.();
           }
         }
-      });
-    }
-  };
+      }
+    };
 
-  const update = (timestamp: number, deltaTime: number) => {
-    const canvas = canvasRef.current;
-    if (!canvas || gameStateRef.current !== 'playing') return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
+    const onPointerMove = (e: PointerEvent) => {
+      const rect = container.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) return;
+      const nx = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+      const ny = -(((e.clientY - rect.top) / rect.height) * 2 - 1);
+      const wx = nx * 6.2;
+      const wy = 2.8 + ny * 3.4;
+      slashAt(wx, wy);
+    };
 
-    const delta = deltaTime / 16.666;
-    const gravity = 0.28;
-
-    // Spawn waves
-    spawnTimerRef.current += delta;
-    if (spawnTimerRef.current > Math.max(25, 60 - score * 0.05)) {
-      spawnTimerRef.current = 0;
-      spawnFruitItem();
-      if (Math.random() < 0.4) spawnFruitItem(); // Double spawns
-    }
-
-    // Move items
-    itemsRef.current.forEach(item => {
-      item.vy += gravity * delta;
-      item.x += item.vx * delta;
-      item.y += item.vy * delta;
-    });
-
-    // Cleanup fallen offscreen items
-    itemsRef.current = itemsRef.current.filter(i => i.y < CANVAS_HEIGHT + 40);
-
-    // Clean old trail slices
-    trailRef.current = trailRef.current.filter(p => performance.now() - p.time < 180);
-
-    // DRAW Frame
-    ctx.save();
-    if (shakeRef.current > 0) {
-      const dx = (Math.random() - 0.5) * shakeRef.current;
-      const dy = (Math.random() - 0.5) * shakeRef.current;
-      ctx.translate(dx, dy);
-      shakeRef.current *= 0.85;
-      if (shakeRef.current < 0.5) shakeRef.current = 0;
-    }
-
-    ctx.fillStyle = '#09090b';
-    ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
-
-    // Grid details
-    ctx.strokeStyle = '#1e1b4b';
-    ctx.lineWidth = 0.5;
-    for (let c = 0; c <= CANVAS_WIDTH; c += 40) {
-      ctx.beginPath();
-      ctx.moveTo(c, 0);
-      ctx.lineTo(c, CANVAS_HEIGHT);
-      ctx.stroke();
-    }
-
-    // Render Slasher Items
-    itemsRef.current.forEach(item => {
-      ctx.shadowBlur = 10;
-      ctx.shadowColor = item.color;
-      ctx.fillStyle = item.color;
-
-      if (item.sliced) {
-        // Draw split slices flying apart
-        ctx.save();
-        ctx.translate(item.x, item.y);
-        ctx.rotate(item.sliceAngle);
-
-        // Slice half A (left/top)
-        ctx.fillStyle = item.color;
-        ctx.beginPath();
-        ctx.arc(-5, -3, item.radius, Math.PI / 2, (3 * Math.PI) / 2);
-        ctx.closePath();
-        ctx.fill();
-
-        // Slice half B (right/bottom)
-        ctx.beginPath();
-        ctx.arc(5, 3, item.radius, (3 * Math.PI) / 2, Math.PI / 2);
-        ctx.closePath();
-        ctx.fill();
-
-        ctx.restore();
-      } else {
-        if (item.type === 'bomb') {
-          // Glow red bomb sphere with sparks
-          ctx.beginPath();
-          ctx.arc(item.x, item.y, item.radius, 0, Math.PI * 2);
-          ctx.fill();
-
-          // draw inner black core
-          ctx.fillStyle = '#18181b';
-          ctx.beginPath();
-          ctx.arc(item.x, item.y, item.radius * 0.6, 0, Math.PI * 2);
-          ctx.fill();
-        } else if (item.type === 'star') {
-          // Yellow star polygon
-          ctx.beginPath();
-          ctx.arc(item.x, item.y, item.radius, 0, Math.PI * 2);
-          ctx.fill();
-        } else {
-          // Standard turquoise target sphere
-          ctx.beginPath();
-          ctx.arc(item.x, item.y, item.radius, 0, Math.PI * 2);
-          ctx.fill();
-
-          ctx.fillStyle = '#ffffff';
-          ctx.beginPath();
-          ctx.arc(item.x - 5, item.y - 5, 4, 0, Math.PI * 2);
-          ctx.fill();
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (gameStateRef.current !== 'playing') return;
+      // Keyboard quick-slash support: Space/Arrows slash nearest non-bomb orb
+      if (e.key === ' ' || e.key.startsWith('Arrow')) {
+        const orb = targetsRef.current.find((t) => !t.isBomb && !t.sliced && t.y > 0.5);
+        if (orb) {
+          slashAt(orb.x, orb.y);
         }
       }
-      ctx.shadowBlur = 0;
-    });
+    };
 
-    // Draw particle explosions
-    particlesRef.current.forEach(p => {
-      p.x += p.vx * delta;
-      p.y += p.vy * delta;
-      p.alpha -= p.decay * delta;
+    container.addEventListener('pointermove', onPointerMove);
+    container.addEventListener('pointerdown', onPointerMove);
+    window.addEventListener('keydown', onKeyDown);
 
-      ctx.fillStyle = p.color;
-      ctx.globalAlpha = Math.max(0, p.alpha);
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
-      ctx.fill();
-    });
-    ctx.globalAlpha = 1.0;
-    particlesRef.current = particlesRef.current.filter(p => p.alpha > 0);
+    const orbColors = [0x10b981, 0x06b6d4, 0xf59e0b, 0xec4899, 0xa855f7];
 
-    // Draw glowing sword trail lines
-    if (trailRef.current.length > 1) {
-      ctx.strokeStyle = '#ffffff';
-      ctx.lineWidth = 4;
-      ctx.lineCap = 'round';
-      ctx.lineJoin = 'round';
-      ctx.shadowBlur = 15;
-      ctx.shadowColor = '#d946ef';
+    stage.startLoop((dt) => {
+      bladeTip.rotation.y += dt * 8;
+      bladeTip.rotation.x += dt * 5;
 
-      ctx.beginPath();
-      ctx.moveTo(trailRef.current[0].x, trailRef.current[0].y);
-      for (let i = 1; i < trailRef.current.length; i++) {
-        ctx.lineTo(trailRef.current[i].x, trailRef.current[i].y);
+      if (gameStateRef.current !== 'playing') return;
+
+      const st = stateRef.current;
+      if (st.comboTimer > 0) {
+        st.comboTimer -= dt;
+        if (st.comboTimer <= 0) {
+          st.combo = 0;
+          setCombo(0);
+        }
       }
-      ctx.stroke();
-      ctx.shadowBlur = 0;
-    }
 
-    // Render floating texts
-    floatingTextsRef.current.forEach(t => {
-      t.y += t.vy * delta;
-      t.alpha -= 0.025 * delta;
+      st.spawnTimer -= dt;
+      if (st.spawnTimer <= 0) {
+        st.spawnTimer = 0.65 + Math.random() * 0.45;
+        const batch = 1 + Math.floor(Math.random() * 2);
+        for (let b = 0; b < batch; b++) {
+          const isBomb = Math.random() < 0.18;
+          const color = orbColors[Math.floor(Math.random() * orbColors.length)];
+          const mesh = buildSlashTargetMesh(isBomb, color);
+          const startX = (Math.random() - 0.5) * 8.5;
+          const vx = -startX * (0.35 + Math.random() * 0.35);
+          const vy = 9.8 + Math.random() * 2.6;
+          mesh.position.set(startX, -0.5, 0);
+          stage.scene.add(mesh);
 
-      ctx.fillStyle = t.color;
-      ctx.globalAlpha = Math.max(0, t.alpha);
-      ctx.font = 'bold 9px "Press Start 2P", monospace';
-      ctx.textAlign = 'center';
-      ctx.fillText(t.text, t.x, t.y);
+          targetsRef.current.push({
+            mesh,
+            x: startX,
+            y: -0.5,
+            z: 0,
+            vx,
+            vy,
+            rotSpeed: new THREE.Vector3(
+              (Math.random() - 0.5) * 5,
+              (Math.random() - 0.5) * 5,
+              (Math.random() - 0.5) * 5
+            ),
+            isBomb,
+            sliced: false,
+            color,
+            points: 15
+          });
+        }
+      }
+
+      for (let i = targetsRef.current.length - 1; i >= 0; i--) {
+        const t = targetsRef.current[i];
+        t.x += t.vx * dt;
+        t.y += t.vy * dt;
+        t.vy -= 12.5 * dt;
+        t.mesh.position.set(t.x, t.y, t.z);
+        t.mesh.rotation.x += t.rotSpeed.x * dt;
+        t.mesh.rotation.y += t.rotSpeed.y * dt;
+
+        if (t.y < -1.5) {
+          stage.scene.remove(t.mesh);
+          targetsRef.current.splice(i, 1);
+          if (!t.isBomb && !t.sliced) {
+            st.lives -= 1;
+            setLives(st.lives);
+            stage.triggerTrauma(0.35);
+            if (st.lives <= 0) {
+              triggerGameOver(scoreRef.current);
+              return;
+            }
+          }
+        }
+      }
     });
-    ctx.globalAlpha = 1.0;
-    floatingTextsRef.current = floatingTextsRef.current.filter(t => t.alpha > 0);
 
-    ctx.restore();
-
-    // Stats
-    ctx.fillStyle = '#ffffff';
-    ctx.font = "bold 11px 'JetBrains Mono', monospace";
-    ctx.textAlign = 'left';
-    ctx.fillText(`TEBASAN BERUNTUN: ${Math.floor(score / 10)}`, 15, 30);
-    ctx.textAlign = 'right';
-    ctx.fillText(`SKOR: ${score}`, CANVAS_WIDTH - 15, 30);
-  };
+    return () => {
+      container.removeEventListener('pointermove', onPointerMove);
+      container.removeEventListener('pointerdown', onPointerMove);
+      window.removeEventListener('keydown', onKeyDown);
+      stage.dispose();
+      stageRef.current = null;
+    };
+  }, [addScore, scoreRef, triggerGameOver]);
 
   return (
-    <GameContainer aspect="portrait" maxWidth="sm">
-      {(gameState === 'playing' || gameState === 'paused') && (
-        <GameHUD 
-          stats={[
-            { id: 'combo', label: 'TEBASAN BERUNTUN', value: Math.floor(score / 10) },
-            { id: 'score', label: 'SKOR', value: score, emphasized: true }
-          ]} 
-        />
-      )}
+    <div className="relative w-full h-full min-h-[460px] bg-slate-950 overflow-hidden rounded-2xl border border-emerald-500/20">
+      <div ref={mountRef} className="absolute inset-0 w-full h-full cursor-crosshair" />
+
+      <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex flex-wrap items-center justify-between gap-2 p-3.5">
+        <div className="flex items-center gap-3 rounded-xl border border-white/10 bg-slate-950/85 px-3.5 py-2 text-xs text-slate-200 tabular-nums">
+          <span className="flex items-center gap-1 font-semibold text-emerald-400">
+            <Sword className="w-3.5 h-3.5" /> SKOR: {score}
+          </span>
+          {combo > 1 && (
+            <>
+              <span aria-hidden="true">·</span>
+              <span className="text-amber-400 font-semibold">{combo}x SLASH COMBO</span>
+            </>
+          )}
+        </div>
+
+        <div className="flex items-center gap-2 rounded-xl border border-white/10 bg-slate-950/85 px-3.5 py-2 text-xs text-rose-400 font-semibold tabular-nums">
+          <Flame className="w-3.5 h-3.5" /> NYAWA: {lives}
+        </div>
+      </div>
+
+      <ThreeDockOverlay
+        cameraPreset={cameraPreset}
+        onSelectPreset={handleSelectPreset}
+        quality={quality}
+        onCycleQuality={handleCycleQuality}
+        extraControls={
+          <span className="hidden sm:inline-flex items-center gap-1 text-[11px] text-slate-400 px-2 whitespace-nowrap shrink-0">
+            <AlertTriangle className="w-3 h-3 text-emerald-400" /> Geser Kursor / Tap untuk Menebas Kristal 3D (Hindari Ranjau Merah)
+          </span>
+        }
+      />
 
       <GameOverlay
         gameState={gameState}
         score={score}
         highScore={highScore}
-        onStart={startNewGame}
-        onRestart={startNewGame}
-        onResume={resumeGame}
         countdown={countdown}
-        instructions="GESER KURSOR/JARI UNTUK TEBAS NEON. Hati-hati jangan sampai menebas BOMB MERAH!"
+        onStart={handleStart}
+        onRestart={handleStart}
+        title="Cyber Slasher 3D"
+        description="Tebas kristal data 3D yang melayang di udara dengan katana plasma dan hindari ranjau EMP merah!"
+        themeColor="emerald"
       />
-
-      <div className="relative w-full aspect-[4/5] mx-auto bg-zinc-950 rounded-xl border-4 border-zinc-900 shadow-2xl overflow-hidden cursor-crosshair">
-        <canvas
-          ref={canvasRef}
-          width={CANVAS_WIDTH}
-          height={CANVAS_HEIGHT}
-          onMouseMove={handlePointerMove}
-          onTouchMove={handlePointerMove}
-          className="w-full h-full display-block bg-zinc-950 cursor-crosshair"
-        />
-      </div>
-    </GameContainer>
+    </div>
   );
 }

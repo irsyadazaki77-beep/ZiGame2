@@ -22,6 +22,7 @@ import { recordSuspiciousScore } from './suspiciousScores';
 import { invalidateSession } from './sessions';
 import { getUtcDateString, getIsoWeekString } from './rewards';
 import { isValidIdempotencyKey, getProcessedAction, setProcessedAction } from './idempotency';
+import { verifyClientSubmissionProof } from './security';
 
 export interface ScoreSubmissionInput {
   sessionId: string;
@@ -33,6 +34,9 @@ export interface ScoreSubmissionInput {
   durationMs?: number;
   masteryLevel?: number;
   idempotencyKey?: string;
+  nonce?: string;
+  signature?: string;
+  clientProof?: string;
   requestId?: string;
   clientIp?: string;
 }
@@ -81,6 +85,9 @@ export async function executeScoreSubmission({
   durationMs,
   masteryLevel,
   idempotencyKey,
+  nonce,
+  signature,
+  clientProof,
   requestId,
   clientIp
 }: ScoreSubmissionInput): Promise<ScoreSubmissionResult> {
@@ -149,6 +156,18 @@ export async function executeScoreSubmission({
         }
         if (session.consumed) throw ApiError.unprocessable('Sesi sudah digunakan.', 'SESSION_ALREADY_CONSUMED');
         if (nowMs > session.expiresAt) throw ApiError.unprocessable('Sesi kedaluwarsa.', 'SESSION_EXPIRED');
+
+        // 2b. Cryptographic HMAC Session Signature & Proof Check
+        const proofCheck = verifyClientSubmissionProof(session, score, nonce, clientProof, signature);
+        if (!proofCheck.valid) {
+          antiCheatError = {
+            reason: proofCheck.reason || 'Cryptographic HMAC session verification failed',
+            duration: Math.max(0, nowMs - session.startTime),
+            velocity: 0,
+            severity: 'CRITICAL'
+          };
+          throw ApiError.unprocessable('Tanda tangan kriptografi atau bukti integritas sesi tidak valid.', 'INVALID_SESSION_SIGNATURE');
+        }
 
         // 3. Anti-Cheat & Duration Validation
         const verifiedDurationMs = nowMs - session.startTime;
@@ -365,6 +384,26 @@ export async function executeScoreSubmission({
     const verifiedDurationMs = nowMs - session.startTime;
     const durationSeconds = Math.max(verifiedDurationMs / 1000, 0.5);
     const serverVelocity = score / durationSeconds;
+
+    // Cryptographic HMAC Session Signature & Proof Check
+    const proofCheck = verifyClientSubmissionProof(session, score, nonce, clientProof, signature);
+    if (!proofCheck.valid) {
+      session.consumed = true;
+      session.consumedAt = nowMs;
+      await recordSuspiciousScore({
+        sessionId,
+        userId,
+        gameId: canonicalId,
+        score,
+        durationMs: verifiedDurationMs,
+        velocity: serverVelocity,
+        reason: proofCheck.reason || 'Cryptographic HMAC session verification failed',
+        severity: 'CRITICAL',
+        requestId,
+        clientIp
+      });
+      throw ApiError.unprocessable('Tanda tangan kriptografi atau bukti integritas sesi tidak valid.', 'INVALID_SESSION_SIGNATURE');
+    }
 
     let clientVelocity: number | undefined;
     if (typeof durationMs === 'number' && durationMs > 0) {

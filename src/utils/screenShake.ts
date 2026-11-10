@@ -3,7 +3,7 @@
  * Allows any game or HUD action to trigger screen shake with duration & intensity.
  */
 
-export type ShakeIntensity = 'subtle' | 'medium' | 'heavy';
+export type ShakeIntensity = 'subtle' | 'medium' | 'heavy' | 'light';
 
 type ShakeListener = (intensity: ShakeIntensity) => void;
 

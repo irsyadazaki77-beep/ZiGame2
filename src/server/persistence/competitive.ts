@@ -32,6 +32,7 @@ import { invalidateSession } from './sessions';
 import { getUtcDateString, getIsoWeekString } from './rewards';
 import { ScoreSubmissionInput, ScoreSubmissionResult, getUserDailyGameRewardsEarned } from './scores';
 import { isValidIdempotencyKey, getProcessedAction, setProcessedAction } from './idempotency';
+import { computeSessionSignature, verifyClientSubmissionProof } from './security';
 
 export interface RankedSubmissionResult extends ScoreSubmissionResult {
   oldRating: number;
@@ -125,6 +126,7 @@ export async function createRankedSession(userId: string, gameId: string): Promi
   const season = await getActiveSeason();
   const sessionId = `rnk_${Date.now()}_${crypto.randomBytes(16).toString('hex')}`;
   const nonce = crypto.randomBytes(16).toString('hex');
+  const signature = computeSessionSignature(sessionId, userId, canonicalId, nonce);
   const now = Date.now();
 
   const session: StoredGameSession = {
@@ -132,6 +134,7 @@ export async function createRankedSession(userId: string, gameId: string): Promi
     userId,
     gameId: canonicalId,
     nonce,
+    signature,
     startTime: now,
     expiresAt: now + (30 * 60 * 1000), // 30 min for ranked
     consumed: false,
@@ -221,7 +224,7 @@ export function validateSessionHard(
 
 export async function executeRankedSubmission(input: ScoreSubmissionInput): Promise<RankedSubmissionResult> {
   assertPersistenceOperational();
-  const { sessionId, userId, gameId, score, playerName, playerAvatar, durationMs, masteryLevel, idempotencyKey, requestId, clientIp } = input;
+  const { sessionId, userId, gameId, score, playerName, playerAvatar, durationMs, masteryLevel, idempotencyKey, nonce, signature, clientProof, requestId, clientIp } = input;
   const canonicalId = requireCanonicalGameId(gameId);
   const gameConfig = GAME_COMPETITIVE_CONFIGS[canonicalId];
 
@@ -276,6 +279,17 @@ export async function executeRankedSubmission(input: ScoreSubmissionInput): Prom
         const verifiedDurationMs = nowMs - session.startTime;
         const durationSeconds = Math.max(verifiedDurationMs / 1000, 0.5);
         const serverVelocity = score / durationSeconds;
+
+        const proofCheck = verifyClientSubmissionProof(session, score, nonce, clientProof, signature);
+        if (!proofCheck.valid) {
+          antiCheatError = {
+            reason: proofCheck.reason || 'Ranked cryptographic HMAC session verification failed',
+            duration: verifiedDurationMs,
+            velocity: serverVelocity,
+            severity: 'CRITICAL'
+          };
+          throw ApiError.unprocessable('Tanda tangan kriptografi atau bukti integritas sesi ranked tidak valid.', 'INVALID_SESSION_SIGNATURE');
+        }
 
         let clientVelocity: number | undefined;
         if (typeof durationMs === 'number' && durationMs > 0) {
@@ -499,6 +513,25 @@ export async function executeRankedSubmission(input: ScoreSubmissionInput): Prom
     const verifiedDurationMs = nowMs - session.startTime;
     const durationSeconds = Math.max(verifiedDurationMs / 1000, 0.5);
     const serverVelocity = score / durationSeconds;
+
+    const proofCheck = verifyClientSubmissionProof(session, score, nonce, clientProof, signature);
+    if (!proofCheck.valid) {
+      session.consumed = true;
+      session.consumedAt = nowMs;
+      await recordSuspiciousScore({
+        sessionId,
+        userId,
+        gameId: canonicalId,
+        score,
+        durationMs: verifiedDurationMs,
+        velocity: serverVelocity,
+        reason: proofCheck.reason || 'Ranked cryptographic HMAC session verification failed',
+        severity: 'CRITICAL',
+        requestId,
+        clientIp
+      });
+      throw ApiError.unprocessable('Tanda tangan kriptografi atau bukti integritas sesi ranked tidak valid.', 'INVALID_SESSION_SIGNATURE');
+    }
 
     let clientVelocity: number | undefined;
     if (typeof durationMs === 'number' && durationMs > 0) {

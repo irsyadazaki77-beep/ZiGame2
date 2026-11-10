@@ -1,347 +1,314 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
+import * as THREE from 'three';
+import { GameComponentProps } from '../../types';
 import { audio } from '../../utils/audio';
 import { useGameEngine } from '../../hooks/useGameEngine';
-import { Particle } from '../../types';
-import { GameContainer } from '../gameplay/GameContainer';
-import { GameHUD } from '../gameplay/GameHUD';
 import { GameOverlay } from '../gameplay/GameOverlay';
+import { ThreeDockOverlay } from '../gameplay/ThreeDockOverlay';
+import {
+  ThreeStageController,
+  CameraPreset3D,
+  QualityLevel3D
+} from '../../utils/threeStage';
+import { Brain, Sparkles, Zap } from 'lucide-react';
 
-interface CyberSimonGameProps {
-  onGameOver: (score: number) => void;
-  onScoreUpdate: (score: number) => void;
-  highScore: number;
-}
+const PAD_COLORS = [0x06b6d4, 0xec4899, 0xfacc15, 0x22c55e];
+const PAD_POSITIONS: [number, number][] = [
+  [-1.65, -1.65],
+  [1.65, -1.65],
+  [-1.65, 1.65],
+  [1.65, 1.65]
+];
 
-interface SimonPad {
-  id: number;
-  name: string;
-  color: string;
-  glowColor: string;
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-}
-
-export default function CyberSimonGame({ onGameOver, onScoreUpdate, highScore }: CyberSimonGameProps) {
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+export default function CyberSimonGame({
+  onGameOver,
+  onScoreUpdate,
+  highScore
+}: GameComponentProps) {
+  const mountRef = useRef<HTMLDivElement | null>(null);
+  const stageRef = useRef<ThreeStageController | null>(null);
 
   const {
     gameState,
-    setGameState,
     score,
-    updateScore,
     addScore,
-    startLoop,
-    stopLoop,
-    triggerGameOver,
     startWithCountdown,
     countdown,
+    triggerGameOver,
+    scoreRef
   } = useGameEngine({
-    gameId: 'cybersimon',
+    gameId: 'cyber-simon',
     onGameOver,
-    onScoreUpdate,
+    onScoreUpdate
   });
 
+  const [seqLength, setSeqLength] = useState(1);
+  const [statusText, setStatusText] = useState('PERHATIKAN URUTAN');
+  const [cameraPreset, setCameraPreset] = useState<CameraPreset3D>('isometric');
+  const [quality, setQuality] = useState<QualityLevel3D>('ultra');
+
   const gameStateRef = useRef(gameState);
-  
   useEffect(() => {
     gameStateRef.current = gameState;
   }, [gameState]);
 
-  const CANVAS_WIDTH = 400;
-  const CANVAS_HEIGHT = 500;
+  const simonRef = useRef({
+    sequence: [0] as number[],
+    playerStep: 0,
+    showingSeq: true,
+    showIdx: 0,
+    showTimer: 0.65,
+    litPad: -1,
+    litTimer: 0
+  });
 
-  // Simon Pads Layout definitions (4 quadrants)
-  const pads: SimonPad[] = [
-    { id: 0, name: 'GREEN', color: '#064e3b', glowColor: '#10b981', x: 40, y: 120, width: 150, height: 150 }, // Top Left
-    { id: 1, name: 'RED', color: '#7f1d1d', glowColor: '#ef4444', x: 210, y: 120, width: 150, height: 150 }, // Top Right
-    { id: 2, name: 'YELLOW', color: '#78350f', glowColor: '#f59e0b', x: 40, y: 290, width: 150, height: 150 }, // Bottom Left
-    { id: 3, name: 'BLUE', color: '#1e3a8a', glowColor: '#3b82f6', x: 210, y: 290, width: 150, height: 150 }, // Bottom Right
-  ];
+  const handlePadInput = useCallback(
+    (padIdx: number) => {
+      if (gameStateRef.current !== 'playing') return;
+      const st = simonRef.current;
+      if (st.showingSeq) return;
 
-  const sequenceRef = useRef<number[]>([]);
-  const playerSequenceRef = useRef<number[]>([]);
-  const isPlaybackRef = useRef(false);
-  const activePadRef = useRef<number | null>(null);
-  const playbackIndexRef = useRef(0);
-  const playbackTimerRef = useRef(0);
+      st.litPad = padIdx;
+      st.litTimer = 0.28;
+      audio.playClick?.();
 
-  const particlesRef = useRef<Particle[]>([]);
+      const stage = stageRef.current;
+      const [px, pz] = PAD_POSITIONS[padIdx];
+      stage?.particles.burst(px, 0.65, pz, 16, PAD_COLORS[padIdx], 6.5);
 
-  const lastTimeRef = useRef(0);
+      if (st.sequence[st.playerStep] === padIdx) {
+        st.playerStep += 1;
+        addScore(20);
+        if (st.playerStep >= st.sequence.length) {
+          addScore(50);
+          audio.playCoin?.();
+          stage?.kickFov(3.5);
+          st.sequence.push(Math.floor(Math.random() * 4));
+          setSeqLength(st.sequence.length);
+          st.playerStep = 0;
+          st.showingSeq = true;
+          st.showIdx = 0;
+          st.showTimer = 0.75;
+          setStatusText('PERHATIKAN URUTAN 3D');
+        }
+      } else {
+        stage?.particles.burst(0, 0.8, 0, 36, 0xef4444, 9.5);
+        stage?.triggerTrauma(0.75);
+        audio.playExplosion?.();
+        triggerGameOver(scoreRef.current);
+      }
+    },
+    [addScore, scoreRef, triggerGameOver]
+  );
+
+  const handleStart = useCallback(() => {
+    simonRef.current = {
+      sequence: [Math.floor(Math.random() * 4)],
+      playerStep: 0,
+      showingSeq: true,
+      showIdx: 0,
+      showTimer: 0.75,
+      litPad: -1,
+      litTimer: 0
+    };
+    setSeqLength(1);
+    setStatusText('PERHATIKAN URUTAN 3D');
+    startWithCountdown();
+  }, [startWithCountdown]);
 
   useEffect(() => {
-    drawStatic();
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === '1' || e.key === 'q' || e.key === 'ArrowUp') handlePadInput(0);
+      else if (e.key === '2' || e.key === 'w' || e.key === 'ArrowRight') handlePadInput(1);
+      else if (e.key === '3' || e.key === 'a' || e.key === 'ArrowLeft') handlePadInput(2);
+      else if (e.key === '4' || e.key === 's' || e.key === 'ArrowDown') handlePadInput(3);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [handlePadInput]);
+
+  const handleSelectPreset = useCallback((preset: CameraPreset3D) => {
+    setCameraPreset(preset);
+    stageRef.current?.setCameraPreset(preset);
   }, []);
 
-  const drawStatic = () => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    ctx.fillStyle = '#09090b';
-    ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
-
-    // Title
-    ctx.fillStyle = '#ffffff';
-    ctx.font = "bold 20px 'Space Grotesk', sans-serif";
-    ctx.textAlign = 'center';
-    ctx.fillText('CYBER SIMON', CANVAS_WIDTH / 2, 60);
-
-    ctx.fillStyle = '#3b82f6';
-    ctx.font = "12px 'JetBrains Mono', monospace";
-    ctx.fillText('IKUTI SEQUENCE POLA LAMPU NEON', CANVAS_WIDTH / 2, 85);
-
-    // Draw static dim pads
-    pads.forEach(pad => {
-      ctx.fillStyle = pad.color;
-      ctx.beginPath();
-      ctx.roundRect(pad.x, pad.y, pad.width, pad.height, 15);
-      ctx.fill();
+  const handleCycleQuality = useCallback(() => {
+    setQuality((prev) => {
+      const next: QualityLevel3D =
+        prev === 'ultra' ? 'balanced' : prev === 'balanced' ? 'performance' : 'ultra';
+      stageRef.current?.setQualityLevel(next);
+      return next;
     });
-  };
+  }, []);
 
-  const startGame = useCallback(() => {
-    updateScore(0);
-    sequenceRef.current = [];
-    playerSequenceRef.current = [];
-    isPlaybackRef.current = false;
-    activePadRef.current = null;
-    particlesRef.current = [];
+  useEffect(() => {
+    const container = mountRef.current;
+    if (!container) return;
 
-    startWithCountdown(() => {
-      lastTimeRef.current = performance.now();
-      addNewSequenceStep();
-      startLoop(gameStep);
-    });
-  }, [startWithCountdown, startLoop, updateScore]);
-
-  const addNewSequenceStep = () => {
-    const randomPad = Math.floor(Math.random() * 4);
-    sequenceRef.current.push(randomPad);
-    startPlayback();
-  };
-
-  const startPlayback = () => {
-    isPlaybackRef.current = true;
-    playbackIndexRef.current = 0;
-    playbackTimerRef.current = 0;
-    activePadRef.current = null;
-  };
-
-  const createPadParticles = (pad: SimonPad) => {
-    const px = pad.x + pad.width / 2;
-    const py = pad.y + pad.height / 2;
-    for (let i = 0; i < 10; i++) {
-      particlesRef.current.push({
-        x: px,
-        y: py,
-        vx: (Math.random() - 0.5) * 4,
-        vy: (Math.random() - 0.5) * 4,
-        color: pad.glowColor,
-        radius: Math.random() * 2.5 + 1,
-        alpha: 1,
-        decay: Math.random() * 0.05 + 0.03,
+    let stage: ThreeStageController;
+    try {
+      stage = new ThreeStageController({
+        container,
+        backgroundColor: 0x080514,
+        fogColor: 0x080514,
+        fogDensity: 0.016,
+        initialPreset: 'isometric',
+        gridPrimaryColor: '#a855f7',
+        gridSecondaryColor: '#110922',
+        cameraPresets: {
+          isometric: { position: [6.8, 9.5, 6.8], lookAt: [0, 0.3, 0], fov: 45 },
+          chase: { position: [0, 7.2, 8.8], lookAt: [0, 0.3, 0], fov: 48 },
+          diorama: { position: [0, 11.8, 1.2], lookAt: [0, 0, 0], fov: 45 }
+        }
       });
-    }
-  };
-
-  const playPadGlow = (padId: number) => {
-    activePadRef.current = padId;
-    audio.playJump(); // Plays audio chime
-    
-    // Trigger sparks
-    const pad = pads[padId];
-    createPadParticles(pad);
-
-    // Turn off glow after a delay
-    setTimeout(() => {
-      if (activePadRef.current === padId) {
-        activePadRef.current = null;
-      }
-    }, 350);
-  };
-
-  const handlePadClick = (padId: number) => {
-    if (gameStateRef.current !== 'playing' || isPlaybackRef.current) return;
-
-    playPadGlow(padId);
-    playerSequenceRef.current.push(padId);
-
-    // Compare
-    const currentIndex = playerSequenceRef.current.length - 1;
-    if (playerSequenceRef.current[currentIndex] !== sequenceRef.current[currentIndex]) {
-      // Game Over!
-      audio.playExplosion();
-      triggerGameOver();
+    } catch {
       return;
     }
 
-    if (playerSequenceRef.current.length === sequenceRef.current.length) {
-      // Completed full turn!
-      addScore(10);
+    stageRef.current = stage;
+    setQuality(stage.getQualityLevel());
 
-      playerSequenceRef.current = [];
-      setTimeout(() => {
-        if (gameStateRef.current === 'playing') {
-          audio.playScore();
-          addNewSequenceStep();
-        }
-      }, 1000);
-    }
-  };
+    // Build Central Synthesizer Base Chassis + 4 Quartz Crystal Pads
+    const baseHub = new THREE.Mesh(
+      new THREE.CylinderGeometry(3.8, 4.1, 0.38, 32),
+      new THREE.MeshPhysicalMaterial({
+        color: 0x0f172a,
+        metalness: 0.85,
+        roughness: 0.22,
+        clearcoat: 0.9
+      })
+    );
+    baseHub.position.y = 0.19;
+    stage.scene.add(baseHub);
 
-  const handleCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (gameStateRef.current !== 'playing' || isPlaybackRef.current) return;
+    const padMeshes: THREE.Mesh[] = [];
+    const padGeo = new THREE.CylinderGeometry(1.18, 1.28, 0.45, 24);
 
-    const rect = canvasRef.current?.getBoundingClientRect();
-    if (!rect) return;
-
-    // Get click coordinates normalized to canvas size
-    const clickX = ((e.clientX - rect.left) / rect.width) * CANVAS_WIDTH;
-    const clickY = ((e.clientY - rect.top) / rect.height) * CANVAS_HEIGHT;
-
-    pads.forEach(pad => {
-      if (
-        clickX >= pad.x &&
-        clickX <= pad.x + pad.width &&
-        clickY >= pad.y &&
-        clickY <= pad.y + pad.height
-      ) {
-        handlePadClick(pad.id);
-      }
-    });
-  };
-
-  const gameStep = useCallback((timestamp: number) => {
-    if (gameStateRef.current !== 'playing') return;
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    // Sequence playback handling
-    if (isPlaybackRef.current) {
-      playbackTimerRef.current += 1.5; // speeds up simulation a bit
-      const stepDuration = 40;
-
-      if (playbackTimerRef.current > stepDuration) {
-        playbackTimerRef.current = 0;
-        
-        if (playbackIndexRef.current < sequenceRef.current.length) {
-          const nextPadId = sequenceRef.current[playbackIndexRef.current];
-          playPadGlow(nextPadId);
-          playbackIndexRef.current++;
-        } else {
-          // Finished playing full sequence, player's turn!
-          isPlaybackRef.current = false;
-          playerSequenceRef.current = [];
-        }
-      }
+    for (let i = 0; i < 4; i++) {
+      const mat = new THREE.MeshPhysicalMaterial({
+        color: PAD_COLORS[i],
+        emissive: PAD_COLORS[i],
+        emissiveIntensity: 0.22,
+        roughness: 0.15,
+        metalness: 0.3,
+        clearcoat: 0.95
+      });
+      const mesh = new THREE.Mesh(padGeo, mat);
+      mesh.position.set(PAD_POSITIONS[i][0], 0.48, PAD_POSITIONS[i][1]);
+      mesh.castShadow = true;
+      mesh.userData.padIdx = i;
+      stage.scene.add(mesh);
+      padMeshes.push(mesh);
     }
 
-    draw(ctx);
-  }, []);
+    const raycaster = new THREE.Raycaster();
+    const pointer = new THREE.Vector2();
 
-  const draw = (ctx: CanvasRenderingContext2D) => {
+    const onPointerDown = (e: PointerEvent) => {
+      if (gameStateRef.current !== 'playing') return;
+      const rect = container.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) return;
+      pointer.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+      pointer.y = -(((e.clientY - rect.top) / rect.height) * 2 - 1);
+      raycaster.setFromCamera(pointer, stage.camera);
+      const hits = raycaster.intersectObjects(padMeshes, false);
+      if (hits.length > 0) {
+        const idx = hits[0].object.userData.padIdx as number | undefined;
+        if (typeof idx === 'number') handlePadInput(idx);
+      }
+    };
 
-    // DRAW
-    ctx.fillStyle = '#09090b';
-    ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+    container.addEventListener('pointerdown', onPointerDown);
 
-    // Draw Title Info
-    ctx.fillStyle = '#ffffff';
-    ctx.font = "bold 18px 'Space Grotesk', sans-serif";
-    ctx.textAlign = 'center';
-    ctx.fillText('CYBER SIMON', CANVAS_WIDTH / 2, 45);
+    stage.startLoop((dt) => {
+      const st = simonRef.current;
 
-    // Draw Pads
-    pads.forEach(pad => {
-      const isGlowing = activePadRef.current === pad.id;
+      if (gameStateRef.current === 'playing') {
+        if (st.litTimer > 0) {
+          st.litTimer -= dt;
+          if (st.litTimer <= 0) st.litPad = -1;
+        }
 
-      if (isGlowing) {
-        ctx.shadowBlur = 25;
-        ctx.shadowColor = pad.glowColor;
-        ctx.fillStyle = pad.glowColor;
-      } else {
-        ctx.fillStyle = pad.color;
+        if (st.showingSeq) {
+          st.showTimer -= dt;
+          if (st.showTimer <= 0) {
+            if (st.showIdx < st.sequence.length) {
+              const pIdx = st.sequence[st.showIdx];
+              st.litPad = pIdx;
+              st.litTimer = 0.38;
+              st.showIdx += 1;
+              st.showTimer = 0.58;
+              audio.playClick?.();
+            } else {
+              st.showingSeq = false;
+              setStatusText('GILIRAN ANDA!');
+            }
+          }
+        }
       }
 
-      ctx.beginPath();
-      ctx.roundRect(pad.x, pad.y, pad.width, pad.height, 16);
-      ctx.fill();
-      ctx.shadowBlur = 0;
+      for (let i = 0; i < 4; i++) {
+        const m = padMeshes[i];
+        const mat = m.material as THREE.MeshPhysicalMaterial;
+        const isLit = st.litPad === i;
+        mat.emissiveIntensity = THREE.MathUtils.damp(
+          mat.emissiveIntensity,
+          isLit ? 1.35 : 0.22,
+          14,
+          dt
+        );
+        m.position.y = THREE.MathUtils.damp(m.position.y, isLit ? 0.62 : 0.45, 14, dt);
+      }
     });
 
-    // Draw center controller hud circle
-    ctx.fillStyle = '#09090b';
-    ctx.strokeStyle = '#1e1b4b';
-    ctx.lineWidth = 4;
-    ctx.beginPath();
-    ctx.arc(CANVAS_WIDTH / 2, 280, 45, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.stroke();
-
-    ctx.fillStyle = isPlaybackRef.current ? '#f59e0b' : '#10b981';
-    ctx.font = "bold 10px 'JetBrains Mono', monospace";
-    ctx.textAlign = 'center';
-    ctx.fillText(isPlaybackRef.current ? 'WATCH' : 'REPEAT', CANVAS_WIDTH / 2, 275);
-
-    ctx.fillStyle = '#ffffff';
-    ctx.font = "bold 16px 'Space Grotesk', sans-serif";
-    ctx.fillText(`${sequenceRef.current.length}`, CANVAS_WIDTH / 2, 296);
-
-    // Draw particle effects
-    particlesRef.current.forEach(p => {
-      p.x += p.vx;
-      p.y += p.vy;
-      p.alpha -= p.decay;
-
-      ctx.fillStyle = p.color;
-      ctx.globalAlpha = Math.max(0, p.alpha);
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
-      ctx.fill();
-    });
-    ctx.globalAlpha = 1.0;
-    particlesRef.current = particlesRef.current.filter(p => p.alpha > 0);
-
-    // Bottom HUD score
-    ctx.fillStyle = '#52525b';
-    ctx.font = "bold 11px 'JetBrains Mono', monospace";
-    ctx.fillText(`SKOR: ${score}`, CANVAS_WIDTH / 2, 475);
-  };
+    return () => {
+      container.removeEventListener('pointerdown', onPointerDown);
+      stage.dispose();
+      stageRef.current = null;
+    };
+  }, [handlePadInput]);
 
   return (
-    <GameContainer aspect="portrait" maxWidth="sm">
-      {gameState === 'playing' && (
-        <GameHUD 
-          stats={[
-            { id: 'score', label: 'SKOR', value: score, emphasized: true }
-          ]} 
-        />
-      )}
+    <div className="relative w-full h-full min-h-[460px] bg-slate-950 overflow-hidden rounded-2xl border border-purple-500/20">
+      <div ref={mountRef} className="absolute inset-0 w-full h-full cursor-pointer" />
+
+      <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex flex-wrap items-center justify-between gap-2 p-3.5">
+        <div className="flex items-center gap-3 rounded-xl border border-white/10 bg-slate-950/85 px-3.5 py-2 text-xs text-slate-200 tabular-nums">
+          <span className="flex items-center gap-1 font-semibold text-purple-400">
+            <Brain className="w-3.5 h-3.5" /> PANJANG NADA: {seqLength}
+          </span>
+          <span aria-hidden="true">·</span>
+          <span>SKOR: <strong className="text-white">{score}</strong></span>
+        </div>
+
+        <div className="flex items-center gap-1.5 rounded-xl border border-white/10 bg-slate-950/85 px-3.5 py-2 text-xs font-semibold text-amber-400">
+          <Sparkles className="w-3.5 h-3.5" /> {statusText}
+        </div>
+      </div>
+
+      <ThreeDockOverlay
+        cameraPreset={cameraPreset}
+        onSelectPreset={handleSelectPreset}
+        quality={quality}
+        onCycleQuality={handleCycleQuality}
+        extraControls={
+          <span className="hidden sm:inline-flex items-center gap-1 text-[11px] text-slate-400 px-2 whitespace-nowrap shrink-0">
+            <Zap className="w-3 h-3 text-purple-400" /> Klik Kristal 3D atau Tekan 1–4 Sesuai Urutan Cahaya
+          </span>
+        }
+      />
 
       <GameOverlay
         gameState={gameState}
         score={score}
+        highScore={highScore}
         countdown={countdown}
-        onStart={startGame}
-        onRestart={startGame}
-        instructions="IKUTI SEQUENCE POLA LAMPU NEON. Ketuk langsung pada panel menyala."
+        onStart={handleStart}
+        onRestart={handleStart}
+        title="Cyber Simon 3D"
+        description="Hafalkan dan ulangi urutan pendaran kristal kuarsa 3D di atas konsol sintetis!"
+        themeColor="purple"
       />
-
-      <div className="relative w-full aspect-[4/5] mx-auto bg-zinc-950 rounded-xl border-4 border-zinc-900 shadow-2xl overflow-hidden cursor-pointer">
-        <canvas
-          ref={canvasRef}
-          width={CANVAS_WIDTH}
-          height={CANVAS_HEIGHT}
-          onClick={handleCanvasClick}
-          className="w-full h-full display-block bg-zinc-950 cursor-pointer"
-        />
-      </div>
-    </GameContainer>
+    </div>
   );
 }

@@ -8,6 +8,7 @@ import {
   StoredSuspiciousScore,
   AnomalySeverity
 } from './db';
+import { recordSecurityStrike, getFlaggedAndBannedUsers, getSecurityEvents } from './security';
 
 export interface RecordSuspiciousScoreParams extends Omit<StoredSuspiciousScore, 'id' | 'timestamp'> {
   severity?: AnomalySeverity;
@@ -34,6 +35,17 @@ export async function recordSuspiciousScore(entry: RecordSuspiciousScoreParams):
     await db.collection('suspiciousScores').doc(fullEntry.id).set(fullEntry);
   } else {
     memoryStore.suspiciousScores.push(fullEntry);
+  }
+
+  // Trigger automated strike & account suspension policy for hard anti-cheat violations
+  if (!entry.flaggedOnly && entry.userId && (fullEntry.severity === 'CRITICAL' || fullEntry.severity === 'HIGH')) {
+    await recordSecurityStrike(
+      entry.userId,
+      entry.reason,
+      fullEntry.severity,
+      false,
+      entry.clientIp
+    ).catch(() => {});
   }
 
   return fullEntry;
@@ -125,10 +137,14 @@ export async function getRealAdminStats(): Promise<{
   };
   totalLedgerTransactions: number;
   activeSessionsCount: number;
+  bannedUsersCount: number;
+  securityEventsCount: number;
   serverTime: string;
 }> {
   assertPersistenceOperational();
   const suspicious = await getSuspiciousScores({ limit: 100 });
+  const flaggedUsers = await getFlaggedAndBannedUsers(100);
+  const securityEvents = await getSecurityEvents(50);
 
   const severityBreakdown = {
     critical: 0,
@@ -164,6 +180,8 @@ export async function getRealAdminStats(): Promise<{
     }
   }
 
+  const bannedUsersCount = flaggedUsers.filter(u => u.isBanned).length;
+
   return {
     success: true,
     suspiciousScoresCount: suspicious.length,
@@ -171,6 +189,9 @@ export async function getRealAdminStats(): Promise<{
     severityBreakdown,
     totalLedgerTransactions,
     activeSessionsCount,
+    bannedUsersCount,
+    securityEventsCount: securityEvents.length,
     serverTime: new Date().toISOString()
   };
 }
+

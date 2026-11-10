@@ -1,37 +1,35 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
+import * as THREE from 'three';
+import { GameComponentProps } from '../../types';
 import { audio } from '../../utils/audio';
 import { useGameEngine } from '../../hooks/useGameEngine';
-import { GameContainer } from '../gameplay/GameContainer';
-import { GameHUD } from '../gameplay/GameHUD';
 import { GameOverlay } from '../gameplay/GameOverlay';
-import { RefreshCw } from 'lucide-react';
+import { ThreeDockOverlay } from '../gameplay/ThreeDockOverlay';
+import {
+  ThreeStageController,
+  CameraPreset3D,
+  QualityLevel3D
+} from '../../utils/threeStage';
+import { Gem, Timer, Zap } from 'lucide-react';
 
-interface GameProps {
-  onGameOver: (score: number) => void;
-  onScoreUpdate: (score: number) => void;
-  highScore: number;
+const GRID_N = 6;
+const GEM_COLORS = [0xec4899, 0x06b6d4, 0xfacc15, 0x22c55e, 0xa855f7];
+
+interface GemCell3D {
+  r: number;
+  c: number;
+  type: number; // 0..4
+  mesh: THREE.Mesh;
 }
 
-type BlockColor = 'red' | 'blue' | 'yellow' | 'green' | 'purple';
+export default function BlockMatchGame({
+  onGameOver,
+  onScoreUpdate,
+  highScore
+}: GameComponentProps) {
+  const mountRef = useRef<HTMLDivElement | null>(null);
+  const stageRef = useRef<ThreeStageController | null>(null);
 
-interface GridCell {
-  id: string;
-  color: BlockColor;
-  isMatched: boolean;
-}
-
-const COLORS: BlockColor[] = ['red', 'blue', 'yellow', 'green', 'purple'];
-const COLOR_STYLES: Record<BlockColor, string> = {
-  red: 'bg-red-500 border-red-400 shadow-[0_0_10px_rgba(239,68,68,0.4)] text-red-100',
-  blue: 'bg-blue-500 border-blue-400 shadow-[0_0_10px_rgba(59,130,246,0.4)] text-blue-100',
-  yellow: 'bg-yellow-500 border-yellow-400 shadow-[0_0_10px_rgba(234,179,8,0.4)] text-yellow-100',
-  green: 'bg-emerald-500 border-emerald-400 shadow-[0_0_10px_rgba(16,185,129,0.4)] text-emerald-100',
-  purple: 'bg-purple-500 border-purple-400 shadow-[0_0_10px_rgba(168,85,247,0.4)] text-purple-100',
-};
-
-const GRID_SIZE = 6;
-
-export default function BlockMatchGame({ onGameOver, onScoreUpdate, highScore }: GameProps) {
   const {
     gameState,
     score,
@@ -39,215 +37,313 @@ export default function BlockMatchGame({ onGameOver, onScoreUpdate, highScore }:
     startWithCountdown,
     countdown,
     triggerGameOver,
-    pauseGame,
-    resumeGame,
+    scoreRef
   } = useGameEngine({
-    gameId: 'blockmatch',
+    gameId: 'block-match',
     onGameOver,
-    onScoreUpdate,
+    onScoreUpdate
   });
 
-  const [grid, setGrid] = useState<GridCell[][]>([]);
-  const [movesLeft, setMovesLeft] = useState(25);
-  const [hasValidMoves, setHasValidMoves] = useState(true);
-  const [combo, setCombo] = useState(1);
+  const [movesLeft, setMovesLeft] = useState(20);
+  const [combo, setCombo] = useState(0);
+  const [cameraPreset, setCameraPreset] = useState<CameraPreset3D>('isometric');
+  const [quality, setQuality] = useState<QualityLevel3D>('ultra');
 
-  const initGrid = (): GridCell[][] => {
-    const newGrid: GridCell[][] = [];
-    for (let r = 0; r < GRID_SIZE; r++) {
-      const row: GridCell[] = [];
-      for (let c = 0; c < GRID_SIZE; c++) {
-        row.push({
-          id: `${r}-${c}-${Math.random()}`,
-          color: COLORS[Math.floor(Math.random() * COLORS.length)],
-          isMatched: false,
-        });
-      }
-      newGrid.push(row);
-    }
-    return newGrid;
-  };
+  const gameStateRef = useRef(gameState);
+  useEffect(() => {
+    gameStateRef.current = gameState;
+  }, [gameState]);
 
-  const startNewGame = () => {
-    startWithCountdown(() => {
-      setMovesLeft(25);
-      setCombo(1);
-      setGrid(initGrid());
-      setHasValidMoves(true);
-    });
-  };
+  const matchStateRef = useRef({
+    moves: 20,
+    selected: null as { r: number; c: number } | null
+  });
 
-  // BFS / Flood-fill to find connected matching blocks
-  const getConnectedBlocks = (startRow: number, startCol: number, color: BlockColor, currentGrid: GridCell[][]): [number, number][] => {
-    const queue: [number, number][] = [[startRow, startCol]];
-    const connected: [number, number][] = [];
-    const visited = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(false));
-    visited[startRow][startCol] = true;
+  const cellsRef = useRef<GemCell3D[][]>([]);
+  const syncCellAppearanceRef = useRef<() => void>(() => {});
 
-    const dirs = [[-1, 0], [1, 0], [0, -1], [0, 1]];
-
-    while (queue.length > 0) {
-      const [r, c] = queue.shift()!;
-      connected.push([r, c]);
-
-      for (const [dr, dc] of dirs) {
-        const nr = r + dr;
-        const nc = c + dc;
-
-        if (nr >= 0 && nr < GRID_SIZE && nc >= 0 && nc < GRID_SIZE) {
-          if (!visited[nr][nc] && currentGrid[nr][nc].color === color) {
-            visited[nr][nc] = true;
-            queue.push([nr, nc]);
-          }
+  const handleStart = useCallback(() => {
+    matchStateRef.current = { moves: 20, selected: null };
+    setMovesLeft(20);
+    setCombo(0);
+    for (let r = 0; r < GRID_N; r++) {
+      for (let c = 0; c < GRID_N; c++) {
+        if (cellsRef.current[r]?.[c]) {
+          cellsRef.current[r][c].type = Math.floor(Math.random() * GEM_COLORS.length);
         }
       }
     }
+    syncCellAppearanceRef.current();
+    startWithCountdown();
+  }, [startWithCountdown]);
 
-    return connected;
-  };
+  const handleSelectPreset = useCallback((preset: CameraPreset3D) => {
+    setCameraPreset(preset);
+    stageRef.current?.setCameraPreset(preset);
+  }, []);
 
-  const checkAnyMovesLeft = (currentGrid: GridCell[][]): boolean => {
-    for (let r = 0; r < GRID_SIZE; r++) {
-      for (let c = 0; c < GRID_SIZE; c++) {
-        const matches = getConnectedBlocks(r, c, currentGrid[r][c].color, currentGrid);
-        if (matches.length >= 2) return true;
-      }
-    }
-    return false;
-  };
+  const handleCycleQuality = useCallback(() => {
+    setQuality((prev) => {
+      const next: QualityLevel3D =
+        prev === 'ultra' ? 'balanced' : prev === 'balanced' ? 'performance' : 'ultra';
+      stageRef.current?.setQualityLevel(next);
+      return next;
+    });
+  }, []);
 
-  const handleCellClick = (r: number, c: number) => {
-    if (gameState !== 'playing' || movesLeft <= 0) return;
+  useEffect(() => {
+    const container = mountRef.current;
+    if (!container) return;
 
-    const targetColor = grid[r][c].color;
-    const matchingCoordinates = getConnectedBlocks(r, c, targetColor, grid);
-
-    // Blast only if 2 or more are connected
-    if (matchingCoordinates.length < 2) {
-      audio.playHit();
+    let stage: ThreeStageController;
+    try {
+      stage = new ThreeStageController({
+        container,
+        backgroundColor: 0x0c0512,
+        fogColor: 0x0c0512,
+        fogDensity: 0.016,
+        initialPreset: 'isometric',
+        gridPrimaryColor: '#ec4899',
+        gridSecondaryColor: '#160820',
+        cameraPresets: {
+          isometric: { position: [7.5, 10.5, 7.5], lookAt: [0, 0.3, 0], fov: 45 },
+          chase: { position: [0, 7.8, 9.5], lookAt: [0, 0.3, 0], fov: 48 },
+          diorama: { position: [0, 13.5, 1.4], lookAt: [0, 0, 0], fov: 45 }
+        }
+      });
+    } catch {
       return;
     }
 
-    audio.playLaser();
-    
-    // Calculate points
-    const earnedPoints = matchingCoordinates.length * 10 * combo;
-    addScore(earnedPoints);
-    setMovesLeft(prev => prev - 1);
+    stageRef.current = stage;
+    setQuality(stage.getQualityLevel());
 
-    // Apply blast (nullify color)
-    const nextGrid = grid.map(row => row.map(cell => ({ ...cell })));
-    for (const [br, bc] of matchingCoordinates) {
-      nextGrid[br][bc].isMatched = true;
-    }
+    const step = 1.15;
+    const gemGeos = [
+      new THREE.OctahedronGeometry(0.46, 0),
+      new THREE.DodecahedronGeometry(0.44, 0),
+      new THREE.IcosahedronGeometry(0.45, 0),
+      new THREE.BoxGeometry(0.66, 0.66, 0.66),
+      new THREE.ConeGeometry(0.45, 0.78, 6)
+    ];
 
-    // Apply Gravity (blocks fall down)
-    for (let col = 0; col < GRID_SIZE; col++) {
-      // Collect non-empty cells in the column from bottom to top
-      const columnCells: GridCell[] = [];
-      for (let row = GRID_SIZE - 1; row >= 0; row--) {
-        if (!nextGrid[row][col].isMatched) {
-          columnCells.push(nextGrid[row][col]);
-        }
-      }
+    const grid: GemCell3D[][] = [];
+    const allMeshes: THREE.Mesh[] = [];
 
-      // Fill remaining top slots with brand-new cells
-      while (columnCells.length < GRID_SIZE) {
-        columnCells.push({
-          id: `new-${col}-${Math.random()}`,
-          color: COLORS[Math.floor(Math.random() * COLORS.length)],
-          isMatched: false,
+    for (let r = 0; r < GRID_N; r++) {
+      const row: GemCell3D[] = [];
+      for (let c = 0; c < GRID_N; c++) {
+        const t = Math.floor(Math.random() * GEM_COLORS.length);
+        const mat = new THREE.MeshPhysicalMaterial({
+          color: GEM_COLORS[t],
+          emissive: GEM_COLORS[t],
+          emissiveIntensity: 0.4,
+          roughness: 0.15,
+          metalness: 0.25,
+          clearcoat: 0.95
         });
+        const mesh = new THREE.Mesh(gemGeos[t], mat);
+        mesh.position.set((c - (GRID_N - 1) / 2) * step, 0.55, (r - (GRID_N - 1) / 2) * step);
+        mesh.castShadow = true;
+        stage.scene.add(mesh);
+
+        const cell: GemCell3D = { r, c, type: t, mesh };
+        mesh.userData.cell = cell;
+        row.push(cell);
+        allMeshes.push(mesh);
       }
-
-      // Re-populate nextGrid for this column
-      for (let row = GRID_SIZE - 1; row >= 0; row--) {
-        nextGrid[row][col] = columnCells[GRID_SIZE - 1 - row];
-      }
+      grid.push(row);
     }
+    cellsRef.current = grid;
 
-    setGrid(nextGrid);
-
-    // Trigger combo increase
-    if (matchingCoordinates.length >= 4) {
-      setCombo(prev => prev + 1);
-    } else {
-      setCombo(1);
-    }
-
-    // Check if we ran out of moves or if board is deadlocked
-    setTimeout(() => {
-      if (!checkAnyMovesLeft(nextGrid)) {
-        // Automatically reshuffle board if no moves are left but turns are left!
-        if (movesLeft > 1) {
-          audio.playLevelUp();
-          let shuffledGrid = nextGrid;
-          let safety = 0;
-          do {
-            shuffledGrid = initGrid();
-            safety++;
-          } while (!checkAnyMovesLeft(shuffledGrid) && safety < 10);
-          setGrid(shuffledGrid);
-        } else {
-          endGame();
+    syncCellAppearanceRef.current = () => {
+      const sel = matchStateRef.current.selected;
+      for (let r = 0; r < GRID_N; r++) {
+        for (let c = 0; c < GRID_N; c++) {
+          const cell = grid[r][c];
+          cell.mesh.geometry = gemGeos[cell.type];
+          const mat = cell.mesh.material as THREE.MeshPhysicalMaterial;
+          mat.color.setHex(GEM_COLORS[cell.type]);
+          mat.emissive.setHex(GEM_COLORS[cell.type]);
+          const isSel = sel && sel.r === r && sel.c === c;
+          mat.emissiveIntensity = isSel ? 1.1 : 0.4;
+          cell.mesh.scale.setScalar(isSel ? 1.28 : 1.0);
         }
       }
-    }, 300);
-  };
+    };
 
-  const endGame = () => {
-    triggerGameOver(score);
-  };
+    const resolveMatches = (): number => {
+      const matched = Array.from({ length: GRID_N }, () => Array(GRID_N).fill(false));
+      // Horizontal & vertical 3+ matches
+      for (let r = 0; r < GRID_N; r++) {
+        for (let c = 0; c < GRID_N - 2; c++) {
+          const t = grid[r][c].type;
+          if (grid[r][c + 1].type === t && grid[r][c + 2].type === t) {
+            matched[r][c] = matched[r][c + 1] = matched[r][c + 2] = true;
+          }
+        }
+      }
+      for (let c = 0; c < GRID_N; c++) {
+        for (let r = 0; r < GRID_N - 2; r++) {
+          const t = grid[r][c].type;
+          if (grid[r + 1][c].type === t && grid[r + 2][c].type === t) {
+            matched[r][c] = matched[r + 1][c] = matched[r + 2][c] = true;
+          }
+        }
+      }
 
-  useEffect(() => {
-    if (gameState === 'playing' && movesLeft <= 0) {
-      endGame();
-    }
-  }, [movesLeft, gameState]);
+      let count = 0;
+      for (let r = 0; r < GRID_N; r++) {
+        for (let c = 0; c < GRID_N; c++) {
+          if (matched[r][c]) {
+            count++;
+            const cell = grid[r][c];
+            stage.particles.burst(
+              cell.mesh.position.x,
+              0.6,
+              cell.mesh.position.z,
+              10,
+              GEM_COLORS[cell.type],
+              6.5
+            );
+            cell.type = Math.floor(Math.random() * GEM_COLORS.length);
+          }
+        }
+      }
+      return count;
+    };
+
+    const onSelectCell = (cell: GemCell3D) => {
+      if (gameStateRef.current !== 'playing') return;
+      const st = matchStateRef.current;
+      if (!st.selected) {
+        st.selected = { r: cell.r, c: cell.c };
+        audio.playClick?.();
+        syncCellAppearanceRef.current();
+        return;
+      }
+
+      const prev = grid[st.selected.r][st.selected.c];
+      const dist = Math.abs(prev.r - cell.r) + Math.abs(prev.c - cell.c);
+      if (dist === 1) {
+        // Swap types
+        const tmp = prev.type;
+        prev.type = cell.type;
+        cell.type = tmp;
+        st.selected = null;
+
+        let totalCleared = resolveMatches();
+        if (totalCleared === 0) {
+          // Even if no automatic 3-line formed, clear matching connected cluster of clicked gem or award tactical swap
+          totalCleared = 3;
+          stage.particles.burst(
+            cell.mesh.position.x,
+            0.6,
+            cell.mesh.position.z,
+            18,
+            GEM_COLORS[cell.type],
+            7
+          );
+          cell.type = Math.floor(Math.random() * GEM_COLORS.length);
+          prev.type = Math.floor(Math.random() * GEM_COLORS.length);
+        }
+
+        st.moves -= 1;
+        setMovesLeft(st.moves);
+        setCombo((c) => c + 1);
+        addScore(totalCleared * 20);
+        audio.playCoin?.();
+        stage.triggerTrauma(0.22);
+        syncCellAppearanceRef.current();
+
+        if (st.moves <= 0) {
+          triggerGameOver(scoreRef.current + totalCleared * 20);
+        }
+      } else {
+        st.selected = { r: cell.r, c: cell.c };
+        audio.playClick?.();
+        syncCellAppearanceRef.current();
+      }
+    };
+
+    const raycaster = new THREE.Raycaster();
+    const pointer = new THREE.Vector2();
+
+    const onPointerDown = (e: PointerEvent) => {
+      if (gameStateRef.current !== 'playing') return;
+      const rect = container.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) return;
+      pointer.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+      pointer.y = -(((e.clientY - rect.top) / rect.height) * 2 - 1);
+      raycaster.setFromCamera(pointer, stage.camera);
+      const hits = raycaster.intersectObjects(allMeshes, false);
+      if (hits.length > 0) {
+        const hitCell = hits[0].object.userData.cell as GemCell3D | undefined;
+        if (hitCell) onSelectCell(hitCell);
+      }
+    };
+
+    container.addEventListener('pointerdown', onPointerDown);
+
+    stage.startLoop((dt, elapsed) => {
+      for (const m of allMeshes) {
+        m.rotation.y += dt * 1.6;
+        m.position.y = 0.55 + Math.sin(elapsed * 3 + m.position.x) * 0.06;
+      }
+    });
+
+    return () => {
+      container.removeEventListener('pointerdown', onPointerDown);
+      stage.dispose();
+      stageRef.current = null;
+    };
+  }, [addScore, scoreRef, triggerGameOver]);
 
   return (
-    <GameContainer aspect="square" maxWidth="sm">
-      {(gameState === 'playing' || gameState === 'paused') && (
-        <GameHUD 
-          stats={[
-            { id: 'moves', label: 'LANGKAH', value: `${movesLeft} KALI`, emphasized: movesLeft <= 5 },
-            { id: 'combo', label: 'KOMBO', value: `x${combo}` },
-            { id: 'score', label: 'SKOR', value: score, emphasized: true }
-          ]} 
-        />
-      )}
+    <div className="relative w-full h-full min-h-[460px] bg-slate-950 overflow-hidden rounded-2xl border border-pink-500/20">
+      <div ref={mountRef} className="absolute inset-0 w-full h-full cursor-pointer" />
+
+      <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex flex-wrap items-center justify-between gap-2 p-3.5">
+        <div className="flex items-center gap-3 rounded-xl border border-white/10 bg-slate-950/85 px-3.5 py-2 text-xs text-slate-200 tabular-nums">
+          <span className="flex items-center gap-1 font-semibold text-pink-400">
+            <Gem className="w-3.5 h-3.5" /> SKOR: {score}
+          </span>
+          {combo > 1 && (
+            <>
+              <span aria-hidden="true">·</span>
+              <span className="text-amber-400 font-semibold">{combo}x CHAIN</span>
+            </>
+          )}
+        </div>
+
+        <div className="flex items-center gap-1.5 rounded-xl border border-white/10 bg-slate-950/85 px-3.5 py-2 text-xs font-semibold text-cyan-400 tabular-nums">
+          <Timer className="w-3.5 h-3.5" /> LANGKAH: {movesLeft}
+        </div>
+      </div>
+
+      <ThreeDockOverlay
+        cameraPreset={cameraPreset}
+        onSelectPreset={handleSelectPreset}
+        quality={quality}
+        onCycleQuality={handleCycleQuality}
+        extraControls={
+          <span className="hidden sm:inline-flex items-center gap-1 text-[11px] text-slate-400 px-2 whitespace-nowrap shrink-0">
+            <Zap className="w-3 h-3 text-pink-400" /> Klik 2 Kristal Geometri 3D Berdampingan untuk Menukar & Meledakkan Kombo
+          </span>
+        }
+      />
 
       <GameOverlay
         gameState={gameState}
         score={score}
         highScore={highScore}
-        onStart={startNewGame}
-        onRestart={startNewGame}
-        onResume={resumeGame}
         countdown={countdown}
-        instructions="Hancurkan barisan balok neon berwarna sama yang saling terhubung."
+        onStart={handleStart}
+        onRestart={handleStart}
+        title="Neon Block Match-3 3D"
+        description="Tukar dan cocokkan permata kristal polihedral 3D untuk memicu ledakan berantai!"
+        themeColor="pink"
       />
-
-      <div className="grid grid-cols-6 gap-1 sm:gap-2 p-2 sm:p-3 bg-zinc-900 border-2 border-zinc-800 rounded-3xl w-full max-w-[400px] aspect-square mx-auto">
-        {grid.map((row, r) =>
-          row.map((cell, c) => (
-            <button
-              key={cell.id}
-              onClick={() => handleCellClick(r, c)}
-              className={`w-full aspect-square rounded-xl border-2 cursor-pointer transition-all duration-300 hover:scale-105 active:scale-95 ${
-                COLOR_STYLES[cell.color]
-              }`}
-            />
-          ))
-        )}
-      </div>
-
-      {gameState === 'playing' && (
-        <div className="game-mobile-controls mt-4 flex items-center justify-center gap-2 text-zinc-500 font-mono text-xs uppercase tracking-wider mx-auto">
-          <RefreshCw size={10} className="animate-spin text-zinc-600" />
-          Papan otomatis diacak kembali jika menemui jalan buntu.
-        </div>
-      )}
-    </GameContainer>
+    </div>
   );
 }

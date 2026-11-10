@@ -11,3 +11,5 @@ export * from './leaderboard';
 export * from './suspiciousScores';
 export * from './killSwitches';
 export * from './reconciliation';
+export * from './security';
+

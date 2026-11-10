@@ -9,16 +9,40 @@ export interface StoredGameSession {
   userId: string;
   gameId: CanonicalGameId;
   nonce: string;
+  signature?: string;
   startTime: number;
   expiresAt: number;
   consumed: boolean;
   consumedAt?: number;
+  invalidatedReason?: string;
   isRanked?: boolean;
   seasonId?: string;
   gameVersion?: string;
   balanceVersion?: string;
   rulesetVersion?: string;
   createdAt?: number;
+}
+
+export interface StoredUserSecurity {
+  userId: string;
+  strikeCount: number;
+  isBanned: boolean;
+  banReason?: string;
+  bannedAt?: string;
+  banExpiresAt?: number | null;
+  bannedBy?: string;
+  lastViolationAt?: string;
+}
+
+export interface StoredSecurityEvent {
+  id: string;
+  userId?: string;
+  clientIp?: string;
+  eventType: string;
+  severity: AnomalySeverity;
+  reason: string;
+  path?: string;
+  timestamp: string;
 }
 
 export interface StoredEconomy {
@@ -81,6 +105,7 @@ export interface StoredSuspiciousScore {
   velocity: number;
   reason: string;
   severity?: AnomalySeverity;
+  flaggedOnly?: boolean;
   requestId?: string;
   clientIp?: string;
   timestamp: string;
@@ -142,6 +167,8 @@ export class InMemoryStore {
   ledger: StoredEconomyTransaction[] = [];
   claimedRewards = new Map<string, Set<string>>();
   gameHistory: StoredGameHistoryEntry[] = [];
+  userSecurity = new Map<string, StoredUserSecurity>();
+  securityEvents: StoredSecurityEvent[] = [];
 
   clear() {
     this.sessions.clear();
@@ -158,6 +185,8 @@ export class InMemoryStore {
     this.ledger = [];
     this.claimedRewards.clear();
     this.gameHistory = [];
+    this.userSecurity.clear();
+    this.securityEvents = [];
   }
 }
 

@@ -34,9 +34,8 @@ export const GamePageHeader: React.FC<GamePageHeaderProps> = React.memo(({
 }) => {
   return (
     <div 
-      className="relative flex-none h-12 sm:h-14 w-full z-40 flex items-center justify-between px-3 sm:px-4 bg-zinc-950/95 backdrop-blur-md border-b border-white/[0.06] shadow-sm select-none"
+      className="relative flex-none min-h-[3rem] sm:min-h-[3.5rem] h-auto w-full z-40 flex items-center justify-between px-3 sm:px-4 py-2 bg-zinc-950/95 backdrop-blur-md border-b border-white/[0.06] shadow-sm select-none pt-safe"
       id="arcade-top-navbar"
-      style={{ paddingTop: 'env(safe-area-inset-top)' }}
     >
       {/* Left: Back & Game Info */}
       <div className="flex items-center gap-2 sm:gap-3">

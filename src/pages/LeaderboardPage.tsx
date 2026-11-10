@@ -156,75 +156,75 @@ export default function LeaderboardPage({ games, currentUsername }: LeaderboardP
 
       {/* Loading state or display leaderboard */}
       {loading ? (
-        <div className="p-12 text-center text-zinc-500 text-xs font-mono animate-pulse border border-zinc-800/50 border-dashed rounded-3xl bg-zinc-950/20">
+        <div className="p-12 text-center text-zinc-500 text-xs font-mono animate-pulse border border-zinc-800/50 border-dashed rounded-3xl bg-zinc-950/20" aria-live="polite">
           Mengambil data skor siber yang dienkripsi dari cloud...
         </div>
       ) : leaderboard.length === 0 ? (
-        <div className="p-12 text-center text-zinc-500 text-xs italic border border-zinc-800/50 border-dashed rounded-3xl bg-zinc-950/20">
+        <div className="p-12 text-center text-zinc-500 text-xs italic border border-zinc-800/50 border-dashed rounded-3xl bg-zinc-950/20" aria-live="polite">
           Belum ada data skor terekam untuk game "{selectedGame?.title || 'ini'}" di kategori ini.
         </div>
       ) : (
-        <div className="space-y-6">
+        <div className="space-y-6" aria-live="polite">
           {/* Podium for Top 3 (Rendered only on page 1) */}
           {page === 1 && topThree.length > 0 && (
-            <div className="grid grid-cols-3 gap-2 sm:gap-4 pt-2 pb-2 px-1 max-w-lg sm:max-w-2xl mx-auto items-end">
+            <div className="grid grid-cols-3 gap-1.5 xs:gap-2 sm:gap-4 pt-2 pb-2 px-1 max-w-lg sm:max-w-2xl mx-auto items-end">
               {/* 2nd Place */}
               {topThree[1] ? (
                 <div className="flex flex-col items-center order-1">
-                  <div className="relative mb-1.5 sm:mb-2">
-                    <span className="text-2xl sm:text-3xl p-1.5 sm:p-2 bg-[#141824] border border-white/[0.08] rounded-xl sm:rounded-2xl block relative">
+                  <div className="relative mb-1 sm:mb-2">
+                    <span className="text-xl xs:text-2xl sm:text-3xl p-1 sm:p-2 bg-[#141824] border border-white/[0.08] rounded-xl sm:rounded-2xl block relative">
                       {topThree[1].playerAvatar || '👾'}
                     </span>
-                    <span className="absolute -top-2 -right-2 w-5 h-5 sm:w-6 sm:h-6 bg-zinc-400 text-zinc-950 font-black text-[10px] sm:text-xs font-mono rounded-full flex items-center justify-center border border-zinc-500 shadow">
+                    <span className="absolute -top-1.5 -right-1.5 w-4 h-4 xs:w-5 xs:h-5 sm:w-6 sm:h-6 bg-zinc-400 text-zinc-950 font-black text-[9px] xs:text-[10px] sm:text-xs font-mono rounded-full flex items-center justify-center border border-zinc-500 shadow">
                       2
                     </span>
                   </div>
                   <div className="text-center w-full min-w-0">
-                    <h3 className="font-bold text-[11px] sm:text-xs text-zinc-300 truncate">{topThree[1].playerName}</h3>
-                    <p className="font-mono text-[10px] sm:text-[11px] text-amber-400 font-bold mt-0.5">{topThree[1].score.toLocaleString()}</p>
+                    <h3 className="font-bold text-[10px] xs:text-[11px] sm:text-xs text-zinc-300 truncate max-w-[65px] xs:max-w-[85px] sm:max-w-[140px] mx-auto">{topThree[1].playerName}</h3>
+                    <p className="font-mono text-[9px] xs:text-[10px] sm:text-[11px] text-amber-400 font-bold mt-0.5">{topThree[1].score.toLocaleString()}</p>
                   </div>
-                  <div className="w-full h-8 sm:h-12 bg-zinc-800/40 border-t border-zinc-700/50 rounded-t-lg mt-2"></div>
+                  <div className="w-full h-8 sm:h-12 bg-zinc-800/40 border-t border-zinc-700/50 rounded-t-lg mt-1.5"></div>
                 </div>
               ) : <div className="order-1" />}
 
               {/* 1st Place */}
               {topThree[0] && (
                 <div className="flex flex-col items-center order-2">
-                  <div className="relative mb-1.5 sm:mb-2">
-                    <span className="text-3xl sm:text-4xl p-2 sm:p-2.5 bg-[#141824] border-2 border-amber-500 rounded-2xl sm:rounded-3xl block relative shadow-lg shadow-amber-500/15">
+                  <div className="relative mb-1 sm:mb-2">
+                    <span className="text-2xl xs:text-3xl sm:text-4xl p-1.5 sm:p-2.5 bg-[#141824] border-2 border-amber-500 rounded-2xl sm:rounded-3xl block relative shadow-lg shadow-amber-500/15">
                       {topThree[0].playerAvatar || '👑'}
                     </span>
-                    <span className="absolute -top-2.5 -right-2.5 w-6 h-6 sm:w-7 sm:h-7 bg-amber-500 text-zinc-950 font-black text-xs sm:text-sm font-mono rounded-full flex items-center justify-center border border-amber-400 shadow">
+                    <span className="absolute -top-2 -right-2 w-5 h-5 xs:w-6 xs:h-6 sm:w-7 sm:h-7 bg-amber-500 text-zinc-950 font-black text-[10px] xs:text-xs sm:text-sm font-mono rounded-full flex items-center justify-center border border-amber-400 shadow">
                       1
                     </span>
                   </div>
                   <div className="text-center w-full min-w-0">
-                    <h3 className="font-bold text-xs sm:text-sm text-white truncate flex items-center justify-center gap-1">
+                    <h3 className="font-bold text-[11px] xs:text-xs sm:text-sm text-white truncate max-w-[75px] xs:max-w-[100px] sm:max-w-[150px] mx-auto flex items-center justify-center gap-0.5">
                       <span className="truncate">{topThree[0].playerName}</span>
-                      <CheckCircle size={12} className="text-amber-400 shrink-0" />
+                      <CheckCircle size={11} className="text-amber-400 shrink-0" />
                     </h3>
-                    <p className="font-mono text-xs text-amber-400 font-black mt-0.5">{topThree[0].score.toLocaleString()} pts</p>
+                    <p className="font-mono text-[10px] xs:text-xs text-amber-400 font-black mt-0.5">{topThree[0].score.toLocaleString()} pts</p>
                   </div>
-                  <div className="w-full h-12 sm:h-16 bg-amber-500/15 border-t-2 border-amber-500/40 rounded-t-lg mt-2"></div>
+                  <div className="w-full h-12 sm:h-16 bg-amber-500/15 border-t-2 border-amber-500/40 rounded-t-lg mt-1.5"></div>
                 </div>
               )}
 
               {/* 3rd Place */}
               {topThree[2] ? (
                 <div className="flex flex-col items-center order-3">
-                  <div className="relative mb-1.5 sm:mb-2">
-                    <span className="text-2xl sm:text-3xl p-1.5 sm:p-2 bg-[#141824] border border-white/[0.08] rounded-xl sm:rounded-2xl block relative">
+                  <div className="relative mb-1 sm:mb-2">
+                    <span className="text-xl xs:text-2xl sm:text-3xl p-1 sm:p-2 bg-[#141824] border border-white/[0.08] rounded-xl sm:rounded-2xl block relative">
                       {topThree[2].playerAvatar || '👾'}
                     </span>
-                    <span className="absolute -top-2 -right-2 w-5 h-5 sm:w-6 sm:h-6 bg-amber-700 text-white font-black text-[10px] sm:text-xs font-mono rounded-full flex items-center justify-center border border-amber-600 shadow">
+                    <span className="absolute -top-1.5 -right-1.5 w-4 h-4 xs:w-5 xs:h-5 sm:w-6 sm:h-6 bg-amber-700 text-white font-black text-[9px] xs:text-[10px] sm:text-xs font-mono rounded-full flex items-center justify-center border border-amber-600 shadow">
                       3
                     </span>
                   </div>
                   <div className="text-center w-full min-w-0">
-                    <h3 className="font-bold text-[11px] sm:text-xs text-zinc-400 truncate">{topThree[2].playerName}</h3>
-                    <p className="font-mono text-[10px] sm:text-[11px] text-amber-500 font-bold mt-0.5">{topThree[2].score.toLocaleString()}</p>
+                    <h3 className="font-bold text-[10px] xs:text-[11px] sm:text-xs text-zinc-400 truncate max-w-[65px] xs:max-w-[85px] sm:max-w-[140px] mx-auto">{topThree[2].playerName}</h3>
+                    <p className="font-mono text-[9px] xs:text-[10px] sm:text-[11px] text-amber-500 font-bold mt-0.5">{topThree[2].score.toLocaleString()}</p>
                   </div>
-                  <div className="w-full h-6 sm:h-8 bg-amber-950/30 border-t border-amber-800/40 rounded-t-lg mt-2"></div>
+                  <div className="w-full h-6 sm:h-8 bg-amber-950/30 border-t border-amber-800/40 rounded-t-lg mt-1.5"></div>
                 </div>
               ) : <div className="order-3" />}
             </div>

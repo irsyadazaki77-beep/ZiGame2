@@ -1,105 +1,74 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
+import * as THREE from 'three';
+import { GameComponentProps } from '../../types';
 import { audio } from '../../utils/audio';
 import { useGameEngine } from '../../hooks/useGameEngine';
 import { inputManager } from '../../services/inputService';
 import { GameOverlay } from '../gameplay/GameOverlay';
-import { Shield, Zap, Sparkles } from 'lucide-react';
+import { ThreeDockOverlay } from '../gameplay/ThreeDockOverlay';
+import {
+  ThreeStageController,
+  CameraPreset3D,
+  QualityLevel3D,
+  buildStarfighter3D,
+  buildEnemyShip3D
+} from '../../utils/threeStage';
+import { Shield, Zap, Flame, Crosshair } from 'lucide-react';
 
-interface SpaceDefenderProps {
-  onGameOver: (score: number) => void;
-  onScoreUpdate: (score: number) => void;
-  highScore: number;
-}
-
-interface Star {
+interface EnemyEntity3D {
+  mesh: THREE.Group;
   x: number;
-  y: number;
+  z: number;
   speed: number;
-  size: number;
-  brightness: number;
-}
-
-interface Enemy {
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-  speed: number;
-  color: string;
-  points: number;
   type: 'scout' | 'interceptor' | 'tank' | 'commander';
-  health: number;
-  maxHealth: number;
+  hp: number;
+  maxHp: number;
+  points: number;
   shootCooldown: number;
-}
-
-interface Bulconst {
-  scoreRef,
-  gameLoopRef,
-  startLoop,
-  x: number;
-  y: number;
-  vx: number;
-  vy: number;
   radius: number;
-  color: string;
-  isEnemy: boolean;
 }
 
-interface PowerUp {
+interface BulletEntity3D {
+  mesh: THREE.Mesh;
   x: number;
-  y: number;
-  type: 'spread' | 'shield' | 'bomb' | 'rapid' | 'dual';
-  label: string;
-  color: string;
-}
-
-interface Particle {
-  x: number;
-  y: number;
+  z: number;
   vx: number;
-  vy: number;
-  size: number;
-  color: string;
-  alpha: number;
-  decay: number;
+  vz: number;
+  isEnemy: boolean;
+  color: number;
 }
 
-interface FloatingText {
+interface PowerUpEntity3D {
+  mesh: THREE.Group;
   x: number;
-  y: number;
-  text: string;
-  color: string;
-  alpha: number;
-  vy: number;
+  z: number;
+  type: 'spread' | 'shield' | 'bomb' | 'rapid' | 'dual';
 }
 
-const WIDTH = 450;
-const HEIGHT = 400;
+const ARENA_HALF_W = 8.5;
+const ARENA_TOP_Z = -13.5;
+const ARENA_BOT_Z = 7.5;
 
-export default function SpaceDefenderGame({ onGameOver, onScoreUpdate, highScore }: SpaceDefenderProps) {
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const containerRef = useRef<HTMLDivElement | null>(null);
+export default function SpaceDefenderGame({
+  onGameOver,
+  onScoreUpdate,
+  highScore
+}: GameComponentProps) {
+  const mountRef = useRef<HTMLDivElement | null>(null);
+  const stageRef = useRef<ThreeStageController | null>(null);
 
-  // States
   const {
     gameState,
-    setGameState,
     score,
-    updateScore,
     addScore,
-    startLoop,
-    stopLoop,
-    triggerGameOver,
     startWithCountdown,
     countdown,
-    setScore,
-    scoreRef,
-    gameLoopRef
+    triggerGameOver,
+    scoreRef
   } = useGameEngine({
-    gameId: 'spacedefender',
+    gameId: 'space-defender',
     onGameOver,
-    onScoreUpdate,
+    onScoreUpdate
   });
 
   const [wave, setWave] = useState(1);
@@ -107,843 +76,605 @@ export default function SpaceDefenderGame({ onGameOver, onScoreUpdate, highScore
   const [combo, setCombo] = useState(0);
   const [weaponType, setWeaponType] = useState<'single' | 'dual' | 'spread' | 'rapid'>('single');
   const [hasShield, setHasShield] = useState(false);
+  const [cameraPreset, setCameraPreset] = useState<CameraPreset3D>('chase');
+  const [quality, setQuality] = useState<QualityLevel3D>('ultra');
 
-  // Loop & Sync Refs
   const gameStateRef = useRef(gameState);
-  const waveRef = useRef(1);
-  const livesRef = useRef(3);
-  const comboRef = useRef(0);
-  const comboTimerRef = useRef(0);
-  const hitStopRef = useRef(0);
-  const shakeRef = useRef(0);
-  const warpSpeedRef = useRef(1);
-
   useEffect(() => {
     gameStateRef.current = gameState;
   }, [gameState]);
 
-  // Player State
-  const playerRef = useRef({
-    x: 40,
-    y: 180,
-    w: 26,
-    h: 22,
-    speed: 5.5,
-    lastShot: 0,
+  const playerStateRef = useRef({
+    x: 0,
+    z: 5.5,
+    vx: 0,
+    vz: 0,
     weapon: 'single' as 'single' | 'dual' | 'spread' | 'rapid',
     weaponTimer: 0,
     shield: false,
     invincibleTimer: 0,
+    shootCooldown: 0,
+    lives: 3,
+    wave: 1,
+    killsInWave: 0,
+    combo: 0,
+    comboTimer: 0,
+    spawnTimer: 0
   });
 
-  const starsRef = useRef<Star[]>([]);
-  const enemiesRef = useRef<Enemy[]>([]);
-  const bulletsRef = useRef<any[]>([]);
-  const powerupsRef = useRef<PowerUp[]>([]);
-  const particlesRef = useRef<Particle[]>([]);
-  const floatingTextsRef = useRef<FloatingText[]>([]);
-  const activeKeysRef = useRef<{ [key: string]: boolean }>({});
-  const spawnTimerRef = useRef<number>(0);
+  const keysRef = useRef<Record<string, boolean>>({});
+  const enemiesRef = useRef<EnemyEntity3D[]>([]);
+  const bulletsRef = useRef<BulletEntity3D[]>([]);
+  const powerUpsRef = useRef<PowerUpEntity3D[]>([]);
+  const shipPartsRef = useRef<ReturnType<typeof buildStarfighter3D> | null>(null);
 
-  // Starfield initialization
-  const generateStars = useCallback(() => {
-    const stars: Star[] = [];
-    for (let i = 0; i < 45; i++) {
-      stars.push({
-        x: Math.random() * WIDTH,
-        y: Math.random() * HEIGHT,
-        speed: Math.random() * 2 + 0.5,
-        size: Math.random() * 1.8 + 0.6,
-        brightness: Math.random() * 0.7 + 0.3,
-      });
-    }
-    starsRef.current = stars;
+  const clearEntities = useCallback(() => {
+    const stage = stageRef.current;
+    if (!stage) return;
+    enemiesRef.current.forEach((e) => stage.scene.remove(e.mesh));
+    bulletsRef.current.forEach((b) => stage.scene.remove(b.mesh));
+    powerUpsRef.current.forEach((p) => stage.scene.remove(p.mesh));
+    enemiesRef.current = [];
+    bulletsRef.current = [];
+    powerUpsRef.current = [];
   }, []);
 
-  useEffect(() => {
-    generateStars();
-    drawStatic();
-    return () => {
-      if (gameLoopRef?.current) cancelAnimationFrame(gameLoopRef.current);
-    };
-  }, [generateStars]);
-
-  // Tab auto-pause
-  useEffect(() => {
-    const handleVis = () => {
-      if (document.hidden && gameStateRef.current === 'playing') {
-        setGameState('paused');
-      }
-    };
-    document.addEventListener('visibilitychange', handleVis);
-    return () => document.removeEventListener('visibilitychange', handleVis);
-  }, []);
-
-  // Keyboard input listeners
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'KeyW', 'KeyS', 'KeyA', 'KeyD', 'Space'].includes(e.code)) {
-        e.preventDefault();
-        activeKeysRef.current[e.code] = true;
-      }
-      if (e.key === 'Escape' && gameStateRef.current === 'playing') {
-        setGameState('paused');
-      }
-    };
-
-    const handleKeyUp = (e: KeyboardEvent) => {
-      if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'KeyW', 'KeyS', 'KeyA', 'KeyD', 'Space'].includes(e.code)) {
-        e.preventDefault();
-        activeKeysRef.current[e.code] = false;
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    window.addEventListener('keyup', handleKeyUp);
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-      window.removeEventListener('keyup', handleKeyUp);
-    };
-  }, []);
-
-  const spawnParticles = (x: number, y: number, color: string, count = 10, speed = 2.5) => {
-    for (let i = 0; i < count; i++) {
-      const angle = (Math.PI * 2 * i) / count + (Math.random() - 0.5);
-      const spd = (Math.random() * 0.8 + 0.4) * speed;
-      particlesRef.current.push({
-        x,
-        y,
-        vx: Math.cos(angle) * spd,
-        vy: Math.sin(angle) * spd,
-        size: Math.random() * 2.5 + 1.5,
-        color,
-        alpha: 1.0,
-        decay: 0.035 + Math.random() * 0.02,
-      });
-    }
-  };
-
-  const spawnFloatingText = (x: number, y: number, text: string, color = '#fbbf24') => {
-    floatingTextsRef.current.push({
-      x,
-      y,
-      text,
-      color,
-      alpha: 1.0,
-      vy: -1.0,
-    });
-  };
-
-  const resetGame = useCallback(() => {
-    // scoreRef.current = 0;
-    setScore(0);
-    onScoreUpdate(0);
-    waveRef.current = 1;
-    setWave(1);
-    livesRef.current = 3;
-    setLives(3);
-    comboRef.current = 0;
-    setCombo(0);
-    comboTimerRef.current = 0;
-
-    playerRef.current = {
-      x: 40,
-      y: HEIGHT / 2 - 11,
-      w: 26,
-      h: 22,
-      speed: 5.5,
-      lastShot: 0,
+  const handleStartGame = useCallback(() => {
+    clearEntities();
+    playerStateRef.current = {
+      x: 0,
+      z: 5.5,
+      vx: 0,
+      vz: 0,
       weapon: 'single',
       weaponTimer: 0,
       shield: false,
       invincibleTimer: 0,
+      shootCooldown: 0,
+      lives: 3,
+      wave: 1,
+      killsInWave: 0,
+      combo: 0,
+      comboTimer: 0,
+      spawnTimer: 0.4
     };
+    setLives(3);
+    setWave(1);
+    setCombo(0);
     setWeaponType('single');
     setHasShield(false);
+    if (shipPartsRef.current) {
+      shipPartsRef.current.group.position.set(0, 0.65, 5.5);
+      shipPartsRef.current.group.rotation.set(0, 0, 0);
+      shipPartsRef.current.shieldMesh.visible = false;
+    }
+    startWithCountdown();
+  }, [clearEntities, startWithCountdown]);
 
-    enemiesRef.current = [];
-    bulletsRef.current = [];
-    powerupsRef.current = [];
-    particlesRef.current = [];
-    floatingTextsRef.current = [];
-    spawnTimerRef.current = 0;
-    warpSpeedRef.current = 1;
+  const handleSelectPreset = useCallback((preset: CameraPreset3D) => {
+    setCameraPreset(preset);
+    stageRef.current?.setCameraPreset(preset);
+  }, []);
 
-    generateStars();
-    drawStatic();
-  }, [generateStars, onScoreUpdate]);
-
-  const startGame = useCallback(() => {
-    resetGame();
-    startWithCountdown(() => {
-      startLoop(gameStep);
+  const handleCycleQuality = useCallback(() => {
+    setQuality((prev) => {
+      const next: QualityLevel3D =
+        prev === 'ultra' ? 'balanced' : prev === 'balanced' ? 'performance' : 'ultra';
+      stageRef.current?.setQualityLevel(next);
+      return next;
     });
-  }, [resetGame, startWithCountdown, startLoop]);
+  }, []);
 
-  const triggerLaser = (now: number) => {
-    const player = playerRef.current;
-    const cooldown = player.weapon === 'rapid' ? 120 : 180;
-    if (now - player.lastShot < cooldown) return;
+  // Input listeners (Keyboard + Unified Input Service)
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      keysRef.current[e.key.toLowerCase()] = true;
+      keysRef.current[e.code] = true;
+    };
+    const onKeyUp = (e: KeyboardEvent) => {
+      keysRef.current[e.key.toLowerCase()] = false;
+      keysRef.current[e.code] = false;
+    };
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('keyup', onKeyUp);
 
-    player.lastShot = now;
-    audio.playLaser();
-    shakeRef.current = 1.5;
+    const unsub = inputManager.subscribe({
+      onActionDown: (action) => {
+        if (action === 'LEFT') keysRef.current['arrowleft'] = true;
+        if (action === 'RIGHT') keysRef.current['arrowright'] = true;
+        if (action === 'UP') keysRef.current['arrowup'] = true;
+        if (action === 'DOWN') keysRef.current['arrowdown'] = true;
+        if (action === 'ACTION_PRIMARY') keysRef.current['Space'] = true;
+      },
+      onActionUp: (action) => {
+        if (action === 'LEFT') keysRef.current['arrowleft'] = false;
+        if (action === 'RIGHT') keysRef.current['arrowright'] = false;
+        if (action === 'UP') keysRef.current['arrowup'] = false;
+        if (action === 'DOWN') keysRef.current['arrowdown'] = false;
+        if (action === 'ACTION_PRIMARY') keysRef.current['Space'] = false;
+      }
+    });
 
-    const px = player.x + player.w;
-    const py = player.y + player.h / 2;
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('keyup', onKeyUp);
+      unsub();
+    };
+  }, []);
 
-    if (player.weapon === 'spread') {
-      // 3-way Spread Laser
-      bulletsRef.current.push(
-        { x: px, y: py, vx: 10, vy: 0, radius: 3.5, color: '#a855f7', isEnemy: false },
-        { x: px, y: py - 4, vx: 9.5, vy: -2, radius: 3.5, color: '#a855f7', isEnemy: false },
-        { x: px, y: py + 4, vx: 9.5, vy: 2, radius: 3.5, color: '#a855f7', isEnemy: false }
-      );
-    } else if (player.weapon === 'dual') {
-      // Twin Lasers
-      bulletsRef.current.push(
-        { x: px, y: py - 6, vx: 10, vy: 0, radius: 3.5, color: '#38bdf8', isEnemy: false },
-        { x: px, y: py + 6, vx: 10, vy: 0, radius: 3.5, color: '#38bdf8', isEnemy: false }
-      );
-    } else {
-      // Standard Plasma Beam
-      bulletsRef.current.push({
-        x: px,
-        y: py,
-        vx: 10,
-        vy: 0,
-        radius: 3.5,
-        color: '#6366f1',
-        isEnemy: false,
+  // Initialize Three.js 3D Stage & Game Loop
+  useEffect(() => {
+    const container = mountRef.current;
+    if (!container) return;
+
+    let stage: ThreeStageController;
+    try {
+      stage = new ThreeStageController({
+        container,
+        backgroundColor: 0x050814,
+        fogColor: 0x050814,
+        fogDensity: 0.015,
+        initialPreset: 'chase',
+        gridPrimaryColor: '#6366f1',
+        gridSecondaryColor: '#070b18',
+        cameraPresets: {
+          chase: { position: [0, 8.2, 13.8], lookAt: [0, 0.4, -2.5], fov: 56 },
+          isometric: { position: [11.5, 14.5, 11.5], lookAt: [0, 0, -1.5], fov: 46 },
+          diorama: { position: [0, 21.5, 2.5], lookAt: [0, 0, -2.0], fov: 48 }
+        }
       });
-    }
-
-    // Engine exhaust spark
-    spawnParticles(player.x - 2, py, '#f97316', 3, 1.2);
-  };
-
-  const spawnEnemy = () => {
-    const r = Math.random();
-    const currentWave = waveRef.current;
-
-    let type: Enemy['type'] = 'scout';
-    let color = '#38bdf8';
-    let speed = Math.random() * 1.2 + 1.6 + currentWave * 0.2;
-    let hp = 1;
-    let points = 10;
-    let w = 22, h = 20;
-    let shootCd = 0;
-
-    if (r < 0.22) {
-      type = 'interceptor';
-      color = '#f43f5e';
-      speed = Math.random() * 1.5 + 3.0 + currentWave * 0.25;
-      points = 20;
-      w = 24; h = 18;
-    } else if (r < 0.4) {
-      type = 'tank';
-      color = '#a855f7';
-      speed = Math.random() * 0.6 + 1.0 + currentWave * 0.1;
-      hp = 3;
-      points = 35;
-      w = 28; h = 28;
-    } else if (r < 0.5 && currentWave >= 2) {
-      type = 'commander';
-      color = '#fbbf24';
-      speed = 0.9;
-      hp = 5;
-      points = 60;
-      w = 32; h = 32;
-      shootCd = 60;
-    }
-
-    enemiesRef.current.push({
-      x: WIDTH + 20,
-      y: Math.max(30, Math.random() * (HEIGHT - 50)),
-      w,
-      h,
-      speed,
-      color,
-      points,
-      type,
-      health: hp,
-      maxHealth: hp,
-      shootCooldown: shootCd,
-    });
-  };
-
-  const gameStep = useCallback((timestamp: number, dt: number) => {
-    if (gameStateRef.current !== 'playing') return;
-
-    if (hitStopRef.current > 0) {
-      hitStopRef.current -= dt;
-      draw();
+    } catch {
       return;
     }
 
-    updatePhysics(dt, timestamp);
-    draw();
-  }, []);
+    stageRef.current = stage;
+    setQuality(stage.getQualityLevel());
 
-  const updatePhysics = (dt: number, now: number) => {
-    const player = playerRef.current;
+    // Build 12-part 3D Starfighter
+    const ship = buildStarfighter3D(0x6366f1, 0x22d3ee, stage.isSoftwareGl);
+    ship.group.position.set(0, 0.65, 5.5);
+    stage.scene.add(ship.group);
+    shipPartsRef.current = ship;
 
-    // Decay Combo
-    if (comboTimerRef.current > 0) {
-      comboTimerRef.current -= dt;
-      if (comboTimerRef.current <= 0) {
-        comboRef.current = 0;
-        setCombo(0);
+    // Build Instanced 3D Starfield Pillars & Space Dust
+    const starGeo = new THREE.OctahedronGeometry(0.08, 0);
+    const starMat = new THREE.MeshBasicMaterial({ color: 0xe0f2fe });
+    const starCount = 120;
+    const starInstanced = new THREE.InstancedMesh(starGeo, starMat, starCount);
+    starInstanced.frustumCulled = false;
+    const starPositions = Array.from({ length: starCount }, () => ({
+      x: (Math.random() - 0.5) * 36,
+      y: 0.2 + Math.random() * 5,
+      z: (Math.random() - 0.5) * 36,
+      speed: 3 + Math.random() * 6
+    }));
+    const dummyMat = new THREE.Matrix4();
+    stage.scene.add(starInstanced);
+
+    const bulletGeo = new THREE.CapsuleGeometry(0.09, 0.42, 4, 8);
+    bulletGeo.rotateX(Math.PI / 2);
+
+    const spawnBullet = (x: number, z: number, vx: number, vz: number, isEnemy: boolean, color: number) => {
+      const mat = new THREE.MeshStandardMaterial({
+        color,
+        emissive: color,
+        emissiveIntensity: 0.95,
+        roughness: 0.15
+      });
+      const mesh = new THREE.Mesh(bulletGeo, mat);
+      mesh.position.set(x, 0.65, z);
+      stage.scene.add(mesh);
+      bulletsRef.current.push({ mesh, x, z, vx, vz, isEnemy, color });
+    };
+
+    const spawnPowerUp = (x: number, z: number) => {
+      const types: PowerUpEntity3D['type'][] = ['spread', 'dual', 'rapid', 'shield', 'bomb'];
+      const type = types[Math.floor(Math.random() * types.length)];
+      const colorMap: Record<PowerUpEntity3D['type'], number> = {
+        spread: 0xf59e0b,
+        dual: 0x38bdf8,
+        rapid: 0xa855f7,
+        shield: 0x10b981,
+        bomb: 0xef4444
+      };
+      const g = new THREE.Group();
+      const core = new THREE.Mesh(
+        new THREE.OctahedronGeometry(0.42, 0),
+        new THREE.MeshStandardMaterial({
+          color: colorMap[type],
+          emissive: colorMap[type],
+          emissiveIntensity: 0.85,
+          roughness: 0.2
+        })
+      );
+      const ring = new THREE.Mesh(
+        new THREE.TorusGeometry(0.58, 0.04, 8, 20),
+        new THREE.MeshBasicMaterial({ color: 0xffffff })
+      );
+      g.add(core, ring);
+      g.position.set(x, 0.65, z);
+      stage.scene.add(g);
+      powerUpsRef.current.push({ mesh: g, x, z, type });
+    };
+
+    const spawnEnemy = (waveNum: number) => {
+      const r = Math.random();
+      let type: EnemyEntity3D['type'] = 'scout';
+      if (waveNum >= 3 && r < 0.14) type = 'commander';
+      else if (waveNum >= 2 && r < 0.34) type = 'tank';
+      else if (r < 0.62) type = 'interceptor';
+
+      const hpMap = { scout: 1, interceptor: 2, tank: 4 + Math.floor(waveNum / 2), commander: 7 + waveNum };
+      const spdMap = { scout: 4.2, interceptor: 5.6, tank: 2.6, commander: 2.1 };
+      const ptsMap = { scout: 15, interceptor: 25, tank: 50, commander: 100 };
+      const radMap = { scout: 0.68, interceptor: 0.72, tank: 0.95, commander: 1.15 };
+
+      const mesh = buildEnemyShip3D(type);
+      const x = (Math.random() - 0.5) * (ARENA_HALF_W * 1.75);
+      const z = ARENA_TOP_Z;
+      mesh.position.set(x, 0.65, z);
+      stage.scene.add(mesh);
+
+      enemiesRef.current.push({
+        mesh,
+        x,
+        z,
+        speed: spdMap[type] + Math.min(2.5, waveNum * 0.18),
+        type,
+        hp: hpMap[type],
+        maxHp: hpMap[type],
+        points: ptsMap[type],
+        shootCooldown: 1.2 + Math.random() * 1.5,
+        radius: radMap[type]
+      });
+    };
+
+    stage.startLoop((dt, elapsed) => {
+      // Animate starfield
+      for (let i = 0; i < starCount; i++) {
+        const st = starPositions[i];
+        st.z += st.speed * dt * (gameStateRef.current === 'playing' ? 2.2 : 0.6);
+        if (st.z > 16) st.z = -20;
+        dummyMat.makeTranslation(st.x, st.y, st.z);
+        starInstanced.setMatrixAt(i, dummyMat);
       }
-    }
+      starInstanced.instanceMatrix.needsUpdate = true;
 
-    // Decay Weapon Timer
-    if (player.weaponTimer > 0) {
-      player.weaponTimer -= dt;
-      if (player.weaponTimer <= 0) {
-        player.weapon = 'single';
-        setWeaponType('single');
+      // Pulse player thrusters
+      const pulse = 0.85 + Math.sin(elapsed * 28) * 0.25;
+      ship.thrusterL.scale.set(1, pulse, 1);
+      ship.thrusterR.scale.set(1, pulse, 1);
+
+      if (gameStateRef.current !== 'playing') return;
+
+      const ps = playerStateRef.current;
+      const keys = keysRef.current;
+
+      // Movement
+      let moveX = 0;
+      let moveZ = 0;
+      if (keys['arrowleft'] || keys['a']) moveX -= 1;
+      if (keys['arrowright'] || keys['d']) moveX += 1;
+      if (keys['arrowup'] || keys['w']) moveZ -= 1;
+      if (keys['arrowdown'] || keys['s']) moveZ += 1;
+
+      const speed = 10.5;
+      ps.x = THREE.MathUtils.clamp(ps.x + moveX * speed * dt, -ARENA_HALF_W, ARENA_HALF_W);
+      ps.z = THREE.MathUtils.clamp(ps.z + moveZ * speed * dt, -2.5, ARENA_BOT_Z);
+
+      ship.group.position.set(ps.x, 0.65, ps.z);
+      ship.group.rotation.z = THREE.MathUtils.damp(ship.group.rotation.z, -moveX * 0.42, 10, dt);
+      ship.group.rotation.x = THREE.MathUtils.damp(ship.group.rotation.x, -moveZ * 0.16, 10, dt);
+      ship.shieldMesh.visible = ps.shield || ps.invincibleTimer > 0;
+      ship.shieldMesh.rotation.y += dt * 2.5;
+
+      stage.setFollowTarget(ps.x, 0, (ps.z - 5.5) * 0.5, 0.32);
+
+      // Timers
+      if (ps.invincibleTimer > 0) ps.invincibleTimer -= dt;
+      if (ps.weaponTimer > 0) {
+        ps.weaponTimer -= dt;
+        if (ps.weaponTimer <= 0) {
+          ps.weapon = 'single';
+          setWeaponType('single');
+        }
       }
-    }
-
-    // Decay Invincible Timer
-    if (player.invincibleTimer > 0) {
-      player.invincibleTimer -= dt;
-    }
-
-    // Decay Warp speed
-    if (warpSpeedRef.current > 1) {
-      warpSpeedRef.current = Math.max(1, warpSpeedRef.current - 0.05);
-    }
-
-    // Player Movement via Keys
-    const keys = activeKeysRef.current;
-    if (keys['ArrowUp'] || keys['KeyW']) player.y = Math.max(15, player.y - player.speed);
-    if (keys['ArrowDown'] || keys['KeyS']) player.y = Math.min(HEIGHT - player.h - 15, player.y + player.speed);
-    if (keys['ArrowLeft'] || keys['KeyA']) player.x = Math.max(15, player.x - player.speed);
-    if (keys['ArrowRight'] || keys['KeyD']) player.x = Math.min(WIDTH / 2, player.x + player.speed);
-
-    // Auto-fire or hold Space
-    if (keys['Space']) {
-      triggerLaser(now);
-    }
-
-    // Update Starfield
-    starsRef.current.forEach(star => {
-      star.x -= star.speed * warpSpeedRef.current;
-      if (star.x < 0) {
-        star.x = WIDTH;
-        star.y = Math.random() * HEIGHT;
-      }
-    });
-
-    // Update anys
-    for (let i = bulletsRef.current.length - 1; i >= 0; i--) {
-      const b = bulletsRef.current[i];
-      b.x += b.vx;
-      b.y += b.vy;
-
-      // Clean out of bounds
-      if (b.x < 0 || b.x > WIDTH || b.y < 0 || b.y > HEIGHT) {
-        bulletsRef.current.splice(i, 1);
-        continue;
+      if (ps.comboTimer > 0) {
+        ps.comboTimer -= dt;
+        if (ps.comboTimer <= 0) {
+          ps.combo = 0;
+          setCombo(0);
+        }
       }
 
-      // Enemy any hitting player
-      if (b.isEnemy) {
-        if (
-          player.invincibleTimer <= 0 &&
-          b.x >= player.x &&
-          b.x <= player.x + player.w &&
-          b.y >= player.y &&
-          b.y <= player.y + player.h
-        ) {
+      // Auto-fire or Space/Touch fire
+      ps.shootCooldown -= dt;
+      const wantsShoot = keys[' '] || keys['Space'] || keys['z'] || true; // Continuous arcade fire + manual boost
+      if (wantsShoot && ps.shootCooldown <= 0) {
+        const rate = ps.weapon === 'rapid' ? 0.11 : 0.21;
+        ps.shootCooldown = rate;
+        audio.playLaser?.();
+        if (ps.weapon === 'single' || ps.weapon === 'rapid') {
+          spawnBullet(ps.x, ps.z - 1.1, 0, -24, false, 0x22d3ee);
+        } else if (ps.weapon === 'dual') {
+          spawnBullet(ps.x - 0.55, ps.z - 0.9, 0, -24, false, 0x38bdf8);
+          spawnBullet(ps.x + 0.55, ps.z - 0.9, 0, -24, false, 0x38bdf8);
+        } else if (ps.weapon === 'spread') {
+          spawnBullet(ps.x, ps.z - 1.1, 0, -24, false, 0xf59e0b);
+          spawnBullet(ps.x - 0.35, ps.z - 1.0, -4.8, -23, false, 0xf59e0b);
+          spawnBullet(ps.x + 0.35, ps.z - 1.0, 4.8, -23, false, 0xf59e0b);
+        }
+      }
+
+      // Enemy Spawning
+      ps.spawnTimer -= dt;
+      if (ps.spawnTimer <= 0) {
+        spawnEnemy(ps.wave);
+        ps.spawnTimer = Math.max(0.45, 1.35 - ps.wave * 0.08);
+      }
+
+      // Update Bullets
+      for (let i = bulletsRef.current.length - 1; i >= 0; i--) {
+        const b = bulletsRef.current[i];
+        b.x += b.vx * dt;
+        b.z += b.vz * dt;
+        b.mesh.position.set(b.x, 0.65, b.z);
+
+        if (b.z < ARENA_TOP_Z - 3 || b.z > ARENA_BOT_Z + 3 || Math.abs(b.x) > ARENA_HALF_W + 3) {
+          stage.scene.remove(b.mesh);
           bulletsRef.current.splice(i, 1);
-          handlePlayerDamage();
           continue;
         }
-      }
-    }
 
-    // Spawn Enemies
-    spawnTimerRef.current += dt;
-    const spawnInterval = Math.max(500, 1500 - waveRef.current * 180);
-    if (spawnTimerRef.current >= spawnInterval) {
-      spawnEnemy();
-      spawnTimerRef.current = 0;
-    }
-
-    // Update Enemies
-    for (let i = enemiesRef.current.length - 1; i >= 0; i--) {
-      const enemy = enemiesRef.current[i];
-      enemy.x -= enemy.speed;
-
-      // Commander shoots return lasers
-      if (enemy.type === 'commander') {
-        enemy.shootCooldown--;
-        if (enemy.shootCooldown <= 0) {
-          bulletsRef.current.push({
-            x: enemy.x,
-            y: enemy.y + enemy.h / 2,
-            vx: -5,
-            vy: 0,
-            radius: 3,
-            color: '#ef4444',
-            isEnemy: true,
-          });
-          enemy.shootCooldown = 90;
-        }
-      }
-
-      // Out of bounds
-      if (enemy.x + enemy.w < 0) {
-        enemiesRef.current.splice(i, 1);
-        continue;
-      }
-
-      // Ship-Enemy Collision
-      if (
-        player.invincibleTimer <= 0 &&
-        player.x + player.w >= enemy.x &&
-        player.x <= enemy.x + enemy.w &&
-        player.y + player.h >= enemy.y &&
-        player.y <= enemy.y + enemy.h
-      ) {
-        spawnParticles(enemy.x + enemy.w / 2, enemy.y + enemy.h / 2, enemy.color, 16);
-        enemiesRef.current.splice(i, 1);
-        handlePlayerDamage();
-        continue;
-      }
-
-      // any-Enemy Collisions
-      for (let j = bulletsRef.current.length - 1; j >= 0; j--) {
-        const b = bulletsRef.current[j];
-        if (b.isEnemy) continue;
-
-        if (
-          b.x + b.radius >= enemy.x &&
-          b.x - b.radius <= enemy.x + enemy.w &&
-          b.y + b.radius >= enemy.y &&
-          b.y - b.radius <= enemy.y + enemy.h
-        ) {
-          bulletsRef.current.splice(j, 1);
-          enemy.health--;
-
-          if (enemy.health <= 0) {
-            // Enemy Destroyed!
-            const newCombo = Math.min(5, comboRef.current + 1);
-            comboRef.current = newCombo;
-            comboTimerRef.current = 2800;
-            setCombo(newCombo);
-
-            const pointsEarned = enemy.points * newCombo;
-            addScore(pointsEarned);
-
-            audio.playCombo(newCombo);
-            inputManager.vibrateGamepad(100, 0.4);
-            shakeRef.current = enemy.type === 'tank' || enemy.type === 'commander' ? 8 : 4;
-            hitStopRef.current = enemy.type === 'commander' ? 60 : 35; // Crisp hit-stop
-
-            spawnParticles(enemy.x + enemy.w / 2, enemy.y + enemy.h / 2, enemy.color, 18);
-            spawnFloatingText(enemy.x + enemy.w / 2, enemy.y, `+${pointsEarned} ${newCombo > 1 ? `(${newCombo}x)` : ''}`, enemy.color);
-
-            // Power-up drops
-            if (Math.random() < 0.18) {
-              spawnPowerup(enemy.x, enemy.y);
+        if (b.isEnemy) {
+          const dist = Math.hypot(b.x - ps.x, b.z - ps.z);
+          if (dist < 0.78) {
+            stage.scene.remove(b.mesh);
+            bulletsRef.current.splice(i, 1);
+            if (ps.invincibleTimer <= 0) {
+              if (ps.shield) {
+                ps.shield = false;
+                setHasShield(false);
+                ps.invincibleTimer = 1.2;
+                stage.particles.burst(ps.x, 0.65, ps.z, 22, 0x22d3ee, 8);
+                stage.triggerTrauma(0.35);
+              } else {
+                ps.lives -= 1;
+                setLives(ps.lives);
+                ps.invincibleTimer = 1.8;
+                stage.particles.burst(ps.x, 0.65, ps.z, 32, 0xef4444, 10);
+                stage.triggerTrauma(0.65);
+                audio.playExplosion?.();
+                if (ps.lives <= 0) {
+                  triggerGameOver(scoreRef.current);
+                  return;
+                }
+              }
             }
-
-            enemiesRef.current.splice(i, 1);
-
-            // Check Wave Transition
-            checkWaveProgress();
-            break;
-          } else {
-            // Damage spark
-            audio.playHit();
-            spawnParticles(b.x, b.y, enemy.color, 4);
           }
         }
       }
-    }
 
-    // Update Powerups
-    for (let i = powerupsRef.current.length - 1; i >= 0; i--) {
-      const pu = powerupsRef.current[i];
-      pu.x -= 1.8;
+      // Update Enemies
+      for (let i = enemiesRef.current.length - 1; i >= 0; i--) {
+        const e = enemiesRef.current[i];
+        e.z += e.speed * dt;
+        if (e.type === 'interceptor') {
+          e.x += Math.sin(elapsed * 3.5 + i) * 2.5 * dt;
+        }
+        e.mesh.position.set(e.x, 0.65, e.z);
+        e.mesh.rotation.z = Math.sin(elapsed * 4 + i) * 0.15;
 
-      // Catch
-      if (
-        player.x + player.w >= pu.x &&
-        player.x <= pu.x + 20 &&
-        player.y + player.h >= pu.y &&
-        player.y <= pu.y + 20
-      ) {
-        applyPowerup(pu.type);
-        powerupsRef.current.splice(i, 1);
-        continue;
+        // Enemy shooting
+        e.shootCooldown -= dt;
+        if (e.shootCooldown <= 0 && e.z < ps.z - 2.5) {
+          e.shootCooldown = e.type === 'commander' ? 1.1 : 2.1;
+          spawnBullet(e.x, e.z + 0.8, 0, 11.5, true, 0xf43f5e);
+        }
+
+        // Check bullet collisions with enemy
+        let destroyed = false;
+        for (let j = bulletsRef.current.length - 1; j >= 0; j--) {
+          const b = bulletsRef.current[j];
+          if (b.isEnemy) continue;
+          if (Math.hypot(b.x - e.x, b.z - e.z) < e.radius + 0.25) {
+            stage.scene.remove(b.mesh);
+            bulletsRef.current.splice(j, 1);
+            e.hp -= 1;
+            stage.particles.burst(e.x, 0.65, e.z, 8, 0x38bdf8, 5);
+            if (e.hp <= 0) {
+              destroyed = true;
+              break;
+            }
+          }
+        }
+
+        if (destroyed) {
+          stage.scene.remove(e.mesh);
+          enemiesRef.current.splice(i, 1);
+          ps.combo += 1;
+          ps.comboTimer = 3.2;
+          setCombo(ps.combo);
+          const mult = Math.min(4, 1 + Math.floor(ps.combo / 5));
+          addScore(e.points * mult);
+
+          stage.particles.burst(
+            e.x,
+            0.65,
+            e.z,
+            e.type === 'commander' ? 42 : 20,
+            e.type === 'commander' ? 0xf59e0b : 0xf43f5e,
+            8.5
+          );
+          stage.triggerTrauma(e.type === 'commander' ? 0.55 : 0.22);
+          if (e.type === 'commander') {
+            stage.triggerSlowMo(0.38, 0.25);
+            stage.kickFov(4.5);
+          }
+          audio.playExplosion?.();
+
+          if (Math.random() < 0.16) {
+            spawnPowerUp(e.x, e.z);
+          }
+
+          ps.killsInWave += 1;
+          if (ps.killsInWave >= 10 + ps.wave * 4) {
+            ps.killsInWave = 0;
+            ps.wave += 1;
+            setWave(ps.wave);
+            stage.kickFov(6);
+          }
+          continue;
+        }
+
+        // Player body collision or enemy passed bottom
+        if (Math.hypot(e.x - ps.x, e.z - ps.z) < e.radius + 0.65) {
+          stage.scene.remove(e.mesh);
+          enemiesRef.current.splice(i, 1);
+          if (ps.invincibleTimer <= 0) {
+            if (ps.shield) {
+              ps.shield = false;
+              setHasShield(false);
+              ps.invincibleTimer = 1.2;
+              stage.particles.burst(ps.x, 0.65, ps.z, 25, 0x22d3ee, 8);
+            } else {
+              ps.lives -= 1;
+              setLives(ps.lives);
+              ps.invincibleTimer = 1.8;
+              stage.particles.burst(ps.x, 0.65, ps.z, 35, 0xef4444, 10);
+              stage.triggerTrauma(0.7);
+              if (ps.lives <= 0) {
+                triggerGameOver(scoreRef.current);
+                return;
+              }
+            }
+          }
+          continue;
+        }
+
+        if (e.z > ARENA_BOT_Z + 2.5) {
+          stage.scene.remove(e.mesh);
+          enemiesRef.current.splice(i, 1);
+        }
       }
 
-      if (pu.x < -20) {
-        powerupsRef.current.splice(i, 1);
+      // Update PowerUps
+      for (let i = powerUpsRef.current.length - 1; i >= 0; i--) {
+        const p = powerUpsRef.current[i];
+        p.z += 3.2 * dt;
+        p.mesh.position.set(p.x, 0.65, p.z);
+        p.mesh.rotation.y += dt * 3;
+        p.mesh.rotation.x += dt * 2;
+
+        if (Math.hypot(p.x - ps.x, p.z - ps.z) < 1.1) {
+          stage.scene.remove(p.mesh);
+          powerUpsRef.current.splice(i, 1);
+          audio.playPowerUp?.();
+          stage.particles.burst(ps.x, 0.65, ps.z, 24, 0x10b981, 7);
+          stage.kickFov(-3.5);
+
+          if (p.type === 'shield') {
+            ps.shield = true;
+            setHasShield(true);
+          } else if (p.type === 'bomb') {
+            enemiesRef.current.forEach((en) => {
+              stage.particles.burst(en.x, 0.65, en.z, 18, 0xf59e0b, 9);
+              stage.scene.remove(en.mesh);
+              addScore(en.points);
+            });
+            enemiesRef.current = [];
+            stage.triggerTrauma(0.8);
+            stage.triggerSlowMo(0.35, 0.3);
+          } else {
+            ps.weapon = p.type;
+            ps.weaponTimer = 10;
+            setWeaponType(p.type);
+          }
+          continue;
+        }
+
+        if (p.z > ARENA_BOT_Z + 2) {
+          stage.scene.remove(p.mesh);
+          powerUpsRef.current.splice(i, 1);
+        }
       }
-    }
+    });
 
-    // Update Particles
-    for (let i = particlesRef.current.length - 1; i >= 0; i--) {
-      const p = particlesRef.current[i];
-      p.x += p.vx;
-      p.y += p.vy;
-      p.alpha -= p.decay;
-      if (p.alpha <= 0) particlesRef.current.splice(i, 1);
-    }
-
-    // Update Floating Texts
-    for (let i = floatingTextsRef.current.length - 1; i >= 0; i--) {
-      const t = floatingTextsRef.current[i];
-      t.y += t.vy;
-      t.alpha -= 0.025;
-      if (t.alpha <= 0) floatingTextsRef.current.splice(i, 1);
-    }
-  };
-
-  const spawnPowerup = (x: number, y: number) => {
-    const types: PowerUp['type'][] = ['spread', 'dual', 'shield', 'bomb'] as any;
-    const type = types[Math.floor(Math.random() * types.length)];
-    const meta: Record<string, { label: string; color: string }> = {
-      spread: { label: 'SPREAD', color: '#a855f7' },
-      dual: { label: 'DUAL', color: '#38bdf8' },
-      shield: { label: 'SHIELD', color: '#06b6d4' },
-      bomb: { label: 'BOMB', color: '#ef4444' },
+    return () => {
+      stage.dispose();
+      stageRef.current = null;
     };
-
-    powerupsRef.current.push({
-      x,
-      y,
-      type,
-      label: meta[type].label,
-      color: meta[type].color,
-    });
-  };
-
-  const applyPowerup = (type: PowerUp['type']) => {
-    const player = playerRef.current;
-    audio.playPowerup();
-    shakeRef.current = 3;
-
-    if (type === 'spread') {
-      player.weapon = 'spread';
-      player.weaponTimer = 10000;
-      setWeaponType('spread');
-      spawnFloatingText(player.x, player.y - 12, 'SPREAD CANNON!', '#a855f7');
-    } else if (type === 'shield') {
-      player.shield = true;
-      setHasShield(true);
-      audio.playShield();
-      spawnFloatingText(player.x, player.y - 12, 'SHIELD AKTIF!', '#06b6d4');
-    } else if (type === 'bomb') {
-      // Clear all enemies on screen
-      audio.playExplosion();
-      shakeRef.current = 14;
-      hitStopRef.current = 70;
-      enemiesRef.current.forEach(e => {
-        spawnParticles(e.x + e.w / 2, e.y + e.h / 2, e.color, 12);
-        addScore(e.points);
-      });
-      enemiesRef.current = [];
-      setScore(score);
-      onScoreUpdate(score);
-      spawnFloatingText(WIDTH / 2, HEIGHT / 2, 'EMP BOMB DETONATED!', '#ef4444');
-    } else {
-      player.weapon = 'dual';
-      player.weaponTimer = 10000;
-      setWeaponType('dual');
-      spawnFloatingText(player.x, player.y - 12, 'DUAL LASERS!', '#38bdf8');
-    }
-  };
-
-  const handlePlayerDamage = () => {
-    const player = playerRef.current;
-
-    if (player.shield) {
-      player.shield = false;
-      setHasShield(false);
-      player.invincibleTimer = 1200;
-      audio.playShield();
-      shakeRef.current = 6;
-      spawnFloatingText(player.x, player.y - 10, 'SHIELD ABSORBED!', '#06b6d4');
-      return;
-    }
-
-    audio.playHit();
-    shakeRef.current = 12;
-    hitStopRef.current = 60;
-    inputManager.vibrateGamepad(180, 0.7);
-
-    const nextLives = livesRef.current - 1;
-    livesRef.current = nextLives;
-    setLives(nextLives);
-    player.invincibleTimer = 1800; // 1.8s invincibility flash
-
-    if (nextLives <= 0) {
-      audio.playExplosion();
-      triggerGameOver();
-    }
-  };
-
-  const checkWaveProgress = () => {
-    const nextWaveThreshold = waveRef.current * 180;
-    if (score >= nextWaveThreshold && waveRef.current < 8) {
-      const nextWave = waveRef.current + 1;
-      waveRef.current = nextWave;
-      setWave(nextWave);
-      warpSpeedRef.current = 4.5; // Warp speed hyperdrive effect!
-      audio.playLevelUp();
-      shakeRef.current = 8;
-      spawnFloatingText(WIDTH / 2, HEIGHT / 2, `GELOMBANG ${nextWave}!`, '#a855f7');
-    }
-  };
-
-  const drawStatic = () => {
-    draw();
-  };
-
-  const draw = () => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    ctx.save();
-
-    // Decaying Screen Shake
-    if (shakeRef.current > 0) {
-      const sx = (Math.random() - 0.5) * shakeRef.current;
-      const sy = (Math.random() - 0.5) * shakeRef.current;
-      ctx.translate(sx, sy);
-      shakeRef.current = Math.max(0, shakeRef.current - 0.4);
-    }
-
-    // Deep Space Background
-    ctx.fillStyle = '#06080d';
-    ctx.fillRect(0, 0, WIDTH, HEIGHT);
-
-    // Starfield
-    starsRef.current.forEach(s => {
-      ctx.fillStyle = `rgba(255, 255, 255, ${s.brightness})`;
-      if (warpSpeedRef.current > 1.2) {
-        // Warp streak line
-        ctx.strokeStyle = '#818cf8';
-        ctx.lineWidth = s.size;
-        ctx.beginPath();
-        ctx.moveTo(s.x, s.y);
-        ctx.lineTo(s.x + s.speed * warpSpeedRef.current * 3, s.y);
-        ctx.stroke();
-      } else {
-        ctx.beginPath();
-        ctx.arc(s.x, s.y, s.size, 0, Math.PI * 2);
-        ctx.fill();
-      }
-    });
-
-    // anys
-    bulletsRef.current.forEach(b => {
-      ctx.fillStyle = b.color;
-      ctx.beginPath();
-      ctx.arc(b.x, b.y, b.radius, 0, Math.PI * 2);
-      ctx.fill();
-
-      // Laser tail
-      ctx.strokeStyle = b.color;
-      ctx.lineWidth = b.radius * 1.5;
-      ctx.beginPath();
-      ctx.moveTo(b.x, b.y);
-      ctx.lineTo(b.x - (b.isEnemy ? -8 : 10), b.y);
-      ctx.stroke();
-    });
-
-    // Enemies
-    enemiesRef.current.forEach(e => {
-      ctx.fillStyle = e.color;
-      ctx.beginPath();
-      ctx.moveTo(e.x, e.y + e.h / 2);
-      ctx.lineTo(e.x + e.w, e.y);
-      ctx.lineTo(e.x + e.w * 0.7, e.y + e.h / 2);
-      ctx.lineTo(e.x + e.w, e.y + e.h);
-      ctx.closePath();
-      ctx.fill();
-
-      // Cockpit glow
-      ctx.fillStyle = '#ffffff';
-      ctx.fillRect(e.x + 4, e.y + e.h / 2 - 2, 4, 4);
-
-      // HP Bar for tank/commander
-      if (e.maxHealth > 1) {
-        const hpPct = e.health / e.maxHealth;
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.2)';
-        ctx.fillRect(e.x, e.y - 6, e.w, 3);
-        ctx.fillStyle = '#ef4444';
-        ctx.fillRect(e.x, e.y - 6, e.w * hpPct, 3);
-      }
-    });
-
-    // Powerups
-    powerupsRef.current.forEach(pu => {
-      ctx.fillStyle = pu.color;
-      ctx.beginPath();
-      ctx.roundRect(pu.x, pu.y, 20, 16, 4);
-      ctx.fill();
-
-      ctx.fillStyle = '#ffffff';
-      ctx.font = 'bold 8px monospace';
-      ctx.textAlign = 'center';
-      ctx.fillText(pu.label[0], pu.x + 10, pu.y + 11);
-    });
-
-    // Player Ship (with Invincibility flashing)
-    const player = playerRef.current;
-    const isFlashing = player.invincibleTimer > 0 && Math.floor(player.invincibleTimer / 100) % 2 === 0;
-
-    if (!isFlashing) {
-      // Ship Hull
-      ctx.fillStyle = '#6366f1';
-      ctx.beginPath();
-      ctx.moveTo(player.x + player.w, player.y + player.h / 2);
-      ctx.lineTo(player.x, player.y);
-      ctx.lineTo(player.x + 5, player.y + player.h / 2);
-      ctx.lineTo(player.x, player.y + player.h);
-      ctx.closePath();
-      ctx.fill();
-
-      // Cockpit
-      ctx.fillStyle = '#38bdf8';
-      ctx.beginPath();
-      ctx.arc(player.x + player.w * 0.6, player.y + player.h / 2, 3.5, 0, Math.PI * 2);
-      ctx.fill();
-
-      // Shield Aura
-      if (player.shield) {
-        ctx.strokeStyle = '#06b6d4';
-        ctx.lineWidth = 2.5;
-        ctx.beginPath();
-        ctx.arc(player.x + player.w / 2, player.y + player.h / 2, player.w * 0.85, 0, Math.PI * 2);
-        ctx.stroke();
-      }
-    }
-
-    // Particles
-    particlesRef.current.forEach(p => {
-      ctx.fillStyle = p.color;
-      ctx.globalAlpha = p.alpha;
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
-      ctx.fill();
-    });
-    ctx.globalAlpha = 1;
-
-    // Floating Texts
-    floatingTextsRef.current.forEach(t => {
-      ctx.fillStyle = t.color;
-      ctx.globalAlpha = t.alpha;
-      ctx.font = 'bold 11px monospace';
-      ctx.textAlign = 'center';
-      ctx.fillText(t.text, t.x, t.y);
-    });
-    ctx.globalAlpha = 1;
-
-    ctx.restore();
-  };
-
-  // Direct Touch / Pointer control for mobile
-  const handlePointerMove = (e: React.PointerEvent) => {
-    if (gameStateRef.current !== 'playing') return;
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-
-    const rect = canvas.getBoundingClientRect();
-    const clientX = e.clientX - rect.left;
-    const clientY = e.clientY - rect.top;
-    const scaleX = WIDTH / rect.width;
-    const scaleY = HEIGHT / rect.height;
-
-    const targetX = clientX * scaleX - playerRef.current.w / 2;
-    const targetY = clientY * scaleY - playerRef.current.h / 2;
-
-    playerRef.current.x = Math.max(10, Math.min(WIDTH / 2, targetX));
-    playerRef.current.y = Math.max(10, Math.min(HEIGHT - playerRef.current.h - 10, targetY));
-
-    // Touch auto-fire
-    triggerLaser(performance.now());
-  };
+  }, [addScore, scoreRef, triggerGameOver]);
 
   return (
-    <div 
-      ref={containerRef}
-      className="relative flex flex-col h-full w-full min-h-0 items-center justify-center overflow-hidden p-2 bg-[#090b10]"
-    >
-      {/* Dynamic Flight HUD */}
-      <div className="w-full max-w-[450px] flex-none flex justify-between items-center mb-2 px-3 py-1 bg-[#121622]/80 border border-white/[0.06] rounded-xl text-xs font-mono">
-        <div className="flex items-center gap-1.5">
-          <span className="text-zinc-400">WAVE:</span>
-          <span className="text-indigo-400 font-bold">{wave}</span>
+    <div className="relative w-full h-full min-h-[460px] bg-slate-950 overflow-hidden rounded-2xl border border-indigo-500/20">
+      {/* Dedicated Empty WebGL Mount Container */}
+      <div ref={mountRef} className="absolute inset-0 w-full h-full" />
+
+      {/* Top Tactical HUD Bar */}
+      <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex flex-wrap items-center justify-between gap-2 p-3.5">
+        <div className="flex items-center gap-3 rounded-xl border border-white/10 bg-slate-950/85 px-3.5 py-2 text-xs text-slate-200 tabular-nums">
+          <span className="font-semibold text-indigo-400">WAVE {wave}</span>
+          <span aria-hidden="true">·</span>
+          <span>SKOR: <strong className="text-white">{score}</strong></span>
+          {combo > 1 && (
+            <>
+              <span aria-hidden="true">·</span>
+              <span className="text-amber-400 font-semibold">{combo}x COMBO</span>
+            </>
+          )}
         </div>
 
-        <div className="flex items-center gap-1">
-          {Array.from({ length: 3 }).map((_, i) => (
-            <span key={i} className={`text-xs ${i < lives ? 'text-rose-500' : 'text-zinc-700'}`}>
-              ❤️
-            </span>
-          ))}
-        </div>
-
-        {combo > 1 && (
-          <div className="flex items-center gap-1 text-amber-400 font-bold animate-pulse">
-            <Sparkles size={12} />
-            <span>{combo}x</span>
-          </div>
-        )}
-
-        {hasShield && (
-          <div className="flex items-center gap-1 text-cyan-400 font-bold">
-            <Shield size={12} />
-            <span>SHIELD</span>
-          </div>
-        )}
-
-        {weaponType !== 'single' && (
-          <span className="px-1.5 py-0.5 bg-indigo-500/20 text-indigo-300 text-[10px] rounded font-bold uppercase">
-            {weaponType}
+        <div className="flex items-center gap-2 rounded-xl border border-white/10 bg-slate-950/85 px-3.5 py-2 text-xs text-slate-200 tabular-nums">
+          <span className="flex items-center gap-1 text-cyan-400 font-medium">
+            <Crosshair className="w-3.5 h-3.5" />
+            {weaponType.toUpperCase()}
           </span>
-        )}
-
-        <div className="flex items-center gap-1.5">
-          <span className="text-zinc-400">SKOR:</span>
-          <span className="text-white font-bold">{score}</span>
+          {hasShield && (
+            <>
+              <span aria-hidden="true">·</span>
+              <span className="flex items-center gap-1 text-emerald-400 font-medium">
+                <Shield className="w-3.5 h-3.5" /> SHIELD
+              </span>
+            </>
+          )}
+          <span aria-hidden="true">·</span>
+          <span className="flex items-center gap-1 text-rose-400 font-semibold">
+            <Flame className="w-3.5 h-3.5" /> HP: {lives}
+          </span>
         </div>
       </div>
 
-      {/* Canvas Stage */}
-      <div 
-        className="relative flex-1 min-h-0 w-full max-w-[450px] max-h-[400px] flex items-center justify-center bg-[#06080d] rounded-2xl border border-white/[0.08] shadow-2xl overflow-hidden touch-none"
-        onPointerMove={handlePointerMove}
-        onPointerDown={handlePointerMove}
-      >
-        <canvas
-          ref={canvasRef}
-          width={WIDTH}
-          height={HEIGHT}
-          className="w-full h-full object-contain block cursor-crosshair select-none"
-        />
+      {/* Collapsible 3D Camera & Quality Bottom Dock */}
+      <ThreeDockOverlay
+        cameraPreset={cameraPreset}
+        onSelectPreset={handleSelectPreset}
+        quality={quality}
+        onCycleQuality={handleCycleQuality}
+        presetLabels={{
+          chase: 'Chase 3D',
+          isometric: 'Tactical Iso',
+          diorama: 'Overhead 3D'
+        }}
+        extraControls={
+          <span className="hidden sm:inline-flex items-center gap-1 text-[11px] text-slate-400 px-2 whitespace-nowrap shrink-0">
+            <Zap className="w-3 h-3 text-indigo-400" /> WASD / Panah: Manuver 3D · Auto-Plasma Aktif
+          </span>
+        }
+      />
 
-        <GameOverlay
-          gameState={gameState}
-          countdown={countdown}
-          score={score}
-          highScore={highScore}
-          onStart={startGame}
-          onRestart={startGame}
-          instructions="Kemudikan pesawat tempur dengan WASD / tombol panah dan tahan SPASI untuk menembak armada alien!"
-        />
-      </div>
+      {/* Game State Overlay (Ready, Countdown, Paused, GameOver) */}
+      <GameOverlay
+        gameState={gameState}
+        score={score}
+        highScore={highScore}
+        countdown={countdown}
+        onStart={handleStartGame}
+        onRestart={handleStartGame}
+        title="Space Defender 3D"
+        description="Kemudikan pesawat tempur Delta-Wing 3D, kumpulkan senjata plasma multi-laras, dan hancurkan armada alien di ruang angkasa 3D!"
+        themeColor="indigo"
+      />
     </div>
   );
 }

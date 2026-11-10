@@ -1,316 +1,290 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
+import * as THREE from 'three';
+import { GameComponentProps } from '../../types';
 import { audio } from '../../utils/audio';
 import { useGameEngine } from '../../hooks/useGameEngine';
-import { Particle } from '../../types';
-import { GameContainer } from '../gameplay/GameContainer';
-import { GameHUD } from '../gameplay/GameHUD';
+import { inputManager } from '../../services/inputService';
 import { GameOverlay } from '../gameplay/GameOverlay';
-import { MobileControls } from '../gameplay/MobileControls';
+import { ThreeDockOverlay } from '../gameplay/ThreeDockOverlay';
+import {
+  ThreeStageController,
+  CameraPreset3D,
+  QualityLevel3D
+} from '../../utils/threeStage';
+import { Lock, Unlock, Zap } from 'lucide-react';
 
-interface LockBreakerGameProps {
-  onGameOver: (score: number) => void;
-  onScoreUpdate: (score: number) => void;
-  highScore: number;
-}
-
-export default function LockBreakerGame({ onGameOver, onScoreUpdate, highScore }: LockBreakerGameProps) {
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+export default function LockBreakerGame({
+  onGameOver,
+  onScoreUpdate,
+  highScore
+}: GameComponentProps) {
+  const mountRef = useRef<HTMLDivElement | null>(null);
+  const stageRef = useRef<ThreeStageController | null>(null);
 
   const {
     gameState,
-    setGameState,
     score,
-    updateScore,
     addScore,
-    startLoop,
-    stopLoop,
-    triggerGameOver,
     startWithCountdown,
     countdown,
-    scoreRef,
+    triggerGameOver,
+    scoreRef
   } = useGameEngine({
-    gameId: 'lockbreaker',
+    gameId: 'lock-breaker',
     onGameOver,
-    onScoreUpdate,
+    onScoreUpdate
   });
 
+  const [vaultLevel, setVaultLevel] = useState(1);
+  const [pinsLeft, setPinsLeft] = useState(3);
+  const [cameraPreset, setCameraPreset] = useState<CameraPreset3D>('chase');
+  const [quality, setQuality] = useState<QualityLevel3D>('ultra');
+
   const gameStateRef = useRef(gameState);
-  
   useEffect(() => {
     gameStateRef.current = gameState;
-    scoreRef.current = score;
-  }, [gameState, score]);
+  }, [gameState]);
 
-  const CANVAS_WIDTH = 400;
-  const CANVAS_HEIGHT = 500;
+  const lockRef = useRef({
+    needleAngle: 0,
+    targetAngle: Math.PI * 0.65,
+    dir: 1,
+    speed: 2.3,
+    pinsRemaining: 3,
+    vault: 1
+  });
 
-  // Lock State
-  const angleRef = useRef(0); // Current scanning hand position (radians)
-  const targetAngleRef = useRef(Math.PI / 4); // Target dot position (radians)
-  const dirRef = useRef(1); // 1 = clockwise, -1 = counter-clockwise
-  const speedRef = useRef(0.04); // Angle velocity per tick
-  const particlesRef = useRef<Particle[]>([]);
+  const attemptStrike = useCallback(() => {
+    if (gameStateRef.current !== 'playing') return;
+    const st = lockRef.current;
+    const stage = stageRef.current;
+
+    let diff = Math.abs(st.needleAngle - st.targetAngle) % (Math.PI * 2);
+    if (diff > Math.PI) diff = Math.PI * 2 - diff;
+
+    if (diff < 0.34) {
+      // Hit target lock pin!
+      st.dir *= -1;
+      st.pinsRemaining -= 1;
+      addScore(30 * st.vault);
+      audio.playCoin?.();
+
+      const tx = Math.cos(st.targetAngle) * 3.1;
+      const tz = Math.sin(st.targetAngle) * 3.1;
+      stage?.particles.burst(tx, 0.7, tz, 22, 0xf59e0b, 7.5);
+      stage?.triggerTrauma(0.24);
+
+      if (st.pinsRemaining <= 0) {
+        st.vault += 1;
+        st.pinsRemaining = 2 + st.vault;
+        st.speed = Math.min(5.2, 2.3 + st.vault * 0.25);
+        setVaultLevel(st.vault);
+        addScore(100);
+        stage?.kickFov(5);
+        audio.playPowerUp?.();
+      }
+      setPinsLeft(st.pinsRemaining);
+      st.targetAngle = (st.needleAngle + Math.PI * (0.45 + Math.random() * 1.1)) % (Math.PI * 2);
+    } else {
+      // Missed pin -> Vault Lockdown
+      stage?.particles.burst(0, 0.8, 0, 36, 0xef4444, 9.5);
+      stage?.triggerTrauma(0.75);
+      audio.playExplosion?.();
+      triggerGameOver(scoreRef.current);
+    }
+  }, [addScore, scoreRef, triggerGameOver]);
+
+  const handleStart = useCallback(() => {
+    lockRef.current = {
+      needleAngle: 0,
+      targetAngle: Math.PI * 0.65,
+      dir: 1,
+      speed: 2.3,
+      pinsRemaining: 3,
+      vault: 1
+    };
+    setVaultLevel(1);
+    setPinsLeft(3);
+    startWithCountdown();
+  }, [startWithCountdown]);
 
   useEffect(() => {
-    drawStatic();
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === ' ' || e.key === 'Enter') {
+        attemptStrike();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+
+    const unsub = inputManager.subscribe({
+      onActionDown: (action) => {
+        if (action === 'ACTION_PRIMARY') attemptStrike();
+      }
+    });
+
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      unsub();
+    };
+  }, [attemptStrike]);
+
+  const handleSelectPreset = useCallback((preset: CameraPreset3D) => {
+    setCameraPreset(preset);
+    stageRef.current?.setCameraPreset(preset);
   }, []);
 
-  const drawStatic = () => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    ctx.fillStyle = '#09090b';
-    ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
-
-    // Render static Lock visual
-    ctx.strokeStyle = '#1e1b4b';
-    ctx.lineWidth = 14;
-    ctx.beginPath();
-    ctx.arc(CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 - 10, 80, 0, Math.PI * 2);
-    ctx.stroke();
-
-    // Lock handle
-    ctx.strokeStyle = '#1e1b4b';
-    ctx.lineWidth = 10;
-    ctx.beginPath();
-    ctx.arc(CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 - 90, 35, Math.PI, 0);
-    ctx.stroke();
-
-    // Title
-    ctx.fillStyle = '#ffffff';
-    ctx.font = "bold 20px 'Space Grotesk', sans-serif";
-    ctx.textAlign = 'center';
-    ctx.fillText('NEON LOCK BREAKER', CANVAS_WIDTH / 2, 80);
-
-    ctx.fillStyle = '#f59e0b';
-    ctx.font = "12px 'JetBrains Mono', monospace";
-    ctx.fillText('KLIK TEPAT PADA BULATAN ORANGE', CANVAS_WIDTH / 2, 105);
-
-    ctx.fillStyle = '#71717a';
-    ctx.font = "11px 'JetBrains Mono', monospace";
-    ctx.fillText('Kecepatan meningkat setiap gembok terbuka', CANVAS_WIDTH / 2, 130);
-  };
-
-  const spawnNewTarget = () => {
-    // Spawn dot at a reasonable distance from current angle, at least Math.PI / 2
-    const minDistance = Math.PI / 1.8;
-    const offset = minDistance + Math.random() * (Math.PI - 0.3);
-    targetAngleRef.current = (angleRef.current + dirRef.current * offset) % (Math.PI * 2);
-    if (targetAngleRef.current < 0) {
-      targetAngleRef.current += Math.PI * 2;
-    }
-  };
-
-  const startGame = useCallback(() => {
-    updateScore(0);
-    angleRef.current = 0;
-    dirRef.current = 1;
-    speedRef.current = 0.045;
-    particlesRef.current = [];
-    spawnNewTarget();
-
-    startWithCountdown(() => {
-      startLoop(gameStep);
+  const handleCycleQuality = useCallback(() => {
+    setQuality((prev) => {
+      const next: QualityLevel3D =
+        prev === 'ultra' ? 'balanced' : prev === 'balanced' ? 'performance' : 'ultra';
+      stageRef.current?.setQualityLevel(next);
+      return next;
     });
-  }, [updateScore, startWithCountdown, startLoop]);
+  }, []);
 
-  const createSuccessParticles = (x: number, y: number) => {
-    for (let i = 0; i < 15; i++) {
-      particlesRef.current.push({
-        x,
-        y,
-        vx: (Math.random() - 0.5) * 6,
-        vy: (Math.random() - 0.5) * 6,
-        color: '#f59e0b',
-        radius: Math.random() * 2 + 1,
-        alpha: 1,
-        decay: Math.random() * 0.04 + 0.02,
+  useEffect(() => {
+    const container = mountRef.current;
+    if (!container) return;
+
+    let stage: ThreeStageController;
+    try {
+      stage = new ThreeStageController({
+        container,
+        backgroundColor: 0x0c0905,
+        fogColor: 0x0c0905,
+        fogDensity: 0.015,
+        initialPreset: 'chase',
+        gridPrimaryColor: '#f59e0b',
+        gridSecondaryColor: '#171108',
+        cameraPresets: {
+          chase: { position: [0, 8.8, 8.5], lookAt: [0, 0.3, 0], fov: 48 },
+          isometric: { position: [7.5, 10.5, 7.5], lookAt: [0, 0.3, 0], fov: 45 },
+          diorama: { position: [0, 13.5, 1.2], lookAt: [0, 0, 0], fov: 46 }
+        }
       });
-    }
-  };
-
-  const handleTrigger = () => {
-    if (gameStateRef.current !== 'playing') return;
-
-    // Normalize angles to 0 to 2*PI
-    let normAngle = angleRef.current % (Math.PI * 2);
-    if (normAngle < 0) normAngle += Math.PI * 2;
-
-    let normTarget = targetAngleRef.current % (Math.PI * 2);
-    if (normTarget < 0) normTarget += Math.PI * 2;
-
-    // Check angular difference
-    let diff = Math.abs(normAngle - normTarget);
-    if (diff > Math.PI) {
-      diff = Math.PI * 2 - diff;
+    } catch {
+      return;
     }
 
-    // Tolerance range in radians (approx 12-14 degrees)
-    const tolerance = 0.22;
+    stageRef.current = stage;
+    setQuality(stage.getQualityLevel());
 
-    if (diff <= tolerance) {
-      // SUCCESS!
-      audio.playScore();
-      
-      const centerX = CANVAS_WIDTH / 2;
-      const centerY = CANVAS_HEIGHT / 2 - 10;
-      const radius = 80;
-      const sparkX = centerX + Math.cos(targetAngleRef.current) * radius;
-      const sparkY = centerY + Math.sin(targetAngleRef.current) * radius;
-
-      createSuccessParticles(sparkX, sparkY);
-
-      addScore(10);
-
-      // Reverse direction and make it slightly faster!
-      dirRef.current *= -1;
-      speedRef.current = Math.min(0.12, speedRef.current + 0.003);
-      spawnNewTarget();
-    } else {
-      // MISSED!
-      audio.playExplosion();
-      triggerGameOver();
-    }
-  };
-
-  const gameStep = useCallback((timestamp: number, dt: number) => {
-    if (gameStateRef.current !== 'playing') return;
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    // Scale speed properly with dt if needed, but since original is per-frame at 60fps, multiply by delta scalar
-    const delta = dt / 16.666;
-    
-    // Update scanner hand position
-    angleRef.current += dirRef.current * speedRef.current * delta;
-
-    draw(ctx);
-  }, []);
-
-  const draw = (ctx: CanvasRenderingContext2D) => {
-    // Draw background
-    ctx.fillStyle = '#09090b';
-    ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
-
-    const centerX = CANVAS_WIDTH / 2;
-    const centerY = CANVAS_HEIGHT / 2 - 10;
-    const radius = 80;
-
-    // Draw Lock Shackle (moving if game active)
-    ctx.strokeStyle = '#1e1b4b';
-    ctx.lineWidth = 10;
-    ctx.beginPath();
-    ctx.arc(centerX, centerY - 80, 35, Math.PI, 0);
-    ctx.stroke();
-
-    // Lock main body ring
-    ctx.strokeStyle = '#0f172a';
-    ctx.lineWidth = 14;
-    ctx.beginPath();
-    ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
-    ctx.stroke();
-
-    // Draw Target Bulatan Orange
-    const targetX = centerX + Math.cos(targetAngleRef.current) * radius;
-    const targetY = centerY + Math.sin(targetAngleRef.current) * radius;
-
-    ctx.shadowBlur = 15;
-    ctx.shadowColor = '#f59e0b';
-    ctx.fillStyle = '#f59e0b';
-    ctx.beginPath();
-    ctx.arc(targetX, targetY, 9, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.shadowBlur = 0;
-
-    // Draw Scanning Hand
-    const handX = centerX + Math.cos(angleRef.current) * radius;
-    const handY = centerY + Math.sin(angleRef.current) * radius;
-
-    ctx.shadowBlur = 12;
-    ctx.shadowColor = '#3b82f6';
-    ctx.fillStyle = '#3b82f6';
-    ctx.beginPath();
-    ctx.arc(handX, handY, 12, 0, Math.PI * 2);
-    ctx.fill();
-
-    // Draw pointer trail inside hand
-    ctx.fillStyle = '#ffffff';
-    ctx.beginPath();
-    ctx.arc(handX, handY, 4, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.shadowBlur = 0;
-
-    // Draw Lock Score in center
-    ctx.fillStyle = '#ffffff';
-    ctx.font = "black 32px 'Space Grotesk', sans-serif";
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(`${score / 10}`, centerX, centerY);
-
-    // Particle render
-    particlesRef.current.forEach(p => {
-      p.x += p.vx;
-      p.y += p.vy;
-      p.alpha -= p.decay;
-
-      ctx.fillStyle = p.color;
-      ctx.globalAlpha = Math.max(0, p.alpha);
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
-      ctx.fill();
+    // Build Multi-Part 3D Titanium Vault Dial (6 parts)
+    const vaultGroup = new THREE.Group();
+    const steelMat = new THREE.MeshPhysicalMaterial({
+      color: 0x334155,
+      metalness: 0.88,
+      roughness: 0.22,
+      clearcoat: 0.85
     });
-    ctx.globalAlpha = 1.0;
-    particlesRef.current = particlesRef.current.filter(p => p.alpha > 0);
+    const goldMat = new THREE.MeshPhysicalMaterial({
+      color: 0xf59e0b,
+      metalness: 0.85,
+      roughness: 0.18,
+      clearcoat: 0.9
+    });
 
-    // Top HUD
-    ctx.fillStyle = '#52525b';
-    ctx.font = "bold 11px 'JetBrains Mono', monospace";
-    ctx.fillText(`KUNCI TERPECAH: ${score / 10}`, 60, 30);
-  };
+    const outerRing = new THREE.Mesh(new THREE.TorusGeometry(3.1, 0.38, 16, 48), steelMat);
+    outerRing.rotation.x = Math.PI / 2;
+    outerRing.position.y = 0.4;
+    outerRing.castShadow = true;
+
+    const centerHub = new THREE.Mesh(new THREE.CylinderGeometry(1.15, 1.35, 0.65, 24), goldMat);
+    centerHub.position.y = 0.325;
+    centerHub.castShadow = true;
+
+    vaultGroup.add(outerRing, centerHub);
+    stage.scene.add(vaultGroup);
+
+    // Target Lock Pin Orb
+    const targetOrb = new THREE.Mesh(
+      new THREE.OctahedronGeometry(0.45, 0),
+      new THREE.MeshStandardMaterial({
+        color: 0xfacc15,
+        emissive: 0xf59e0b,
+        emissiveIntensity: 0.95
+      })
+    );
+    stage.scene.add(targetOrb);
+
+    // Rotating Laser Needle Arm
+    const needleMesh = new THREE.Mesh(
+      new THREE.BoxGeometry(0.28, 0.25, 0.9),
+      new THREE.MeshStandardMaterial({
+        color: 0x22d3ee,
+        emissive: 0x06b6d4,
+        emissiveIntensity: 0.95
+      })
+    );
+    stage.scene.add(needleMesh);
+
+    stage.startLoop((dt, elapsed) => {
+      if (gameStateRef.current !== 'playing') return;
+
+      const st = lockRef.current;
+      st.needleAngle = (st.needleAngle + st.dir * st.speed * dt + Math.PI * 2) % (Math.PI * 2);
+
+      const nx = Math.cos(st.needleAngle) * 3.1;
+      const nz = Math.sin(st.needleAngle) * 3.1;
+      needleMesh.position.set(nx, 0.65, nz);
+      needleMesh.rotation.y = -st.needleAngle;
+
+      const tx = Math.cos(st.targetAngle) * 3.1;
+      const tz = Math.sin(st.targetAngle) * 3.1;
+      targetOrb.position.set(tx, 0.68 + Math.sin(elapsed * 6) * 0.08, tz);
+      targetOrb.rotation.y = elapsed * 4;
+    });
+
+    return () => {
+      stage.dispose();
+      stageRef.current = null;
+    };
+  }, []);
 
   return (
-    <GameContainer aspect="portrait" maxWidth="sm">
-      {gameState === 'playing' && (
-        <GameHUD 
-          stats={[
-            { id: 'score', label: 'SKOR', value: score, emphasized: true }
-          ]} 
-        />
-      )}
+    <div
+      className="relative w-full h-full min-h-[460px] bg-slate-950 overflow-hidden rounded-2xl border border-amber-500/20"
+      onClick={attemptStrike}
+    >
+      <div ref={mountRef} className="absolute inset-0 w-full h-full cursor-pointer" />
+
+      <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex flex-wrap items-center justify-between gap-2 p-3.5">
+        <div className="flex items-center gap-3 rounded-xl border border-white/10 bg-slate-950/85 px-3.5 py-2 text-xs text-slate-200 tabular-nums">
+          <span className="flex items-center gap-1 font-semibold text-amber-400">
+            <Lock className="w-3.5 h-3.5" /> BRANKAS #{vaultLevel}
+          </span>
+          <span aria-hidden="true">·</span>
+          <span>SKOR: <strong className="text-white">{score}</strong></span>
+        </div>
+
+        <div className="flex items-center gap-1.5 rounded-xl border border-white/10 bg-slate-950/85 px-3.5 py-2 text-xs font-semibold text-cyan-400 tabular-nums">
+          <Unlock className="w-3.5 h-3.5" /> PIN TERSISA: {pinsLeft}
+        </div>
+      </div>
+
+      <ThreeDockOverlay
+        cameraPreset={cameraPreset}
+        onSelectPreset={handleSelectPreset}
+        quality={quality}
+        onCycleQuality={handleCycleQuality}
+        extraControls={
+          <span className="hidden sm:inline-flex items-center gap-1 text-[11px] text-slate-400 px-2 whitespace-nowrap shrink-0">
+            <Zap className="w-3 h-3 text-amber-400" /> Klik / Tekan Space Tepat Saat Jarum Biru Menyentuh Kristal Emas
+          </span>
+        }
+      />
 
       <GameOverlay
         gameState={gameState}
         score={score}
+        highScore={highScore}
         countdown={countdown}
-        onStart={startGame}
-        onRestart={startGame}
-        instructions="KLIK TEPAT PADA BULATAN ORANGE. Kecepatan meningkat setiap gembok terbuka."
+        onStart={handleStart}
+        onRestart={handleStart}
+        title="Neon Lock Breaker 3D"
+        description="Buka silinder kombinasi brankas titanium 3D dengan mengetuk tepat saat indikator sejajar dengan pin!"
+        themeColor="amber"
       />
-
-      <div 
-        className="relative w-full aspect-[4/5] mx-auto bg-zinc-950 rounded-xl border-4 border-zinc-900 shadow-2xl overflow-hidden cursor-pointer"
-        onPointerDown={(e) => {
-          if (gameState === 'playing') handleTrigger();
-        }}
-      >
-        <canvas
-          ref={canvasRef}
-          width={CANVAS_WIDTH}
-          height={CANVAS_HEIGHT}
-          className="w-full h-full display-block bg-zinc-950"
-        />
-      </div>
-
-      {gameState === 'playing' && (
-        <MobileControls
-          onA={handleTrigger}
-          labelA="BUKA!"
-        />
-      )}
-    </GameContainer>
+    </div>
   );
 }

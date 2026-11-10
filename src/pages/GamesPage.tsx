@@ -21,10 +21,41 @@ export default function GamesPage({ games, onSelectGame }: GamesPageProps) {
   const [durationFilter, setDurationFilter] = useState<'all' | 'quick' | 'standard' | 'deep'>('all');
   const [tierFilter, setTierFilter] = useState<'all' | 'flagship' | 'competitive'>('all');
   const [showFilters, setShowFilters] = useState(false);
+  const searchInputRef = React.useRef<HTMLInputElement>(null);
 
+  // Debounce syncing searchQuery to sessionStorage
   useEffect(() => {
-    sessionStorage.setItem('zigame_search_query', searchQuery);
+    const timer = setTimeout(() => {
+      try {
+        sessionStorage.setItem('zigame_search_query', searchQuery);
+      } catch {}
+    }, 150);
+    return () => clearTimeout(timer);
   }, [searchQuery]);
+
+  // Keyboard shortcut '/' to focus search input
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (
+        target && (
+          target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.tagName === 'SELECT' ||
+          target.isContentEditable ||
+          target.closest?.('[role="dialog"]')
+        )
+      ) {
+        return;
+      }
+      if (e.key === '/') {
+        e.preventDefault();
+        searchInputRef.current?.focus();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
 
   const [favorites, setFavorites] = useState<string[]>(() => {
     try {
@@ -111,7 +142,19 @@ export default function GamesPage({ games, onSelectGame }: GamesPageProps) {
     { value: 'fav', label: 'Favorit' }
   ];
 
-  const hasActiveCustomFilters = inputFilter !== 'all' || durationFilter !== 'all' || tierFilter !== 'all' || difficultyFilter !== 'all';
+  const activeFilterCount = useMemo(() => {
+    let count = 0;
+    if (categoryTab !== 'all') count++;
+    if (difficultyFilter !== 'all') count++;
+    if (inputFilter !== 'all') count++;
+    if (durationFilter !== 'all') count++;
+    if (tierFilter !== 'all') count++;
+    if (sortOption !== 'popular') count++;
+    if (searchQuery.trim() !== '') count++;
+    return count;
+  }, [categoryTab, difficultyFilter, inputFilter, durationFilter, tierFilter, sortOption, searchQuery]);
+
+  const hasActiveCustomFilters = activeFilterCount > 0;
 
   const resetAllFilters = () => {
     audio.playCoin();
@@ -197,26 +240,44 @@ export default function GamesPage({ games, onSelectGame }: GamesPageProps) {
       <div className="flex flex-col gap-3">
         {/* Search Row */}
         <div className="flex gap-2 items-center w-full">
-          <div className="flex-1">
+          <div className="flex-1 relative">
             <SearchInput
+              ref={searchInputRef}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Cari nama game, genre, atau mekanisme..."
-              className="w-full"
+              placeholder="Cari nama game, genre, atau mekanisme (Tekan '/')..."
+              className="w-full pr-8"
             />
+            <kbd className="hidden sm:inline-block absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-mono text-text-muted px-1.5 py-0.5 rounded bg-surface-subtle border border-border-subtle pointer-events-none">
+              /
+            </kbd>
           </div>
           <Button
             variant={showFilters || hasActiveCustomFilters ? "primary" : "secondary"}
             size="sm"
             onClick={() => { audio.playCoin(); setShowFilters(!showFilters); }}
-            className="flex items-center gap-2 !min-h-[38px] px-3.5 rounded-full relative"
+            className="flex items-center gap-2 !min-h-[38px] px-3.5 rounded-full relative cursor-pointer"
           >
             <SlidersHorizontal size={14} />
-            <span className="hidden sm:inline text-xs font-mono">Filter Lanjutan</span>
+            <span className="hidden sm:inline text-xs font-mono">
+              Filter {activeFilterCount > 0 ? `(${activeFilterCount})` : 'Lanjutan'}
+            </span>
             {hasActiveCustomFilters && (
-              <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
+              <span className="w-4 h-4 rounded-full bg-amber-400 text-zinc-950 font-bold text-[9px] font-mono flex items-center justify-center animate-pulse">
+                {activeFilterCount}
+              </span>
             )}
           </Button>
+          {hasActiveCustomFilters && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={resetAllFilters}
+              className="!min-h-[38px] px-3 rounded-full text-xs font-mono text-rose-400 border-rose-500/30 hover:bg-rose-500/10 cursor-pointer"
+            >
+              <X size={12} className="mr-1 inline" /> Reset
+            </Button>
+          )}
         </div>
 
         {/* Categories Tab Row */}

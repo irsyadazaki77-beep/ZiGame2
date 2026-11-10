@@ -79,5 +79,42 @@ describe('Unit Tests — Schema Migrations & Safe Local Storage Resilience', () 
     it('returns schema version cleanly via storageService', () => {
       expect(storageService.getSchemaVersion()).toBe(CURRENT_SCHEMA_VERSION);
     });
+
+    it('encrypts and signs sensitive profile data in localStorage and blocks DevTools tampering', () => {
+      const testProfile = {
+        name: 'VaultPilot',
+        avatar: '🚀',
+        colorTheme: 'indigo',
+        coins: 500,
+        xp: 1200,
+        level: 4,
+        unlockedAvatars: ['🚀'],
+        unlockedThemes: ['indigo']
+      };
+
+      storageService.saveProfile(testProfile as any);
+
+      // 1. Verify raw localStorage entry is an encrypted VaultEnvelope (__zv: 2), not plain JSON
+      const rawStored = localStorage.getItem('arcade_player_profile');
+      expect(rawStored).toBeDefined();
+      const parsedEnvelope = JSON.parse(rawStored!);
+      expect(parsedEnvelope.__zv).toBe(2);
+      expect(typeof parsedEnvelope.cipher).toBe('string');
+      expect(typeof parsedEnvelope.sig).toBe('string');
+      expect(rawStored).not.toContain('VaultPilot');
+
+      // 2. Verify storageService.getProfile() decrypts and verifies signature cleanly
+      const loaded = storageService.getProfile();
+      expect(loaded).not.toBeNull();
+      expect(loaded?.name).toBe('VaultPilot');
+      expect(loaded?.coins).toBe(500);
+
+      // 3. Simulate DevTools downgrade attack (overwriting encrypted envelope with forged plain JSON)
+      localStorage.setItem('arcade_player_profile', JSON.stringify({ ...testProfile, coins: 9999999 }));
+      const afterTamper = storageService.getProfile();
+      expect(afterTamper).toBeNull();
+      expect(storageService.getTamperAttemptsCount()).toBeGreaterThanOrEqual(1);
+    });
   });
 });
+

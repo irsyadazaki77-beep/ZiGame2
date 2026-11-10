@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { useGameEngine } from '../../hooks/useGameEngine';
+import { disposeThreeScene } from '../../utils/threeCleanup';
 import { audio } from '../../utils/audio';
 import { screenShake } from '../../utils/screenShake';
 import { GameOverlay } from '../gameplay/GameOverlay';
@@ -10,14 +11,8 @@ import {
   Shield,
   Gauge,
   Eye,
-  RotateCcw,
-  Flame,
   Trophy,
-  Volume2,
-  VolumeX,
   Sparkles,
-  Radio,
-  AlertTriangle
 } from 'lucide-react';
 
 interface GameProps {
@@ -52,7 +47,6 @@ interface PowerUpItem {
   active: boolean;
 }
 
-const _vec3 = new THREE.Vector3();
 const _camPos = new THREE.Vector3();
 const _camTarget = new THREE.Vector3();
 
@@ -115,38 +109,12 @@ function createHighwayTexture(anisotropy: number): THREE.CanvasTexture {
   return texture;
 }
 
-function createSkyscraperTexture(): THREE.CanvasTexture {
-  const canvas = document.createElement('canvas');
-  canvas.width = 256;
-  canvas.height = 512;
-  const ctx = canvas.getContext('2d')!;
-
-  ctx.fillStyle = '#05070c';
-  ctx.fillRect(0, 0, 256, 512);
-
-  const colors = ['#00f0ff', '#ff007f', '#3b82f6', '#f59e0b'];
-  for (let y = 16; y < 500; y += 24) {
-    for (let x = 16; x < 240; x += 20) {
-      if (Math.random() > 0.4) {
-        ctx.fillStyle = colors[Math.floor(Math.random() * colors.length)];
-        ctx.globalAlpha = 0.6 + Math.random() * 0.4;
-        ctx.fillRect(x, y, 12, 14);
-      }
-    }
-  }
-  ctx.globalAlpha = 1.0;
-
-  ctx.fillStyle = '#00f0ff';
-  ctx.fillRect(240, 0, 8, 512);
-
-  const tex = new THREE.CanvasTexture(canvas);
-  tex.wrapS = THREE.RepeatWrapping;
-  tex.wrapT = THREE.RepeatWrapping;
-  tex.colorSpace = THREE.SRGBColorSpace;
-  return tex;
-}
-
-function buildPlayerCar(isSoftwareGl: boolean): { group: THREE.Group; wheels: THREE.Mesh[]; flameLeft: THREE.Mesh; flameRight: THREE.Mesh } {
+function buildPlayerCar(isSoftwareGl: boolean): {
+  group: THREE.Group;
+  wheels: THREE.Mesh[];
+  flameLeft: THREE.Mesh;
+  flameRight: THREE.Mesh;
+} {
   const group = new THREE.Group();
   const wheels: THREE.Mesh[] = [];
 
@@ -155,7 +123,7 @@ function buildPlayerCar(isSoftwareGl: boolean): { group: THREE.Group; wheels: TH
     metalness: 0.85,
     roughness: 0.18,
     clearcoat: 1.0,
-    clearcoatRoughness: 0.1
+    clearcoatRoughness: 0.1,
   });
 
   const carbonMat = new THREE.MeshStandardMaterial({ color: 0x11131a, metalness: 0.5, roughness: 0.55 });
@@ -165,7 +133,7 @@ function buildPlayerCar(isSoftwareGl: boolean): { group: THREE.Group; wheels: TH
     roughness: 0.1,
     transmission: isSoftwareGl ? 0 : 0.85,
     transparent: true,
-    opacity: isSoftwareGl ? 0.45 : 0.95
+    opacity: isSoftwareGl ? 0.45 : 0.95,
   });
 
   const cyanLightMat = new THREE.MeshBasicMaterial({ color: 0x00ffff });
@@ -209,7 +177,7 @@ function buildPlayerCar(isSoftwareGl: boolean): { group: THREE.Group; wheels: TH
     [-0.88, 0.34, -1.05],
     [0.88, 0.34, -1.05],
     [-0.92, 0.34, 1.15],
-    [0.92, 0.34, 1.15]
+    [0.92, 0.34, 1.15],
   ];
 
   wheelPositions.forEach((pos) => {
@@ -239,12 +207,12 @@ function buildTrafficCarMesh(type: 'coupe' | 'truck' | 'speeder' | 'drone', colo
 
   const bodyMat = new THREE.MeshStandardMaterial({ color: colorHex, roughness: 0.3, metalness: 0.7 });
   const darkMat = new THREE.MeshStandardMaterial({ color: 0x18181b, roughness: 0.6 });
-  const headlightMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
-  const taillightMat = new THREE.MeshBasicMaterial({ color: 0xff0044 });
 
   if (type === 'drone') {
-    // Cyber Police Drone Craft
-    const core = new THREE.Mesh(new THREE.OctahedronGeometry(0.75, 1), new THREE.MeshBasicMaterial({ color: 0x38bdf8 }));
+    const core = new THREE.Mesh(
+      new THREE.OctahedronGeometry(0.75, 1),
+      new THREE.MeshBasicMaterial({ color: 0x38bdf8 })
+    );
     core.position.y = 1.2;
     group.add(core);
 
@@ -298,15 +266,27 @@ export default function NeonDriftGame({ onScoreUpdate, onGameOver, highScore }: 
     updateScore,
     triggerGameOver,
     startWithCountdown,
-    countdown
+    countdown,
+    scoreRef,
   } = useGameEngine({
     gameId: 'neon-drift',
     onGameOver,
-    onScoreUpdate
+    onScoreUpdate,
   });
 
+  const gameStateRef = useRef(gameState);
+  const updateScoreRef = useRef(updateScore);
+  const triggerGameOverRef = useRef(triggerGameOver);
+
+  useEffect(() => {
+    gameStateRef.current = gameState;
+    scoreRef.current = score;
+    updateScoreRef.current = updateScore;
+    triggerGameOverRef.current = triggerGameOver;
+  }, [gameState, score, updateScore, triggerGameOver, scoreRef]);
+
   const [speedKmh, setSpeedKmh] = useState(160);
-  const [nitro, setNitro] = useState(40);
+  const [nitro, setNitro] = useState(45);
   const [shields, setShields] = useState(3);
   const [combo, setCombo] = useState(1);
   const [cameraMode, setCameraMode] = useState<CameraMode>('chase');
@@ -326,7 +306,7 @@ export default function NeonDriftGame({ onScoreUpdate, onGameOver, highScore }: 
     comboTimer: 0,
     scoreAcc: 0,
     isDrifting: false,
-    isBoosting: false
+    isBoosting: false,
   });
 
   const cameraModeRef = useRef<CameraMode>('chase');
@@ -344,7 +324,8 @@ export default function NeonDriftGame({ onScoreUpdate, onGameOver, highScore }: 
       if (e.repeat) return;
       if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') inputStateRef.current.left = true;
       else if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') inputStateRef.current.right = true;
-      else if (e.key === 'Shift' || e.key === 'ArrowDown' || e.key === 's' || e.key === 'S') inputStateRef.current.drift = true;
+      else if (e.key === 'Shift' || e.key === 'ArrowDown' || e.key === 's' || e.key === 'S')
+        inputStateRef.current.drift = true;
       else if (e.key === ' ' || e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W') {
         e.preventDefault();
         inputStateRef.current.boost = true;
@@ -354,8 +335,10 @@ export default function NeonDriftGame({ onScoreUpdate, onGameOver, highScore }: 
     const handleKeyUp = (e: KeyboardEvent) => {
       if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') inputStateRef.current.left = false;
       else if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') inputStateRef.current.right = false;
-      else if (e.key === 'Shift' || e.key === 'ArrowDown' || e.key === 's' || e.key === 'S') inputStateRef.current.drift = false;
-      else if (e.key === ' ' || e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W') inputStateRef.current.boost = false;
+      else if (e.key === 'Shift' || e.key === 'ArrowDown' || e.key === 's' || e.key === 'S')
+        inputStateRef.current.drift = false;
+      else if (e.key === ' ' || e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W')
+        inputStateRef.current.boost = false;
     };
 
     window.addEventListener('keydown', handleKeyDown);
@@ -366,6 +349,7 @@ export default function NeonDriftGame({ onScoreUpdate, onGameOver, highScore }: 
     };
   }, [toggleCameraMode]);
 
+  // Persistent Single-Mount Three.js WebGL Lifecycle
   useEffect(() => {
     const mount = canvasMountRef.current;
     if (!mount) return;
@@ -452,12 +436,11 @@ export default function NeonDriftGame({ onScoreUpdate, onGameOver, highScore }: 
         width: type === 'truck' ? 2.2 : 1.7,
         length: type === 'truck' ? 4.6 : 3.4,
         scoredNearMiss: false,
-        color
+        color,
       });
     }
     trafficCarsRef.current = trafficCars;
 
-    // Power-Up Items
     const powerUps: PowerUpItem[] = [];
     const pTypes: CyberPowerUpType[] = ['emp', 'shield', 'double'];
     pTypes.forEach((type, idx) => {
@@ -473,17 +456,33 @@ export default function NeonDriftGame({ onScoreUpdate, onGameOver, highScore }: 
         mesh: pMesh,
         lane,
         z,
-        active: true
+        active: true,
       });
     });
     powerUpsRef.current = powerUps;
 
-    let animationFrameId: number;
-    let lastTime = performance.now();
-    let toastTimeout: any = null;
+    const resizeObserver = new ResizeObserver(() => {
+      if (!mount) return;
+      const w = mount.clientWidth || 800;
+      const h = mount.clientHeight || 500;
+      camera.aspect = w / h;
+      camera.updateProjectionMatrix();
+      renderer.setSize(w, h);
+    });
+    resizeObserver.observe(mount);
 
-    const tick = () => {
-      const now = performance.now();
+    let disposed = false;
+    let frameHandle = 0;
+    let lastTime = performance.now();
+    let toastTimeout: ReturnType<typeof setTimeout> | undefined;
+    let hudSyncCounter = 0;
+
+    const afterDraw = isSoftwareGl
+      ? (cb: FrameRequestCallback) => window.setTimeout(() => cb(performance.now()), 16)
+      : (cb: FrameRequestCallback) => requestAnimationFrame(cb);
+
+    const tick = (now: number) => {
+      if (disposed) return;
       const delta = Math.min((now - lastTime) / 1000, 0.1);
       lastTime = now;
 
@@ -496,7 +495,7 @@ export default function NeonDriftGame({ onScoreUpdate, onGameOver, highScore }: 
         }
       });
 
-      if (gameState === 'playing') {
+      if (gameStateRef.current === 'playing') {
         const wantsDrift = inputs.drift;
         pState.isDrifting = wantsDrift;
 
@@ -521,7 +520,11 @@ export default function NeonDriftGame({ onScoreUpdate, onGameOver, highScore }: 
         }
 
         const targetDriftYaw = wantsDrift
-          ? (inputs.left ? 0.45 : inputs.right ? -0.45 : pState.vx * 0.04)
+          ? inputs.left
+            ? 0.45
+            : inputs.right
+            ? -0.45
+            : pState.vx * 0.04
           : pState.vx * 0.025;
         pState.driftAngle = THREE.MathUtils.damp(pState.driftAngle, targetDriftYaw, 12, delta);
 
@@ -549,7 +552,9 @@ export default function NeonDriftGame({ onScoreUpdate, onGameOver, highScore }: 
         if (pState.scoreAcc >= 1) {
           const added = Math.floor(pState.scoreAcc);
           pState.scoreAcc -= added;
-          updateScore(score + added);
+          const nextScore = scoreRef.current + added;
+          scoreRef.current = nextScore;
+          updateScoreRef.current(nextScore);
         }
 
         if (pState.combo > 1) {
@@ -567,7 +572,7 @@ export default function NeonDriftGame({ onScoreUpdate, onGameOver, highScore }: 
           playerCar.visible = true;
         }
 
-        const roadSpeedUnits = (pState.speedKmh / 3.6) * 1.6 * delta;
+        const roadSpeedUnits = ((pState.speedKmh / 3.6) * 1.6) * delta;
         roadMeshes.forEach((road) => {
           road.position.z += roadSpeedUnits;
           if (road.position.z > ROAD_SEGMENT_LENGTH) {
@@ -575,10 +580,10 @@ export default function NeonDriftGame({ onScoreUpdate, onGameOver, highScore }: 
           }
         });
 
-        // Power-Up Collection Check
         powerUps.forEach((p) => {
           if (!p.active) return;
           p.z += roadSpeedUnits;
+          p.mesh.position.set(p.lane, 0, p.z);
           if (p.z > 25) {
             p.z = -180 - Math.random() * 80;
             p.active = true;
@@ -608,13 +613,13 @@ export default function NeonDriftGame({ onScoreUpdate, onGameOver, highScore }: 
               setCombo(pState.combo);
               setNearMissToast({ id: Date.now(), text: 'DOUBLE MULTIPLIER ACTIVATED!', multiplier: pState.combo });
             }
-            clearTimeout(toastTimeout);
+            if (toastTimeout) clearTimeout(toastTimeout);
             toastTimeout = setTimeout(() => setNearMissToast(null), 1600);
           }
         });
 
         trafficCars.forEach((tCar) => {
-          const relativeSpeed = (pState.speedKmh - tCar.speed) / 3.6 * 1.5 * delta;
+          const relativeSpeed = ((pState.speedKmh - tCar.speed) / 3.6) * 1.5 * delta;
           tCar.z += relativeSpeed;
 
           if (tCar.z > 25) {
@@ -635,16 +640,18 @@ export default function NeonDriftGame({ onScoreUpdate, onGameOver, highScore }: 
             pState.combo = Math.min(16, pState.combo + 1);
             pState.comboTimer = 4.0;
             const bonusPoints = 250 * pState.combo;
-            updateScore(score + bonusPoints);
+            const nextScore = scoreRef.current + bonusPoints;
+            scoreRef.current = nextScore;
+            updateScoreRef.current(nextScore);
             screenShake.trigger('medium');
 
             setCombo(pState.combo);
             setNearMissToast({
               id: Date.now(),
               text: `NEAR MISS! +${bonusPoints}`,
-              multiplier: pState.combo
+              multiplier: pState.combo,
             });
-            clearTimeout(toastTimeout);
+            if (toastTimeout) clearTimeout(toastTimeout);
             toastTimeout = setTimeout(() => setNearMissToast(null), 1400);
           }
 
@@ -658,10 +665,10 @@ export default function NeonDriftGame({ onScoreUpdate, onGameOver, highScore }: 
             setShields(pState.shields);
             setCombo(1);
 
-            pState.vx = (pState.x - tCar.x > 0 ? 6 : -6);
+            pState.vx = pState.x - tCar.x > 0 ? 6 : -6;
 
             if (pState.shields <= 0) {
-              triggerGameOver();
+              triggerGameOverRef.current(scoreRef.current);
             }
           }
         });
@@ -679,8 +686,11 @@ export default function NeonDriftGame({ onScoreUpdate, onGameOver, highScore }: 
         flameLeft.visible = wantsBoost;
         flameRight.visible = wantsBoost;
 
-        setSpeedKmh(Math.round(pState.speedKmh));
-        setNitro(Math.round(pState.nitro));
+        hudSyncCounter++;
+        if (hudSyncCounter % 3 === 0) {
+          setSpeedKmh(Math.round(pState.speedKmh));
+          setNitro(Math.round(pState.nitro));
+        }
       }
 
       const activeMode = cameraModeRef.current;
@@ -689,7 +699,11 @@ export default function NeonDriftGame({ onScoreUpdate, onGameOver, highScore }: 
       camera.updateProjectionMatrix();
 
       if (activeMode === 'chase') {
-        _camPos.set(pState.x * 0.65, 2.9 + (pState.isBoosting ? 0.3 : 0), 5.6 + (pState.isBoosting ? 0.8 : 0));
+        _camPos.set(
+          pState.x * 0.65,
+          2.9 + (pState.isBoosting ? 0.3 : 0),
+          5.6 + (pState.isBoosting ? 0.8 : 0)
+        );
         _camTarget.set(pState.x * 0.85, 1.1, -12);
       } else if (activeMode === 'hood') {
         _camPos.set(pState.x, 0.95, -0.6);
@@ -703,24 +717,27 @@ export default function NeonDriftGame({ onScoreUpdate, onGameOver, highScore }: 
       camera.lookAt(_camTarget);
 
       renderer.render(scene, camera);
-      animationFrameId = requestAnimationFrame(tick);
+      frameHandle = afterDraw(tick);
     };
 
-    animationFrameId = requestAnimationFrame(tick);
+    frameHandle = afterDraw(tick);
 
     return () => {
-      cancelAnimationFrame(animationFrameId);
-      clearTimeout(toastTimeout);
-      roadGeom.dispose();
+      disposed = true;
+      cancelAnimationFrame(frameHandle);
+      clearTimeout(frameHandle);
+      if (toastTimeout) clearTimeout(toastTimeout);
+      resizeObserver.disconnect();
       roadTexture.dispose();
-      renderer.dispose();
-      if (mount && renderer.domElement) {
+      disposeThreeScene(scene, renderer);
+      if (mount && renderer.domElement && renderer.domElement.parentNode === mount) {
         mount.removeChild(renderer.domElement);
       }
     };
-  }, [gameState, score, updateScore, triggerGameOver]);
+  }, [scoreRef]);
 
   const handleStartGame = useCallback(() => {
+    updateScore(0);
     playerStateRef.current = {
       x: 0,
       vx: 0,
@@ -734,22 +751,28 @@ export default function NeonDriftGame({ onScoreUpdate, onGameOver, highScore }: 
       comboTimer: 0,
       scoreAcc: 0,
       isDrifting: false,
-      isBoosting: false
+      isBoosting: false,
     };
+    trafficCarsRef.current.forEach((tc, i) => {
+      tc.lane = ROAD_LANES[i % ROAD_LANES.length];
+      tc.x = tc.lane;
+      tc.z = -60 - i * 32;
+      tc.scoredNearMiss = false;
+    });
     setShields(3);
     setNitro(45);
     setCombo(1);
     startWithCountdown();
-  }, [startWithCountdown]);
+  }, [updateScore, startWithCountdown]);
 
   return (
     <div className="relative w-full h-full flex flex-col items-center justify-center bg-black overflow-hidden select-none font-sans">
       <div ref={canvasMountRef} className="absolute inset-0 w-full h-full cursor-grab active:cursor-grabbing" />
 
-      {/* TOP HUD BAR */}
+      {/* TOP HUD BAR (Zero backdrop-blur over WebGL canvas) */}
       <div className="absolute top-3 left-4 right-4 flex items-center justify-between pointer-events-none z-10">
         <div className="flex items-center gap-3">
-          <div className="bg-zinc-950/80 backdrop-blur-md px-3.5 py-1.5 rounded-lg border border-cyan-500/30 flex items-center gap-2 shadow-[0_0_15px_rgba(6,182,212,0.15)]">
+          <div className="bg-zinc-950/90 px-3.5 py-1.5 rounded-lg border border-cyan-500/30 flex items-center gap-2 shadow-[0_0_15px_rgba(6,182,212,0.15)]">
             <span className="text-xs uppercase tracking-wider font-semibold text-cyan-400">SKOR</span>
             <span className="font-mono font-black text-xl text-white tracking-wider">
               {score.toLocaleString()}
@@ -764,7 +787,7 @@ export default function NeonDriftGame({ onScoreUpdate, onGameOver, highScore }: 
         </div>
 
         <div className="flex items-center gap-2">
-          <div className="bg-zinc-950/80 backdrop-blur-md px-3 py-1.5 rounded-lg border border-zinc-800 flex items-center gap-2 text-zinc-400">
+          <div className="bg-zinc-950/90 px-3 py-1.5 rounded-lg border border-zinc-800 flex items-center gap-2 text-zinc-400">
             <Trophy className="w-3.5 h-3.5 text-amber-400" />
             <span className="text-xs font-mono font-medium text-zinc-300">
               BEST: {highScore.toLocaleString()}
@@ -783,14 +806,16 @@ export default function NeonDriftGame({ onScoreUpdate, onGameOver, highScore }: 
         </div>
       )}
 
-      {/* BOTTOM COLLAPSIBLE DOCK */}
+      {/* BOTTOM DOCK */}
       <div className="absolute bottom-4 left-4 right-4 flex items-end justify-between pointer-events-none z-10">
-        <div className="bg-zinc-950/85 backdrop-blur-md border border-zinc-800 p-3 rounded-xl flex items-center gap-4 text-white">
+        <div className="bg-zinc-950/90 border border-zinc-800 p-3 rounded-xl flex items-center gap-4 text-white">
           <div className="flex items-center gap-2">
             <Gauge className="w-5 h-5 text-cyan-400" />
             <div>
               <div className="text-[10px] text-zinc-400 font-semibold uppercase">KECEPATAN</div>
-              <div className="text-xl font-mono font-black text-white">{speedKmh} <span className="text-xs text-zinc-400 font-normal">KM/H</span></div>
+              <div className="text-xl font-mono font-black text-white">
+                {speedKmh} <span className="text-xs text-zinc-400 font-normal">KM/H</span>
+              </div>
             </div>
           </div>
           <div className="h-8 w-px bg-zinc-800" />
@@ -812,7 +837,9 @@ export default function NeonDriftGame({ onScoreUpdate, onGameOver, highScore }: 
                 {Array.from({ length: 4 }).map((_, i) => (
                   <div
                     key={i}
-                    className={`w-3.5 h-2 rounded-sm ${i < shields ? 'bg-emerald-400 shadow-[0_0_8px_rgba(16,185,129,0.5)]' : 'bg-zinc-800'}`}
+                    className={`w-3.5 h-2 rounded-sm ${
+                      i < shields ? 'bg-emerald-400 shadow-[0_0_8px_rgba(16,185,129,0.5)]' : 'bg-zinc-800'
+                    }`}
                   />
                 ))}
               </div>
@@ -823,7 +850,7 @@ export default function NeonDriftGame({ onScoreUpdate, onGameOver, highScore }: 
         <div className="pointer-events-auto flex items-center gap-2">
           <button
             onClick={toggleCameraMode}
-            className="p-3 bg-zinc-950/85 hover:bg-zinc-900 border border-zinc-800 text-zinc-300 hover:text-white rounded-xl transition-colors flex items-center gap-2 text-xs font-semibold"
+            className="p-3 bg-zinc-950/90 hover:bg-zinc-900 border border-zinc-800 text-zinc-300 hover:text-white rounded-xl transition-colors flex items-center gap-2 text-xs font-semibold cursor-pointer"
           >
             <Eye className="w-4 h-4 text-cyan-400" />
             Kamera: {cameraMode.toUpperCase()}

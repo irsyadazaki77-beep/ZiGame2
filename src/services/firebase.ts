@@ -1,6 +1,6 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut as fbSignOut, onAuthStateChanged, User } from 'firebase/auth';
-import { getFirestore, doc, getDoc, getDocFromServer, setDoc, updateDoc } from 'firebase/firestore';
+import { initializeFirestore, getFirestore, doc, getDoc, getDocFromServer, setDoc, updateDoc } from 'firebase/firestore';
 import { logger } from '../utils/logger';
 import firebaseConfigJson from '../../firebase-applet-config.json';
 
@@ -76,10 +76,20 @@ try {
   if (firebaseConfig.apiKey && firebaseConfig.projectId) {
     app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
     auth = getAuth(app);
-    // Initialize Firestore with specific database ID when configured
-    db = firebaseConfig.firestoreDatabaseId && firebaseConfig.firestoreDatabaseId !== '(default)'
-      ? getFirestore(app, firebaseConfig.firestoreDatabaseId)
-      : getFirestore(app);
+    // Initialize Firestore with specific database ID and experimentalAutoDetectLongPolling for cloud/sandbox resilience
+    try {
+      const firestoreSettings = {
+        experimentalAutoDetectLongPolling: true,
+        ignoreUndefinedProperties: true
+      };
+      db = firebaseConfig.firestoreDatabaseId && firebaseConfig.firestoreDatabaseId !== '(default)'
+        ? initializeFirestore(app, firestoreSettings, firebaseConfig.firestoreDatabaseId)
+        : initializeFirestore(app, firestoreSettings);
+    } catch {
+      db = firebaseConfig.firestoreDatabaseId && firebaseConfig.firestoreDatabaseId !== '(default)'
+        ? getFirestore(app, firebaseConfig.firestoreDatabaseId)
+        : getFirestore(app);
+    }
     provider = new GoogleAuthProvider();
     provider.setCustomParameters({ prompt: 'select_account' });
     isInitialized = true;

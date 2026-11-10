@@ -1,26 +1,25 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
+import * as THREE from 'three';
+import { GameComponentProps } from '../../types';
 import { audio } from '../../utils/audio';
 import { useGameEngine } from '../../hooks/useGameEngine';
-import { GameContainer } from '../gameplay/GameContainer';
-import { GameHUD } from '../gameplay/GameHUD';
 import { GameOverlay } from '../gameplay/GameOverlay';
+import { ThreeDockOverlay } from '../gameplay/ThreeDockOverlay';
+import {
+  ThreeStageController,
+  CameraPreset3D,
+  QualityLevel3D
+} from '../../utils/threeStage';
+import { Cpu, Zap, PlusCircle, Orbit } from 'lucide-react';
 
-interface GameProps {
-  onGameOver: (score: number) => void;
-  onScoreUpdate: (score: number) => void;
-  highScore: number;
-}
+export default function CyberClickerGame({
+  onGameOver,
+  onScoreUpdate,
+  highScore
+}: GameComponentProps) {
+  const mountRef = useRef<HTMLDivElement | null>(null);
+  const stageRef = useRef<ThreeStageController | null>(null);
 
-interface Upgrade {
-  id: string;
-  name: string;
-  cost: number;
-  cps: number; // Click per second boost
-  count: number;
-  icon: string;
-}
-
-export default function CyberClickerGame({ onGameOver, onScoreUpdate, highScore }: GameProps) {
   const {
     gameState,
     score,
@@ -28,278 +27,289 @@ export default function CyberClickerGame({ onGameOver, onScoreUpdate, highScore 
     startWithCountdown,
     countdown,
     triggerGameOver,
-    pauseGame,
-    resumeGame,
+    scoreRef
   } = useGameEngine({
-    gameId: 'cyberclicker',
+    gameId: 'cyber-clicker',
     onGameOver,
-    onScoreUpdate,
+    onScoreUpdate
   });
 
-  const [cps, setCps] = useState(0);
-  const [timeLeft, setTimeLeft] = useState(60);
-  const [isFever, setIsFever] = useState(false);
-  const [feverProgress, setFeverProgress] = useState(0);
-  const [feverTimer, setFeverTimer] = useState(0);
-  const [clickScale, setClickScale] = useState(1);
-  const [clicksCount, setClicksCount] = useState(0);
+  const [energyCredits, setEnergyCredits] = useState(0);
+  const [clickPower, setClickPower] = useState(5);
+  const [autoSatellites, setAutoSatellites] = useState(1);
+  const [cameraPreset, setCameraPreset] = useState<CameraPreset3D>('isometric');
+  const [quality, setQuality] = useState<QualityLevel3D>('ultra');
 
-  const [upgrades, setUpgrades] = useState<Upgrade[]>([
-    { id: 'extractor', name: 'Auto-Extractor', cost: 15, cps: 1, count: 0, icon: '⚡' },
-    { id: 'overclocker', name: 'Quantum Overclocker', cost: 100, cps: 8, count: 0, icon: '🌀' },
-    { id: 'condenser', name: 'Gravity Condenser', cost: 500, cps: 45, count: 0, icon: '🌌' },
-    { id: 'reactor', name: 'AI Fusion Grid', cost: 2500, cps: 250, count: 0, icon: '🤖' },
-  ]);
-
-  const timerRef = useRef<NodeJS.Timeout | null>(null);
-  const cpsRef = useRef<NodeJS.Timeout | null>(null);
-
-  // Click handler
-  const handleClick = (e: React.MouseEvent<HTMLButtonElement>) => {
-    if (gameState !== 'playing') return;
-    audio.playCoin();
-    
-    const clickPower = 1 + upgrades.reduce((sum, up) => sum + up.count * (up.cps * 0.1), 0);
-    const multiplier = isFever ? 5 : 1;
-    const gained = clickPower * multiplier;
-
-    addScore(gained);
-    setClicksCount(prev => prev + 1);
-    
-    // Fever charge
-    if (!isFever) {
-      setFeverProgress(prev => {
-        const next = prev + 4;
-        if (next >= 100) {
-          triggerFever();
-          return 0;
-        }
-        return next;
-      });
-    }
-
-    // Squash effect
-    setClickScale(0.9);
-    setTimeout(() => setClickScale(1), 80);
-
-    // Dynamic rising numbers
-    createClickParticle(e.clientX, e.clientY, `+${gained.toFixed(0)}`);
-  };
-
-  const triggerFever = () => {
-    audio.playLevelUp();
-    setIsFever(true);
-    setFeverTimer(10);
-  };
-
-  // Click particles helper
-  const createClickParticle = (x: number, y: number, text: string) => {
-    const el = document.createElement('div');
-    el.innerText = text;
-    el.className = 'fixed font-mono font-black pointer-events-none text-amber-400 select-none text-sm z-50 animate-bounce transition-all duration-700 opacity-100';
-    el.style.left = `${x}px`;
-    el.style.top = `${y}px`;
-    document.body.appendChild(el);
-
-    setTimeout(() => {
-      el.style.transform = `translateY(-40px) scale(1.5)`;
-      el.style.opacity = '0';
-    }, 50);
-
-    setTimeout(() => {
-      document.body.removeChild(el);
-    }, 800);
-  };
-
-  const buyUpgrade = (id: string) => {
-    if (gameState !== 'playing') return;
-    const upIndex = upgrades.findIndex(u => u.id === id);
-    if (upIndex === -1) return;
-    const upgrade = upgrades[upIndex];
-
-    if (score >= upgrade.cost) {
-      audio.playScore();
-      addScore(-upgrade.cost);
-      
-      const updated = [...upgrades];
-      updated[upIndex] = {
-        ...upgrade,
-        count: upgrade.count + 1,
-        cost: Math.floor(upgrade.cost * 1.3),
-      };
-
-      setUpgrades(updated);
-      
-      // Calculate total CPS
-      const newCps = updated.reduce((sum, u) => sum + u.count * u.cps, 0);
-      setCps(newCps);
-    }
-  };
-
-  // Main game timer
+  const gameStateRef = useRef(gameState);
   useEffect(() => {
-    if (gameState === 'playing') {
-      timerRef.current = setInterval(() => {
-        setTimeLeft(prev => {
-          if (prev <= 1) {
-            endGame();
-            return 0;
-          }
-          return prev - 1;
-        });
+    gameStateRef.current = gameState;
+  }, [gameState]);
 
-        // Fever duration tracker
-        setFeverTimer(prev => {
-          if (prev <= 1) {
-            setIsFever(false);
-            return 0;
-          }
-          return prev - 1;
-        });
-      }, 1000);
+  const reactorRef = useRef({
+    credits: 0,
+    clickPower: 5,
+    satellites: 1,
+    pulseScale: 1.0,
+    spinBoost: 0,
+    autoTimer: 0
+  });
 
-      // Auto extraction ticks (10 times a second for smoother accumulation)
-      cpsRef.current = setInterval(() => {
-        const upgradePower = upgrades.reduce((sum, u) => sum + u.count * u.cps, 0);
-        if (upgradePower > 0) {
-          const tickGain = (upgradePower / 10) * (isFever ? 2 : 1);
-          addScore(tickGain);
-        }
-      }, 100);
+  const pulseCore = useCallback(() => {
+    if (gameStateRef.current !== 'playing') return;
+    const r = reactorRef.current;
+    r.credits += r.clickPower;
+    r.pulseScale = 1.38;
+    r.spinBoost = 6.0;
+    setEnergyCredits(r.credits);
+    addScore(r.clickPower);
+    audio.playCoin?.();
+    const stage = stageRef.current;
+    if (stage) {
+      stage.particles.burst(0, 1.5, 0, 16, 0x6366f1, 7.5);
+      stage.triggerTrauma(0.16);
     }
+  }, [addScore]);
+
+  const buySatellite = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation();
+      if (gameStateRef.current !== 'playing') return;
+      const r = reactorRef.current;
+      const cost = 35 * r.satellites;
+      if (r.credits < cost) return;
+      r.credits -= cost;
+      r.satellites += 1;
+      r.clickPower += 3;
+      setEnergyCredits(r.credits);
+      setAutoSatellites(r.satellites);
+      setClickPower(r.clickPower);
+      audio.playPowerUp?.();
+      stageRef.current?.particles.burst(0, 1.5, 0, 32, 0x22d3ee, 9);
+      stageRef.current?.kickFov(4);
+    },
+    []
+  );
+
+  const handleStart = useCallback(() => {
+    reactorRef.current = {
+      credits: 0,
+      clickPower: 5,
+      satellites: 1,
+      pulseScale: 1.0,
+      spinBoost: 0,
+      autoTimer: 0
+    };
+    setEnergyCredits(0);
+    setClickPower(5);
+    setAutoSatellites(1);
+    startWithCountdown();
+  }, [startWithCountdown]);
+
+  const handleSelectPreset = useCallback((preset: CameraPreset3D) => {
+    setCameraPreset(preset);
+    stageRef.current?.setCameraPreset(preset);
+  }, []);
+
+  const handleCycleQuality = useCallback(() => {
+    setQuality((prev) => {
+      const next: QualityLevel3D =
+        prev === 'ultra' ? 'balanced' : prev === 'balanced' ? 'performance' : 'ultra';
+      stageRef.current?.setQualityLevel(next);
+      return next;
+    });
+  }, []);
+
+  useEffect(() => {
+    const container = mountRef.current;
+    if (!container) return;
+
+    let stage: ThreeStageController;
+    try {
+      stage = new ThreeStageController({
+        container,
+        backgroundColor: 0x060818,
+        fogColor: 0x060818,
+        fogDensity: 0.015,
+        initialPreset: 'isometric',
+        gridPrimaryColor: '#6366f1',
+        gridSecondaryColor: '#090d24',
+        cameraPresets: {
+          isometric: { position: [7.8, 8.8, 7.8], lookAt: [0, 1.4, 0], fov: 46 },
+          chase: { position: [0, 4.5, 9.8], lookAt: [0, 1.4, 0], fov: 50 },
+          diorama: { position: [0, 13.5, 1.8], lookAt: [0, 0, 0], fov: 46 }
+        }
+      });
+    } catch {
+      return;
+    }
+
+    stageRef.current = stage;
+    setQuality(stage.getQualityLevel());
+
+    // Build 9-Part Quantum Gyroscope Reactor Core
+    const reactorGroup = new THREE.Group();
+    reactorGroup.position.y = 1.65;
+
+    const coreCrystal = new THREE.Mesh(
+      new THREE.IcosahedronGeometry(1.05, 1),
+      new THREE.MeshPhysicalMaterial({
+        color: 0x6366f1,
+        emissive: 0x4f46e5,
+        emissiveIntensity: 0.85,
+        roughness: 0.15,
+        metalness: 0.3,
+        clearcoat: 1.0
+      })
+    );
+    const ring1 = new THREE.Mesh(
+      new THREE.TorusGeometry(1.65, 0.09, 12, 36),
+      new THREE.MeshPhysicalMaterial({
+        color: 0x38bdf8,
+        metalness: 0.88,
+        roughness: 0.18,
+        clearcoat: 0.9
+      })
+    );
+    const ring2 = new THREE.Mesh(
+      new THREE.TorusGeometry(2.15, 0.07, 12, 36),
+      new THREE.MeshPhysicalMaterial({
+        color: 0xa855f7,
+        metalness: 0.88,
+        roughness: 0.18,
+        clearcoat: 0.9
+      })
+    );
+    ring2.rotation.x = Math.PI / 2;
+
+    reactorGroup.add(coreCrystal, ring1, ring2);
+    stage.scene.add(reactorGroup);
+
+    // Orbiting Auto-Miner Satellites InstancedMesh
+    const maxSats = 16;
+    const satGeo = new THREE.OctahedronGeometry(0.28, 0);
+    const satMat = new THREE.MeshStandardMaterial({
+      color: 0x22d3ee,
+      emissive: 0x06b6d4,
+      emissiveIntensity: 0.9
+    });
+    const satInstanced = new THREE.InstancedMesh(satGeo, satMat, maxSats);
+    satInstanced.frustumCulled = false;
+    stage.scene.add(satInstanced);
+    const dummyMat = new THREE.Matrix4();
+
+    stage.startLoop((dt, elapsed) => {
+      const r = reactorRef.current;
+      r.pulseScale = THREE.MathUtils.damp(r.pulseScale, 1.0, 10, dt);
+      r.spinBoost = THREE.MathUtils.damp(r.spinBoost, 0, 4, dt);
+
+      coreCrystal.scale.setScalar(r.pulseScale);
+      coreCrystal.rotation.y += (1.5 + r.spinBoost) * dt;
+      ring1.rotation.z += (2.2 + r.spinBoost * 0.5) * dt;
+      ring1.rotation.x += 1.1 * dt;
+      ring2.rotation.y -= (1.8 + r.spinBoost * 0.5) * dt;
+
+      // Update orbiting satellites
+      const satCount = Math.min(maxSats, r.satellites);
+      for (let i = 0; i < maxSats; i++) {
+        if (i < satCount) {
+          const angle = elapsed * 1.8 + (i / satCount) * Math.PI * 2;
+          const sx = Math.cos(angle) * 3.1;
+          const sz = Math.sin(angle) * 3.1;
+          const sy = 1.65 + Math.sin(elapsed * 3 + i) * 0.35;
+          dummyMat.makeScale(1, 1, 1);
+          dummyMat.setPosition(sx, sy, sz);
+          satInstanced.setMatrixAt(i, dummyMat);
+        } else {
+          dummyMat.makeScale(0, 0, 0);
+          dummyMat.setPosition(0, -999, 0);
+          satInstanced.setMatrixAt(i, dummyMat);
+        }
+      }
+      satInstanced.instanceMatrix.needsUpdate = true;
+
+      if (gameStateRef.current !== 'playing') return;
+
+      r.autoTimer += dt;
+      if (r.autoTimer >= 1.0) {
+        r.autoTimer -= 1.0;
+        const passive = r.satellites * 4;
+        r.credits += passive;
+        setEnergyCredits(r.credits);
+        addScore(passive);
+      }
+    });
 
     return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
-      if (cpsRef.current) clearInterval(cpsRef.current);
+      stage.dispose();
+      stageRef.current = null;
     };
-  }, [gameState, upgrades, isFever]);
-
-  const startGame = () => {
-    startWithCountdown(() => {
-      setTimeLeft(60);
-      setIsFever(false);
-      setFeverProgress(0);
-      setClicksCount(0);
-      setUpgrades([
-        { id: 'extractor', name: 'Auto-Extractor', cost: 15, cps: 1, count: 0, icon: '⚡' },
-        { id: 'overclocker', name: 'Quantum Overclocker', cost: 100, cps: 8, count: 0, icon: '🌀' },
-        { id: 'condenser', name: 'Gravity Condenser', cost: 500, cps: 45, count: 0, icon: '🌌' },
-        { id: 'reactor', name: 'AI Fusion Grid', cost: 2500, cps: 250, count: 0, icon: '🤖' },
-      ]);
-      setCps(0);
-    });
-  };
-
-  const endGame = () => {
-    triggerGameOver(score);
-  };
+  }, [addScore]);
 
   return (
-    <GameContainer maxWidth="md" aspect="auto">
-      {(gameState === 'playing' || gameState === 'paused') && (
-        <GameHUD 
-          stats={[
-            { id: 'time', label: 'WAKTU', value: timeLeft < 10 ? `0${timeLeft}` : timeLeft, emphasized: timeLeft < 10, highlight: timeLeft < 10 ? 'text-red-500' : undefined },
-            { id: 'score', label: 'Z-ENERGY', value: Math.floor(score), emphasized: true },
-            { id: 'cps', label: 'AUTO-CPS', value: `+${cps}` }
-          ]} 
-        />
-      )}
+    <div
+      className="relative w-full h-full min-h-[460px] bg-slate-950 overflow-hidden rounded-2xl border border-indigo-500/20"
+      onClick={pulseCore}
+    >
+      <div ref={mountRef} className="absolute inset-0 w-full h-full cursor-pointer" />
+
+      <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex flex-wrap items-center justify-between gap-2 p-3.5">
+        <div className="flex items-center gap-3 rounded-xl border border-white/10 bg-slate-950/85 px-3.5 py-2 text-xs text-slate-200 tabular-nums">
+          <span className="flex items-center gap-1 font-semibold text-indigo-400">
+            <Cpu className="w-3.5 h-3.5" /> ENERGI: {energyCredits}
+          </span>
+          <span aria-hidden="true">·</span>
+          <span>SKOR: <strong className="text-white">{score}</strong></span>
+          <span aria-hidden="true">·</span>
+          <span className="text-cyan-400 font-semibold flex items-center gap-1">
+            <Orbit className="w-3.5 h-3.5" /> {autoSatellites} SATELIT
+          </span>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={buySatellite}
+            disabled={energyCredits < 35 * autoSatellites}
+            className="pointer-events-auto flex items-center gap-1.5 rounded-xl bg-indigo-500 px-3 py-2 text-xs font-semibold text-white transition-colors hover:bg-indigo-400 disabled:opacity-40 whitespace-nowrap shrink-0"
+          >
+            <PlusCircle className="w-3.5 h-3.5" /> Satelit Orbit ({35 * autoSatellites} Energi)
+          </button>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              triggerGameOver(scoreRef.current);
+            }}
+            className="pointer-events-auto rounded-xl border border-white/15 bg-slate-900/90 px-3 py-2 text-xs font-semibold text-slate-200 hover:bg-slate-800 whitespace-nowrap shrink-0"
+          >
+            Simpan & Selesai
+          </button>
+        </div>
+      </div>
+
+      <ThreeDockOverlay
+        cameraPreset={cameraPreset}
+        onSelectPreset={handleSelectPreset}
+        quality={quality}
+        onCycleQuality={handleCycleQuality}
+        extraControls={
+          <span className="hidden sm:inline-flex items-center gap-1 text-[11px] text-slate-400 px-2 whitespace-nowrap shrink-0">
+            <Zap className="w-3 h-3 text-indigo-400" /> Klik Reaktor Kuantum 3D (+{clickPower} Energi/Klik)
+          </span>
+        }
+      />
 
       <GameOverlay
         gameState={gameState}
-        score={Math.floor(score)}
+        score={score}
         highScore={highScore}
-        onStart={startGame}
-        onRestart={startGame}
-        onResume={resumeGame}
         countdown={countdown}
-        instructions="Ekstrak energi siber sebanyak mungkin dalam 60 detik. Beli upgrade untuk melipatgandakan penghasilan!"
+        onStart={handleStart}
+        onRestart={handleStart}
+        title="Cyber Core Clicker 3D"
+        description="Ekstrak energi dari Reaktor Gyroskopik 3D dan luncurkan satelit penambang otomatis ke orbit!"
+        themeColor="indigo"
       />
-
-      {(gameState === 'playing' || gameState === 'paused') && (
-        <div className="w-full grid grid-cols-1 md:grid-cols-2 gap-6 p-4 md:p-6 animate-fadeIn">
-          {/* Active play panel */}
-          <div className="flex flex-col items-center justify-center bg-zinc-900/30 border border-zinc-900/80 rounded-2xl p-6 min-h-[380px]">
-            {/* Core Energy Circle */}
-            <div className="relative my-6 flex items-center justify-center">
-              {isFever && (
-                <div className="absolute inset-0 rounded-full bg-amber-500/10 border-4 border-amber-400 animate-ping opacity-40"></div>
-              )}
-              <button
-                onClick={handleClick}
-                style={{ transform: `scale(${clickScale})` }}
-                className={`w-40 h-40 rounded-full flex flex-col items-center justify-center border-4 relative outline-none select-none transition-transform duration-700 cursor-pointer ${
-                  isFever
-                    ? 'bg-amber-950/30 border-amber-400 shadow-[0_0_40px_rgba(245,158,11,0.4)]'
-                    : 'bg-zinc-950 border-zinc-800 hover:border-zinc-700 shadow-[0_0_20px_rgba(255,255,255,0.02)]'
-                }`}
-              >
-                <div className={`text-4xl mb-2 ${isFever ? 'animate-bounce' : ''}`}>
-                  {isFever ? '🔥' : '⚛️'}
-                </div>
-                <span className="text-sm font-mono text-zinc-500 font-bold tracking-wider uppercase">
-                  {isFever ? 'FEVER 5X!' : 'TAP CORE'}
-                </span>
-              </button>
-            </div>
-
-            {/* Fever charging progress */}
-            <div className="w-full mt-6 max-w-[240px]">
-              <div className="flex justify-between text-xs font-mono text-zinc-500 uppercase mb-2">
-                <span>{isFever ? 'FEVER MODE AKTIF' : 'PENGISI FEVER'}</span>
-                <span>{isFever ? `${feverTimer}s` : `${feverProgress}%`}</span>
-              </div>
-              <div className="w-full h-2 bg-zinc-950 border border-zinc-900 rounded-full overflow-hidden">
-                <div
-                  className={`h-full transition-all duration-300 ${isFever ? 'bg-amber-400 ' : 'bg-zinc-700'}`}
-                  style={{ width: `${isFever ? (feverTimer / 10) * 100 : feverProgress}%` }}
-                />
-              </div>
-            </div>
-          </div>
-
-          {/* Upgrades panel */}
-          <div className="flex flex-col bg-zinc-900/30 border border-zinc-900/80 rounded-2xl p-4 space-y-3">
-            <h3 className="text-xs font-mono font-black text-zinc-400 uppercase tracking-wider border-b border-zinc-800 pb-2">
-              UPGRADES TOKO
-            </h3>
-            <div className="flex-1 overflow-y-auto space-y-2 max-h-[320px] pr-1">
-              {upgrades.map((upgrade) => {
-                const canBuy = score >= upgrade.cost;
-                return (
-                  <button
-                    key={upgrade.id}
-                    disabled={!canBuy}
-                    onClick={() => buyUpgrade(upgrade.id)}
-                    className={`w-full p-3 rounded-xl border flex items-center justify-between transition outline-none text-left select-none cursor-pointer ${
-                      canBuy
-                        ? 'bg-zinc-950 border-zinc-800 hover:border-zinc-700 hover:bg-zinc-900/40 text-white'
-                        : 'bg-zinc-950/40 border-zinc-950 text-zinc-600 cursor-not-allowed'
-                    }`}
-                  >
-                    <div className="flex items-center gap-3">
-                      <span className="text-xl bg-zinc-900 p-2 rounded-lg border border-zinc-800/60">{upgrade.icon}</span>
-                      <div>
-                        <div className="text-xs font-mono font-black uppercase tracking-wider">{upgrade.name}</div>
-                        <div className="text-[10px] font-mono text-zinc-500 uppercase mt-0.5">
-                          + {upgrade.cps} CPS • JUMLAH: {upgrade.count}
-                        </div>
-                      </div>
-                    </div>
-                    <div className="text-right">
-                      <div className={`text-xs font-mono font-black ${canBuy ? 'text-amber-400' : 'text-zinc-600'}`}>
-                        {upgrade.cost} Z-E
-                      </div>
-                      <span className="text-[8px] font-mono text-zinc-600 uppercase block mt-1">BELI 💸</span>
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        </div>
-      )}
-    </GameContainer>
+    </div>
   );
 }

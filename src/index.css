@@ -102,22 +102,27 @@
 }
 
 /* Global Mobile & Surface Optimization Rules */
-html, body {
+html, body, #root {
   background-color: var(--bg-base);
   color: var(--text-primary);
-  overscroll-behavior-y: none;
+  overscroll-behavior: none;
   -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
   padding-bottom: env(safe-area-inset-bottom, 0px);
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-left: env(safe-area-inset-left, 0px);
+  padding-right: env(safe-area-inset-right, 0px);
   transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
 }
 
-/* Explicit select-none for controls, buttons, and canvas */
+/* Explicit select-none for controls, buttons, and canvas to prevent mobile text selection or magnifying glass */
 canvas, button, .game-stage-container, .game-touch-controls, [role="button"], .no-select {
   user-select: none;
   -webkit-user-select: none;
+  -webkit-touch-callout: none;
 }
 
-/* Safe area insets helpers */
+/* Safe area insets helpers for iPhone Notch, Dynamic Island, and Android punch-hole displays */
 .pb-safe {
   padding-bottom: max(0.75rem, env(safe-area-inset-bottom, 0.75rem));
 }
@@ -207,10 +212,12 @@ input, textarea {
 }
 
 /* Scrollbar hide utility */
-.scrollbar-hide::-webkit-scrollbar {
+.scrollbar-hide::-webkit-scrollbar,
+.no-scrollbar::-webkit-scrollbar {
   display: none;
 }
-.scrollbar-hide {
+.scrollbar-hide,
+.no-scrollbar {
   -ms-overflow-style: none;
   scrollbar-width: none;
 }
@@ -263,6 +270,34 @@ input, textarea {
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
   }
+  .shake-subtle, .shake-medium, .shake-heavy {
+    animation: none !important;
+    transform: none !important;
+  }
+  .bg-scanlines, .crt-scanlines {
+    background: none !important;
+    opacity: 0 !important;
+  }
+}
+
+.reduce-motion *, .reduce-motion ::before, .reduce-motion ::after,
+body.reduced-motion *, body.reduced-motion ::before, body.reduced-motion ::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+  scroll-behavior: auto !important;
+}
+
+.reduce-motion .shake-subtle, .reduce-motion .shake-medium, .reduce-motion .shake-heavy,
+body.reduced-motion .shake-subtle, body.reduced-motion .shake-medium, body.reduced-motion .shake-heavy {
+  animation: none !important;
+  transform: none !important;
+}
+
+.disable-crt, .crt-disabled, .reduce-motion .bg-scanlines, .reduce-motion .crt-scanlines {
+  background: none !important;
+  opacity: 0 !important;
+  filter: none !important;
 }
 
 /* Performance Service Disable Classes */
@@ -287,31 +322,30 @@ input, textarea {
   animation-play-state: paused !important;
 }
 
-body.reduced-motion *, body.reduced-motion ::before, body.reduced-motion ::after {
-  animation-duration: 0.01ms !important;
-  animation-iteration-count: 1 !important;
-  transition-duration: 0.01ms !important;
-  scroll-behavior: auto !important;
+/* Game Canvas Containment Rules */
+.game-stage-container {
+  min-height: 320px;
+  max-height: 85vh;
+  max-height: 85dvh;
 }
 
-/* Game Canvas Containment Rules */
 .game-stage-container > div > div {
-  border: none !important;
-  box-shadow: none !important;
-  border-radius: 0 !important;
-  background: transparent !important;
-  max-width: 100% !important;
-  max-height: 100% !important;
+  border: none;
+  box-shadow: none;
+  border-radius: 0;
+  background: transparent;
+  max-width: 100%;
+  max-height: 100%;
 }
 
 .game-stage-container canvas {
-  border: none !important;
-  box-shadow: none !important;
-  border-radius: 8px !important;
-  object-fit: contain !important;
-  max-width: 100% !important;
-  max-height: 100% !important;
-  touch-action: none !important;
+  border: none;
+  box-shadow: none;
+  border-radius: 8px;
+  object-fit: contain;
+  max-width: 100%;
+  max-height: 100%;
+  touch-action: none;
 }
 
 .game-stage-container > div > div > div[class*="aspect-"],

@@ -85,6 +85,10 @@ export const PROGRESSION_CONFIG = {
   starterBadges: ['badge_first_step']
 };
 
+const _now = new Date();
+const _seasonStartIso = new Date(Date.UTC(_now.getUTCFullYear(), _now.getUTCMonth(), 1, 0, 0, 0)).toISOString();
+const _seasonEndIso = new Date(_now.getTime() + 90 * 24 * 60 * 60 * 1000).toISOString();
+
 export const SEASON_CONFIG = {
   activeSeason: {
     id: 'season_1',
@@ -92,8 +96,8 @@ export const SEASON_CONFIG = {
     theme: '#6366f1',
     themeName: 'Cyber Indigo',
     description: 'Buktikan ketangguhanmu di era pertama ZiGame. Kumpulkan Cyber Shards & raih gelar Cyber Vanguard!',
-    startAt: '2026-08-01T00:00:00Z',
-    endAt: '2026-09-30T23:59:59Z',
+    startAt: _seasonStartIso,
+    endAt: _seasonEndIso,
     featuredGames: ['space-defender', 'brick-breaker', 'snake'],
     badgeReward: {
       id: 'badge_season_1_master',
@@ -115,12 +119,12 @@ export const EVENT_CONFIG = {
   events: [
     {
       id: 'evt_double_xp_cyber',
-      name: '⚡ Cyber September Double XP',
+      name: '⚡ Cyber Double XP',
       description: 'Dapatkan 2x XP untuk setiap game yang Anda mainkan di arena ZiGame!',
       icon: '⚡',
       badgeColor: 'from-amber-500 to-orange-600',
-      startAt: '2026-09-01T00:00:00Z',
-      endAt: '2026-09-30T23:59:59Z',
+      startAt: _seasonStartIso,
+      endAt: _seasonEndIso,
       targetGames: ['all'],
       xpMultiplier: 2.0,
       coinMultiplier: 1.0,
@@ -132,8 +136,8 @@ export const EVENT_CONFIG = {
       description: 'Bonus 1.5x Koin dan 2x Mastery XP khusus game Sci-Fi & Stealth!',
       icon: '🚀',
       badgeColor: 'from-cyan-500 to-blue-600',
-      startAt: '2026-09-01T00:00:00Z',
-      endAt: '2026-09-30T23:59:59Z',
+      startAt: _seasonStartIso,
+      endAt: _seasonEndIso,
       targetGames: ['space-defender', 'neon-heist', 'orbital-defense', 'void-survivor'],
       xpMultiplier: 1.5,
       coinMultiplier: 1.5,

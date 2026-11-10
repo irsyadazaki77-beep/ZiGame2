@@ -1,416 +1,317 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
+import * as THREE from 'three';
+import { GameComponentProps } from '../../types';
 import { audio } from '../../utils/audio';
 import { useGameEngine } from '../../hooks/useGameEngine';
-import { Particle } from '../../types';
-import { GameContainer } from '../gameplay/GameContainer';
-import { GameHUD } from '../gameplay/GameHUD';
 import { GameOverlay } from '../gameplay/GameOverlay';
-import { MobileControls } from '../gameplay/MobileControls';
-import { ArrowDown } from 'lucide-react';
+import { ThreeDockOverlay } from '../gameplay/ThreeDockOverlay';
+import {
+  ThreeStageController,
+  CameraPreset3D,
+  QualityLevel3D
+} from '../../utils/threeStage';
+import { Coins, Sparkles, Zap } from 'lucide-react';
 
-interface PlinkoNeoGameProps {
-  onGameOver: (score: number) => void;
-  onScoreUpdate: (score: number) => void;
-  highScore: number;
-}
-
-interface PlinkoPeg {
+interface PlinkoBall3D {
+  mesh: THREE.Mesh;
   x: number;
-  y: number;
-  radius: number;
-}
-
-interface PlinkoBall {
-  x: number;
-  y: number;
+  z: number;
   vx: number;
-  vy: number;
-  radius: number;
-  color: string;
+  vz: number;
 }
 
-interface PlinkoBucket {
-  label: string;
-  multiplier: number;
-  color: string;
-  xStart: number;
-  xEnd: number;
-}
+const MULTIPLIERS = [2, 5, 10, 5, 2];
 
-export default function PlinkoNeoGame({ onGameOver, onScoreUpdate, highScore }: PlinkoNeoGameProps) {
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+export default function PlinkoNeoGame({
+  onGameOver,
+  onScoreUpdate,
+  highScore
+}: GameComponentProps) {
+  const mountRef = useRef<HTMLDivElement | null>(null);
+  const stageRef = useRef<ThreeStageController | null>(null);
 
   const {
     gameState,
-    setGameState,
     score,
-    updateScore,
     addScore,
-    startLoop,
-    stopLoop,
-    triggerGameOver,
     startWithCountdown,
     countdown,
-    scoreRef,
-    gameLoopRef
+    triggerGameOver,
+    scoreRef
   } = useGameEngine({
-    gameId: 'plinkoneo',
+    gameId: 'plinko-neo',
     onGameOver,
-    onScoreUpdate,
+    onScoreUpdate
   });
+
+  const [ballsLeft, setBallsLeft] = useState(12);
+  const [lastMulti, setLastMulti] = useState<number | null>(null);
+  const [cameraPreset, setCameraPreset] = useState<CameraPreset3D>('chase');
+  const [quality, setQuality] = useState<QualityLevel3D>('ultra');
 
   const gameStateRef = useRef(gameState);
   useEffect(() => {
     gameStateRef.current = gameState;
   }, [gameState]);
 
-  const [ballsLeft, setBallsLeft] = useState(5);
-  const ballsLeftRef = useRef(5);
+  const plinkoRef = useRef({
+    ballsRemaining: 12,
+    dropperX: 0
+  });
 
-  
-  useEffect(() => {
-    scoreRef.current = score;
-    ballsLeftRef.current = ballsLeft;
-  }, [score, ballsLeft]);
+  const activeBallsRef = useRef<PlinkoBall3D[]>([]);
+  const spawnBallFnRef = useRef<(xOffset?: number) => void>(() => {});
 
-  const CANVAS_WIDTH = 400;
-  const CANVAS_HEIGHT = 500;
-
-  // Plinko structure
-  const pegsRef = useRef<PlinkoPeg[]>([]);
-  const activeBallsRef = useRef<PlinkoBall[]>([]);
-  const particlesRef = useRef<Particle[]>([]);
-
-  // Define multiplier buckets at the bottom
-  const buckets: PlinkoBucket[] = [
-    { label: '5x', multiplier: 5, color: '#f43f5e', xStart: 0, xEnd: 66 },
-    { label: '2x', multiplier: 2, color: '#ec4899', xStart: 66, xEnd: 133 },
-    { label: '0.5x', multiplier: 0.5, color: '#a855f7', xStart: 133, xEnd: 200 },
-    { label: '0.5x', multiplier: 0.5, color: '#a855f7', xStart: 200, xEnd: 266 },
-    { label: '2x', multiplier: 2, color: '#ec4899', xStart: 266, xEnd: 333 },
-    { label: '5x', multiplier: 5, color: '#f43f5e', xStart: 333, xEnd: 400 },
-  ];
-
-  useEffect(() => {
-    generatePegGrid();
-    drawStatic();
-    return () => {
-      if (gameLoopRef?.current) cancelAnimationFrame(gameLoopRef.current);
-    };
+  const dropBall = useCallback(() => {
+    if (gameStateRef.current !== 'playing') return;
+    if (plinkoRef.current.ballsRemaining <= 0) return;
+    plinkoRef.current.ballsRemaining -= 1;
+    setBallsLeft(plinkoRef.current.ballsRemaining);
+    spawnBallFnRef.current();
+    audio.playClick?.();
   }, []);
 
-  const generatePegGrid = () => {
-    const list: PlinkoPeg[] = [];
-    const startY = 90;
-    const endY = 410;
-    const rowGap = 35;
-    
-    let rowIndex = 0;
-    for (let y = startY; y < endY; y += rowGap) {
-      // Alternating offsets for hexagonal grid
-      const count = rowIndex % 2 === 0 ? 8 : 9;
-      const xGap = CANVAS_WIDTH / (count + 1);
-
-      for (let i = 1; i <= count; i++) {
-        list.push({
-          x: i * xGap,
-          y,
-          radius: 4,
-        });
-      }
-      rowIndex++;
+  const handleStart = useCallback(() => {
+    const stage = stageRef.current;
+    if (stage) {
+      activeBallsRef.current.forEach((b) => stage.scene.remove(b.mesh));
     }
-    pegsRef.current = list;
-  };
-
-  const drawStatic = () => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    ctx.fillStyle = '#09090b';
-    ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
-
-    // Grid wires
-    ctx.strokeStyle = '#1e1b4b';
-    ctx.lineWidth = 0.5;
-    for (let x = 0; x < CANVAS_WIDTH; x += 40) {
-      ctx.beginPath();
-      ctx.moveTo(x, 0);
-      ctx.lineTo(x, CANVAS_HEIGHT);
-      ctx.stroke();
-    }
-
-    // Title
-    ctx.fillStyle = '#ffffff';
-    ctx.font = "bold 20px 'Space Grotesk', sans-serif";
-    ctx.textAlign = 'center';
-    ctx.fillText('PLINKO NEO ARCADE', CANVAS_WIDTH / 2, 40);
-
-    ctx.fillStyle = '#ec4899';
-    ctx.font = "11px 'JetBrains Mono', monospace";
-    ctx.fillText('JATUHKAN BOLA NEON UNTUK MERAIH MULTIPLIER', CANVAS_WIDTH / 2, 65);
-
-    // Pegs
-    ctx.fillStyle = '#3f3f46';
-    pegsRef.current.forEach(peg => {
-      ctx.beginPath();
-      ctx.arc(peg.x, peg.y, peg.radius, 0, Math.PI * 2);
-      ctx.fill();
-    });
-
-    // Buckets rendering
-    buckets.forEach(b => {
-      ctx.fillStyle = '#18181b';
-      ctx.fillRect(b.xStart + 2, 450, b.xEnd - b.xStart - 4, 50);
-      ctx.fillStyle = b.color;
-      ctx.font = "bold 13px 'Space Grotesk', sans-serif";
-      ctx.textAlign = 'center';
-      ctx.fillText(b.label, (b.xStart + b.xEnd) / 2, 480);
-    });
-  };
-
-  const startGame = useCallback(() => {
-    audio.playCoin();
-    updateScore(0);
-    setBallsLeft(5);
-
     activeBallsRef.current = [];
-    particlesRef.current = [];
+    plinkoRef.current = {
+      ballsRemaining: 12,
+      dropperX: 0
+    };
+    setBallsLeft(12);
+    setLastMulti(null);
+    startWithCountdown();
+  }, [startWithCountdown]);
 
-    startWithCountdown(() => {
-      startLoop(gameStep);
+  const handleSelectPreset = useCallback((preset: CameraPreset3D) => {
+    setCameraPreset(preset);
+    stageRef.current?.setCameraPreset(preset);
+  }, []);
+
+  const handleCycleQuality = useCallback(() => {
+    setQuality((prev) => {
+      const next: QualityLevel3D =
+        prev === 'ultra' ? 'balanced' : prev === 'balanced' ? 'performance' : 'ultra';
+      stageRef.current?.setQualityLevel(next);
+      return next;
     });
-  }, [updateScore, startWithCountdown, startLoop]);
+  }, []);
 
-  const dropBall = () => {
-    if (gameStateRef.current !== 'playing' || ballsLeft <= 0 || activeBallsRef.current.length > 0) return;
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === ' ' || e.key === 'Enter') dropBall();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [dropBall]);
 
-    audio.playCoin();
-    setBallsLeft(prev => prev - 1);
+  useEffect(() => {
+    const container = mountRef.current;
+    if (!container) return;
 
-    // Drop from top near center (with small random variation)
-    const dropX = CANVAS_WIDTH / 2 + (Math.random() - 0.5) * 35;
-    activeBallsRef.current.push({
-      x: dropX,
-      y: 65,
-      vx: (Math.random() - 0.5) * 1.5,
-      vy: 1.0,
-      radius: 6,
-      color: '#10b981',
-    });
-  };
-
-  const createPegSparks = (x: number, y: number, color: string) => {
-    for (let i = 0; i < 6; i++) {
-      particlesRef.current.push({
-        x,
-        y,
-        vx: (Math.random() - 0.5) * 4,
-        vy: (Math.random() - 0.5) * 4,
-        color,
-        radius: Math.random() * 1.5 + 1,
-        alpha: 1,
-        decay: Math.random() * 0.08 + 0.04,
+    let stage: ThreeStageController;
+    try {
+      stage = new ThreeStageController({
+        container,
+        backgroundColor: 0x0b0814,
+        fogColor: 0x0b0814,
+        fogDensity: 0.015,
+        initialPreset: 'chase',
+        gridPrimaryColor: '#f59e0b',
+        gridSecondaryColor: '#140e22',
+        cameraPresets: {
+          chase: { position: [0, 9.8, 10.5], lookAt: [0, 0.2, 0.5], fov: 48 },
+          isometric: { position: [8.5, 11.5, 8.5], lookAt: [0, 0.2, 0], fov: 45 },
+          diorama: { position: [0, 15.2, 1.5], lookAt: [0, 0, 0], fov: 46 }
+        }
       });
+    } catch {
+      return;
     }
-  };
 
-  const gameStep = useCallback((timestamp: number, dt: number) => {
-    if (gameStateRef.current !== 'playing') return;
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
+    stageRef.current = stage;
+    setQuality(stage.getQualityLevel());
 
-    const delta = dt / 16.666;
-    const gravity = 0.14;
-    const bounceCoeff = 0.48; // bounciness factor
+    // Build 3D PlinkoPeg Matrix on Table
+    const pegGeo = new THREE.CylinderGeometry(0.18, 0.2, 0.55, 12);
+    const pegMat = new THREE.MeshPhysicalMaterial({
+      color: 0xe2e8f0,
+      metalness: 0.88,
+      roughness: 0.18,
+      clearcoat: 0.9
+    });
+    const pegs: { x: number; z: number }[] = [];
 
-    // Update balls physics
-    activeBallsRef.current.forEach(ball => {
-      ball.vy += gravity * delta;
-      
-      // Air resistance
-      ball.vx *= 0.99;
-
-      ball.x += ball.vx * delta;
-      ball.y += ball.vy * delta;
-
-      // Bounce at side walls
-      if (ball.x - ball.radius < 0) {
-        ball.x = ball.radius;
-        ball.vx = -ball.vx * bounceCoeff;
-        audio.playJump();
-      } else if (ball.x + ball.radius > CANVAS_WIDTH) {
-        ball.x = CANVAS_WIDTH - ball.radius;
-        ball.vx = -ball.vx * bounceCoeff;
-        audio.playJump();
+    for (let row = 0; row < 6; row++) {
+      const cols = row % 2 === 0 ? 5 : 6;
+      const z = -4.2 + row * 1.45;
+      for (let c = 0; c < cols; c++) {
+        const x = (c - (cols - 1) / 2) * 1.45;
+        const peg = new THREE.Mesh(pegGeo, pegMat);
+        peg.position.set(x, 0.275, z);
+        peg.castShadow = true;
+        stage.scene.add(peg);
+        pegs.push({ x, z });
       }
+    }
 
-      // Check Peg collisions
-      pegsRef.current.forEach(peg => {
-        const dist = Math.hypot(ball.x - peg.x, ball.y - peg.y);
-        const minDist = ball.radius + peg.radius;
+    // Build 5 Multiplier Pockets at z = 5.2
+    const pocketColors = [0x38bdf8, 0xa855f7, 0xf59e0b, 0xa855f7, 0x38bdf8];
+    for (let i = 0; i < 5; i++) {
+      const px = (i - 2) * 1.65;
+      const pocket = new THREE.Mesh(
+        new THREE.BoxGeometry(1.4, 0.35, 0.85),
+        new THREE.MeshStandardMaterial({
+          color: pocketColors[i],
+          emissive: pocketColors[i],
+          emissiveIntensity: 0.55
+        })
+      );
+      pocket.position.set(px, 0.175, 5.2);
+      stage.scene.add(pocket);
+    }
 
-        if (dist < minDist) {
-          // Resolve collision
-          const nx = (ball.x - peg.x) / dist;
-          const ny = (ball.y - peg.y) / dist;
+    const ballGeo = new THREE.SphereGeometry(0.32, 16, 16);
+    const ballMat = new THREE.MeshPhysicalMaterial({
+      color: 0xfacc15,
+      emissive: 0xeab308,
+      emissiveIntensity: 0.55,
+      metalness: 0.75,
+      roughness: 0.15,
+      clearcoat: 1.0
+    });
 
-          // Push out of peg
-          ball.x = peg.x + nx * minDist;
-          ball.y = peg.y + ny * minDist;
-
-          // Bounce velocity vector
-          const dotProd = ball.vx * nx + ball.vy * ny;
-          ball.vx = (ball.vx - 2 * dotProd * nx) * bounceCoeff;
-          ball.vy = (ball.vy - 2 * dotProd * ny) * bounceCoeff;
-
-          // Add a tiny random force to avoid getting stuck
-          ball.vx += (Math.random() - 0.5) * 0.5;
-
-          // Sparks and sound
-          createPegSparks(peg.x, peg.y, '#eab308');
-          audio.playHit();
-        }
+    spawnBallFnRef.current = () => {
+      const mesh = new THREE.Mesh(ballGeo, ballMat);
+      const startX = (Math.random() - 0.5) * 2.2;
+      mesh.position.set(startX, 0.32, -5.8);
+      mesh.castShadow = true;
+      stage.scene.add(mesh);
+      activeBallsRef.current.push({
+        mesh,
+        x: startX,
+        z: -5.8,
+        vx: (Math.random() - 0.5) * 1.8,
+        vz: 1.5
       });
+    };
 
-      // Bottom bucket landing check
-      if (ball.y > 450) {
-        // Find bucket index
-        const bx = ball.x;
-        const bucket = buckets.find(b => bx >= b.xStart && bx <= b.xEnd) || buckets[2];
+    stage.startLoop((dt) => {
+      if (gameStateRef.current !== 'playing') return;
 
-        // Rewarding points based on multiplier!
-        const earnedPoints = Math.floor(100 * bucket.multiplier);
-        addScore(earnedPoints);
+      for (let i = activeBallsRef.current.length - 1; i >= 0; i--) {
+        const b = activeBallsRef.current[i];
+        b.vz += 9.8 * dt;
+        b.x += b.vx * dt;
+        b.z += b.vz * dt;
 
-        audio.playLevelUp();
-        createPegSparks(ball.x, 455, bucket.color);
+        // Side rail bounce
+        if (b.x < -4.2) {
+          b.x = -4.2;
+          b.vx = Math.abs(b.vx) * 0.75;
+        } else if (b.x > 4.2) {
+          b.x = 4.2;
+          b.vx = -Math.abs(b.vx) * 0.75;
+        }
 
-        // Delete ball
-        ball.y = CANVAS_HEIGHT + 200;
+        // Peg collisions
+        for (const p of pegs) {
+          const dx = b.x - p.x;
+          const dz = b.z - p.z;
+          const dist = Math.hypot(dx, dz);
+          if (dist < 0.52 && dist > 0.001) {
+            const nx = dx / dist;
+            const nz = dz / dist;
+            b.x = p.x + nx * 0.53;
+            b.z = p.z + nz * 0.53;
+            const jitter = (Math.random() - 0.5) * 2.5;
+            b.vx = nx * 4.2 + jitter;
+            b.vz = Math.max(1.2, Math.abs(b.vz) * 0.55);
+            stage.particles.burst(p.x, 0.45, p.z, 6, 0xfacc15, 4);
+            audio.playClick?.();
+          }
+        }
 
-        // Check game end condition
-        if (ballsLeftRef.current <= 0) {
-          setTimeout(() => {
-            triggerGameOver();
-          }, 1200);
+        b.mesh.position.set(b.x, 0.32, b.z);
+
+        // Reached multiplier pockets
+        if (b.z >= 5.0) {
+          stage.scene.remove(b.mesh);
+          activeBallsRef.current.splice(i, 1);
+
+          const slotIdx = Math.max(0, Math.min(4, Math.round(b.x / 1.65 + 2)));
+          const mult = MULTIPLIERS[slotIdx];
+          setLastMulti(mult);
+          const pts = 25 * mult;
+          addScore(pts);
+          stage.particles.burst(b.x, 0.5, 5.2, 24, pocketColors[slotIdx], 7.5);
+          stage.triggerTrauma(mult >= 10 ? 0.45 : 0.2);
+          if (mult >= 10) stage.kickFov(4);
+          audio.playCoin?.();
+
+          if (plinkoRef.current.ballsRemaining === 0 && activeBallsRef.current.length === 0) {
+            triggerGameOver(scoreRef.current);
+            return;
+          }
         }
       }
     });
 
-    activeBallsRef.current = activeBallsRef.current.filter(b => b.y < CANVAS_HEIGHT + 50);
-
-    // DRAW
-    ctx.fillStyle = '#09090b';
-    ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
-
-    // Pegs
-    pegsRef.current.forEach(peg => {
-      ctx.fillStyle = '#52525b';
-      ctx.beginPath();
-      ctx.arc(peg.x, peg.y, peg.radius, 0, Math.PI * 2);
-      ctx.fill();
-    });
-
-    // Buckets
-    buckets.forEach(b => {
-      // Bucket wall divider vertical bars
-      ctx.strokeStyle = '#27272a';
-      ctx.lineWidth = 1.5;
-      ctx.beginPath();
-      ctx.moveTo(b.xStart, 440);
-      ctx.lineTo(b.xStart, CANVAS_HEIGHT);
-      ctx.stroke();
-
-      ctx.fillStyle = '#18181b';
-      ctx.fillRect(b.xStart + 2, 450, b.xEnd - b.xStart - 4, 50);
-
-      // Glow multiplier
-      ctx.fillStyle = b.color;
-      ctx.font = "bold 12px 'JetBrains Mono', monospace";
-      ctx.textAlign = 'center';
-      ctx.fillText(b.label, (b.xStart + b.xEnd) / 2, 480);
-    });
-
-    // Draw particle effects
-    particlesRef.current.forEach(p => {
-      p.x += p.vx * delta;
-      p.y += p.vy * delta;
-      p.alpha -= p.decay * delta;
-
-      ctx.fillStyle = p.color;
-      ctx.globalAlpha = Math.max(0, p.alpha);
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
-      ctx.fill();
-    });
-    ctx.globalAlpha = 1.0;
-    particlesRef.current = particlesRef.current.filter(p => p.alpha > 0);
-
-    // Draw Falling Ball (if active)
-    activeBallsRef.current.forEach(ball => {
-      ctx.shadowBlur = 10;
-      ctx.shadowColor = ball.color;
-      ctx.fillStyle = ball.color;
-      ctx.beginPath();
-      ctx.arc(ball.x, ball.y, ball.radius, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.shadowBlur = 0;
-    });
-
-    // Header stats
-    ctx.fillStyle = '#ffffff';
-    ctx.font = "bold 11px 'JetBrains Mono', monospace";
-    ctx.textAlign = 'left';
-    ctx.fillText(`BOLA: ${ballsLeftRef.current}`, 15, 30);
-    ctx.textAlign = 'right';
-    ctx.fillText(`SKOR: ${score}`, CANVAS_WIDTH - 15, 30);
-  }, [addScore, triggerGameOver]);
+    return () => {
+      stage.dispose();
+      stageRef.current = null;
+    };
+  }, [addScore, scoreRef, triggerGameOver]);
 
   return (
-    <GameContainer aspect="portrait" maxWidth="sm">
-      {gameState === 'playing' && (
-        <GameHUD 
-          stats={[
-            { id: 'score', label: 'SKOR', value: score, emphasized: true },
-            { id: 'balls', label: 'BOLA', value: ballsLeft }
-          ]} 
-        />
-      )}
+    <div
+      className="relative w-full h-full min-h-[460px] bg-slate-950 overflow-hidden rounded-2xl border border-amber-500/20"
+      onClick={dropBall}
+    >
+      <div ref={mountRef} className="absolute inset-0 w-full h-full cursor-pointer" />
+
+      <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex flex-wrap items-center justify-between gap-2 p-3.5">
+        <div className="flex items-center gap-3 rounded-xl border border-white/10 bg-slate-950/85 px-3.5 py-2 text-xs text-slate-200 tabular-nums">
+          <span className="flex items-center gap-1 font-semibold text-amber-400">
+            <Coins className="w-3.5 h-3.5" /> BOLA TERSISA: {ballsLeft}
+          </span>
+          <span aria-hidden="true">·</span>
+          <span>SKOR: <strong className="text-white">{score}</strong></span>
+        </div>
+
+        {lastMulti !== null && (
+          <div className="flex items-center gap-1 rounded-xl border border-amber-500/30 bg-slate-950/85 px-3.5 py-2 text-xs font-semibold text-amber-400">
+            <Sparkles className="w-3.5 h-3.5" /> JACKPOT {lastMulti}X!
+          </div>
+        )}
+      </div>
+
+      <ThreeDockOverlay
+        cameraPreset={cameraPreset}
+        onSelectPreset={handleSelectPreset}
+        quality={quality}
+        onCycleQuality={handleCycleQuality}
+        extraControls={
+          <span className="hidden sm:inline-flex items-center gap-1 text-[11px] text-slate-400 px-2 whitespace-nowrap shrink-0">
+            <Zap className="w-3 h-3 text-amber-400" /> Klik Layar / Tekan Space untuk Menjatuhkan Bola Emas 3D
+          </span>
+        }
+      />
 
       <GameOverlay
         gameState={gameState}
         score={score}
+        highScore={highScore}
         countdown={countdown}
-        onStart={startGame}
-        onRestart={startGame}
-        instructions="Jatuhkan bola neon untuk meraih multiplier. Kumpulkan skor sebanyak-banyaknya!"
+        onStart={handleStart}
+        onRestart={handleStart}
+        title="Plinko Neo 3D"
+        description="Jatuhkan bola emas 3D melewati matriks pasak logam menuju kantong pengali skor 10x!"
+        themeColor="amber"
       />
-
-      <div className="w-full h-full border-4 border-zinc-900 bg-black rounded-2xl overflow-hidden shadow-2xl relative">
-        <canvas
-          ref={canvasRef}
-          width={CANVAS_WIDTH}
-          height={CANVAS_HEIGHT}
-          className="w-full h-full object-fill block bg-zinc-950"
-        />
-      </div>
-
-      {gameState === 'playing' && (
-        <div className="mt-4 flex gap-4 w-full">
-          <button
-            onClick={dropBall}
-            disabled={ballsLeft <= 0 || activeBallsRef.current.length > 0}
-            className="w-full py-4 bg-pink-600 hover:bg-pink-500 disabled:bg-zinc-800 disabled:text-zinc-500 active:scale-95 border border-pink-500 disabled:border-transparent rounded-xl text-sm font-black text-white flex items-center justify-center gap-2 cursor-pointer shadow-lg shadow-pink-600/20 transition-all uppercase tracking-wider"
-          >
-            <ArrowDown size={15} /> JATUHKAN BOLA ({ballsLeft})
-          </button>
-        </div>
-      )}
-    </GameContainer>
+    </div>
   );
 }

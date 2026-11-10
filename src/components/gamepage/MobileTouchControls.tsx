@@ -39,7 +39,7 @@ export const MobileTouchControls: React.FC<MobileTouchControlsProps> = ({ visibl
 
   const handleTouchStart = (action: InputAction, e: React.TouchEvent | React.MouseEvent) => {
     if (e.cancelable) e.preventDefault();
-    audio.playHit();
+    audio.playClick();
     haptics.trigger('light');
     inputManager.dispatchAction(action, true, 'touch');
   };

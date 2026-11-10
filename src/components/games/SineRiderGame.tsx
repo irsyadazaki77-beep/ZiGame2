@@ -1,387 +1,318 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
+import * as THREE from 'three';
+import { GameComponentProps } from '../../types';
 import { audio } from '../../utils/audio';
 import { useGameEngine } from '../../hooks/useGameEngine';
-import { Particle } from '../../types';
-import { GameContainer } from '../gameplay/GameContainer';
-import { GameHUD } from '../gameplay/GameHUD';
+import { inputManager } from '../../services/inputService';
 import { GameOverlay } from '../gameplay/GameOverlay';
-import { MobileControls } from '../gameplay/MobileControls';
+import { ThreeDockOverlay } from '../gameplay/ThreeDockOverlay';
+import {
+  ThreeStageController,
+  CameraPreset3D,
+  QualityLevel3D,
+  buildStarfighter3D
+} from '../../utils/threeStage';
+import { Waves, Zap } from 'lucide-react';
 
-interface SineRiderGameProps {
-  onGameOver: (score: number) => void;
-  onScoreUpdate: (score: number) => void;
-  highScore: number;
-}
-
-interface ObstacleWall {
+interface SineGate3D {
+  mesh: THREE.Mesh;
   x: number;
-  gapY: number; // Y center of gap
-  gapHeight: number; // height of gap
+  y: number;
+  isHazard: boolean;
   passed: boolean;
 }
 
-export default function SineRiderGame({ onGameOver, onScoreUpdate, highScore }: SineRiderGameProps) {
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+export default function SineRiderGame({
+  onGameOver,
+  onScoreUpdate,
+  highScore
+}: GameComponentProps) {
+  const mountRef = useRef<HTMLDivElement | null>(null);
+  const stageRef = useRef<ThreeStageController | null>(null);
 
   const {
     gameState,
-    setGameState,
     score,
-    updateScore,
     addScore,
-    startLoop,
-    stopLoop,
-    triggerGameOver,
     startWithCountdown,
     countdown,
+    triggerGameOver,
+    scoreRef
   } = useGameEngine({
-    gameId: 'sinerider',
+    gameId: 'sine-rider',
     onGameOver,
-    onScoreUpdate,
+    onScoreUpdate
   });
 
+  const [freqLabel, setFreqLabel] = useState('1.0 Hz');
+  const [cameraPreset, setCameraPreset] = useState<CameraPreset3D>('chase');
+  const [quality, setQuality] = useState<QualityLevel3D>('ultra');
+
   const gameStateRef = useRef(gameState);
-  
   useEffect(() => {
     gameStateRef.current = gameState;
   }, [gameState]);
 
-  const CANVAS_WIDTH = 400;
-  const CANVAS_HEIGHT = 500;
+  const riderRef = useRef({
+    phase: 0,
+    freq: 2.8,
+    amp: 2.3,
+    y: 3.0,
+    boosting: false,
+    speed: 9.5,
+    spawnTimer: 0.4
+  });
 
-  // Physics state
-  const riderYRef = useRef(CANVAS_HEIGHT / 2);
-  const riderVyRef = useRef(0);
-  const gravity = 0.28;
-  const liftForce = -5.8;
-  const isHoldingRef = useRef(false);
+  const gatesRef = useRef<SineGate3D[]>([]);
 
-  const obstaclesRef = useRef<ObstacleWall[]>([]);
-  const particlesRef = useRef<Particle[]>([]);
-  const spawnTimerRef = useRef(0);
-
-  const lastTimeRef = useRef(0);
+  const handleStart = useCallback(() => {
+    const stage = stageRef.current;
+    if (stage) {
+      gatesRef.current.forEach((g) => stage.scene.remove(g.mesh));
+    }
+    gatesRef.current = [];
+    riderRef.current = {
+      phase: 0,
+      freq: 2.8,
+      amp: 2.3,
+      y: 3.0,
+      boosting: false,
+      speed: 9.5,
+      spawnTimer: 0.4
+    };
+    setFreqLabel('1.0 Hz');
+    startWithCountdown();
+  }, [startWithCountdown]);
 
   useEffect(() => {
-    drawStatic();
-  }, []);
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === ' ' || e.key === 'ArrowUp' || e.key.toLowerCase() === 'w') {
+        riderRef.current.boosting = true;
+        setFreqLabel('2.2 Hz');
+      }
+    };
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (e.key === ' ' || e.key === 'ArrowUp' || e.key.toLowerCase() === 'w') {
+        riderRef.current.boosting = false;
+        setFreqLabel('1.0 Hz');
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('keyup', onKeyUp);
 
-  const drawStatic = () => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    ctx.fillStyle = '#09090b';
-    ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
-
-    // Grid wires
-    ctx.strokeStyle = '#1e1b4b';
-    ctx.lineWidth = 1;
-    for (let y = 0; y < CANVAS_HEIGHT; y += 40) {
-      ctx.beginPath();
-      ctx.moveTo(0, y);
-      ctx.lineTo(CANVAS_WIDTH, y);
-      ctx.stroke();
-    }
-
-    // Title
-    ctx.fillStyle = '#ffffff';
-    ctx.font = "bold 20px 'Space Grotesk', sans-serif";
-    ctx.textAlign = 'center';
-    ctx.fillText('SINE RIDER', CANVAS_WIDTH / 2, 200);
-
-    ctx.fillStyle = '#06b6d4';
-    ctx.font = "12px 'JetBrains Mono', monospace";
-    ctx.fillText('TAHAN UNTUK MENAIKKAN GELOMBANG SINE', CANVAS_WIDTH / 2, 225);
-
-    ctx.fillStyle = '#71717a';
-    ctx.font = "11px 'JetBrains Mono', monospace";
-    ctx.fillText('Lewati celah dinding laser bercahaya', CANVAS_WIDTH / 2, 250);
-  };
-
-  const startGame = useCallback(() => {
-    updateScore(0);
-    riderYRef.current = CANVAS_HEIGHT / 2;
-    riderVyRef.current = 0;
-    obstaclesRef.current = [];
-    particlesRef.current = [];
-    spawnTimerRef.current = 0;
-
-    startWithCountdown(() => {
-      lastTimeRef.current = performance.now();
-      startLoop(gameStep);
+    const unsub = inputManager.subscribe({
+      onActionDown: (action) => {
+        if (action === 'ACTION_PRIMARY' || action === 'UP') {
+          riderRef.current.boosting = true;
+          setFreqLabel('2.2 Hz');
+        }
+      },
+      onActionUp: (action) => {
+        if (action === 'ACTION_PRIMARY' || action === 'UP') {
+          riderRef.current.boosting = false;
+          setFreqLabel('1.0 Hz');
+        }
+      }
     });
-  }, [startWithCountdown, startLoop, updateScore]);
 
-  const handlePointerDown = () => {
-    isHoldingRef.current = true;
-    if (gameStateRef.current === 'playing') {
-      audio.playJump();
-    }
-  };
-
-  const handlePointerUp = () => {
-    isHoldingRef.current = false;
-  };
-
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === ' ' || e.key === 'ArrowUp') {
-        e.preventDefault();
-        isHoldingRef.current = true;
-      }
-    };
-    const handleKeyUp = (e: KeyboardEvent) => {
-      if (e.key === ' ' || e.key === 'ArrowUp') {
-        e.preventDefault();
-        isHoldingRef.current = false;
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    window.addEventListener('keyup', handleKeyUp);
     return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-      window.removeEventListener('keyup', handleKeyUp);
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('keyup', onKeyUp);
+      unsub();
     };
   }, []);
 
-  const createRiderTrail = (x: number, y: number) => {
-    particlesRef.current.push({
-      x,
-      y,
-      vx: -1.8 - Math.random() * 1.5,
-      vy: (Math.random() - 0.5) * 1.2,
-      color: '#06b6d4',
-      radius: Math.random() * 3 + 1,
-      alpha: 0.9,
-      decay: 0.04,
+  const handleSelectPreset = useCallback((preset: CameraPreset3D) => {
+    setCameraPreset(preset);
+    stageRef.current?.setCameraPreset(preset);
+  }, []);
+
+  const handleCycleQuality = useCallback(() => {
+    setQuality((prev) => {
+      const next: QualityLevel3D =
+        prev === 'ultra' ? 'balanced' : prev === 'balanced' ? 'performance' : 'ultra';
+      stageRef.current?.setQualityLevel(next);
+      return next;
     });
-  };
+  }, []);
 
-  const createExplosion = (x: number, y: number) => {
-    for (let i = 0; i < 20; i++) {
-      particlesRef.current.push({
-        x,
-        y,
-        vx: (Math.random() - 0.5) * 8,
-        vy: (Math.random() - 0.5) * 8,
-        color: '#f43f5e',
-        radius: Math.random() * 3.5 + 1.5,
-        alpha: 1,
-        decay: Math.random() * 0.04 + 0.02,
+  useEffect(() => {
+    const container = mountRef.current;
+    if (!container) return;
+
+    let stage: ThreeStageController;
+    try {
+      stage = new ThreeStageController({
+        container,
+        backgroundColor: 0x040b14,
+        fogColor: 0x040b14,
+        fogDensity: 0.018,
+        initialPreset: 'chase',
+        gridPrimaryColor: '#06b6d4',
+        gridSecondaryColor: '#071322',
+        cameraPresets: {
+          chase: { position: [-1.5, 3.8, 11.2], lookAt: [1.5, 3.0, 0], fov: 50 },
+          isometric: { position: [-6.5, 6.2, 9.8], lookAt: [1.5, 3.0, 0], fov: 46 },
+          diorama: { position: [0, 3.5, 13.5], lookAt: [0, 3.0, 0], fov: 45 }
+        }
       });
-    }
-  };
-
-  const gameStep = useCallback((timestamp: number, dt: number) => {
-    if (gameStateRef.current !== 'playing') return;
-
-    // delta mapping to original 16.6ms standard for Physics
-    const delta = dt / 16.666;
-
-    const gameSpeed = 3.2 + score * 0.005;
-
-    // Movement updates
-    if (isHoldingRef.current) {
-      riderVyRef.current += liftForce * 0.08 * delta;
-    } else {
-      riderVyRef.current += gravity * delta;
-    }
-
-    // Terminal velocity
-    riderVyRef.current = Math.max(-6, Math.min(6, riderVyRef.current));
-    riderYRef.current += riderVyRef.current * delta;
-
-    // Trail particles
-    if (Math.random() < 0.6) {
-      createRiderTrail(80, riderYRef.current);
-    }
-
-    // Spawn walls
-    spawnTimerRef.current += delta;
-    if (spawnTimerRef.current > 75) {
-      spawnTimerRef.current = 0;
-
-      const gapH = Math.max(105, 140 - score * 0.5);
-      const gapY = 80 + Math.random() * (CANVAS_HEIGHT - 160);
-
-      obstaclesRef.current.push({
-        x: CANVAS_WIDTH + 40,
-        gapY,
-        gapHeight: gapH,
-        passed: false,
-      });
-    }
-
-    // Screen bound death
-    if (riderYRef.current < 0 || riderYRef.current > CANVAS_HEIGHT) {
-      audio.playExplosion();
-      createExplosion(80, riderYRef.current);
-      triggerGameOver();
+    } catch {
       return;
     }
 
-    draw(delta, gameSpeed);
-  }, [score, triggerGameOver]);
+    stageRef.current = stage;
+    setQuality(stage.getQualityLevel());
 
-  const draw = (delta: number, gameSpeed: number) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
+    const glider = buildStarfighter3D(0x06b6d4, 0x22d3ee, stage.isSoftwareGl);
+    glider.group.rotation.y = Math.PI / 2; // Face +X
+    glider.group.position.set(-3.2, 3.0, 0);
+    stage.scene.add(glider.group);
 
-    // DRAW
-    ctx.fillStyle = '#09090b';
-    ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+    // 3D Sine Wave Trail Ribbon Spheres
+    const trailCount = 28;
+    const trailGeo = new THREE.SphereGeometry(0.11, 8, 8);
+    const trailMat = new THREE.MeshBasicMaterial({ color: 0x22d3ee });
+    const trailInstanced = new THREE.InstancedMesh(trailGeo, trailMat, trailCount);
+    trailInstanced.frustumCulled = false;
+    stage.scene.add(trailInstanced);
+    const trailHistory: number[] = Array(trailCount).fill(3.0);
+    const dummyMat = new THREE.Matrix4();
 
-    // Draw background vector line grids
-    ctx.strokeStyle = '#111827';
-    ctx.lineWidth = 1;
-    for (let i = 0; i < CANVAS_WIDTH; i += 30) {
-      ctx.beginPath();
-      ctx.moveTo(i, 0);
-      ctx.lineTo(i, CANVAS_HEIGHT);
-      ctx.stroke();
-    }
+    const ringGeo = new THREE.TorusGeometry(0.78, 0.09, 10, 24);
+    ringGeo.rotateY(Math.PI / 2);
+    const ringMat = new THREE.MeshStandardMaterial({
+      color: 0x22d3ee,
+      emissive: 0x06b6d4,
+      emissiveIntensity: 0.85
+    });
 
-    // Sine rider trajectory visual line
-    ctx.strokeStyle = 'rgba(6, 182, 212, 0.15)';
-    ctx.lineWidth = 3;
-    ctx.beginPath();
-    ctx.moveTo(0, CANVAS_HEIGHT / 2);
-    for (let x = 0; x < CANVAS_WIDTH; x += 10) {
-      const offsetSine = Math.sin(x * 0.02 + performance.now() * 0.003) * 35;
-      ctx.lineTo(x, CANVAS_HEIGHT / 2 + offsetSine);
-    }
-    ctx.stroke();
+    const hazardGeo = new THREE.OctahedronGeometry(0.62, 0);
+    const hazardMat = new THREE.MeshStandardMaterial({
+      color: 0xef4444,
+      emissive: 0xdc2626,
+      emissiveIntensity: 0.85
+    });
 
-    // Render obstacles
-    obstaclesRef.current.forEach(wall => {
-      wall.x -= gameSpeed * delta;
+    stage.startLoop((dt) => {
+      if (gameStateRef.current !== 'playing') return;
 
-      // Draw Top block
-      ctx.fillStyle = '#1e1b4b';
-      ctx.strokeStyle = '#f43f5e';
-      ctx.lineWidth = 2;
+      const r = riderRef.current;
+      const activeFreq = r.boosting ? 5.6 : 2.6;
+      r.phase += activeFreq * dt;
+      const prevY = r.y;
+      r.y = 3.2 + Math.sin(r.phase) * r.amp;
+      const dy = (r.y - prevY) / Math.max(0.001, dt);
 
-      ctx.shadowBlur = 10;
-      ctx.shadowColor = '#f43f5e';
+      glider.group.position.set(-3.2, r.y, 0);
+      glider.group.rotation.x = THREE.MathUtils.clamp(-dy * 0.06, -0.6, 0.6);
 
-      // Top wall
-      ctx.fillRect(wall.x - 15, 0, 30, wall.gapY - wall.gapHeight / 2);
-      ctx.strokeRect(wall.x - 15, 0, 30, wall.gapY - wall.gapHeight / 2);
+      // Update 3D wave trail
+      trailHistory.pop();
+      trailHistory.unshift(r.y);
+      for (let i = 0; i < trailCount; i++) {
+        const s = 1 - i / trailCount;
+        dummyMat.makeScale(s, s, s);
+        dummyMat.setPosition(-3.2 - i * 0.28, trailHistory[i], 0);
+        trailInstanced.setMatrixAt(i, dummyMat);
+      }
+      trailInstanced.instanceMatrix.needsUpdate = true;
 
-      // Bottom wall
-      const botY = wall.gapY + wall.gapHeight / 2;
-      ctx.fillRect(wall.x - 15, botY, 30, CANVAS_HEIGHT - botY);
-      ctx.strokeRect(wall.x - 15, botY, 30, CANVAS_HEIGHT - botY);
-
-      ctx.shadowBlur = 0;
-
-      // Pass detection
-      if (wall.x < 80 && !wall.passed) {
-        wall.passed = true;
-        audio.playScore();
-        addScore(10);
+      r.spawnTimer -= dt;
+      if (r.spawnTimer <= 0) {
+        r.spawnTimer = 0.78;
+        const isHazard = Math.random() < 0.42;
+        const mesh = new THREE.Mesh(isHazard ? hazardGeo : ringGeo, isHazard ? hazardMat : ringMat);
+        const gy = 3.2 + (Math.random() - 0.5) * 4.2;
+        mesh.position.set(11, gy, 0);
+        stage.scene.add(mesh);
+        gatesRef.current.push({ mesh, x: 11, y: gy, isHazard, passed: false });
       }
 
-      // Collision checks
-      const withinX = (80 + 10 > wall.x - 15 && 80 - 10 < wall.x + 15);
-      const inTopGap = (riderYRef.current - 10 < wall.gapY - wall.gapHeight / 2);
-      const inBotGap = (riderYRef.current + 10 > wall.gapY + wall.gapHeight / 2);
+      for (let i = gatesRef.current.length - 1; i >= 0; i--) {
+        const g = gatesRef.current[i];
+        g.x -= r.speed * dt;
+        g.mesh.position.x = g.x;
+        if (g.isHazard) g.mesh.rotation.y += dt * 4;
 
-      if (withinX && (inTopGap || inBotGap)) {
-        audio.playExplosion();
-        createExplosion(80, riderYRef.current);
-        triggerGameOver();
+        if (!g.passed && Math.abs(g.x - -3.2) < 0.72) {
+          const distY = Math.abs(g.y - r.y);
+          if (g.isHazard && distY < 0.78) {
+            stage.particles.burst(-3.2, r.y, 0, 34, 0xef4444, 9.5);
+            stage.triggerTrauma(0.75);
+            audio.playExplosion?.();
+            triggerGameOver(scoreRef.current);
+            return;
+          } else if (!g.isHazard && distY < 0.95) {
+            g.passed = true;
+            stage.scene.remove(g.mesh);
+            gatesRef.current.splice(i, 1);
+            addScore(25);
+            audio.playCoin?.();
+            stage.particles.burst(-3.2, r.y, 0, 18, 0x22d3ee, 7);
+            continue;
+          }
+        }
+
+        if (g.x < -10) {
+          stage.scene.remove(g.mesh);
+          gatesRef.current.splice(i, 1);
+        }
       }
     });
-    obstaclesRef.current = obstaclesRef.current.filter(w => w.x > -50);
 
-    // Draw particle effects
-    particlesRef.current.forEach(p => {
-      p.x += p.vx * delta;
-      p.y += p.vy * delta;
-      p.alpha -= p.decay * delta;
-
-      ctx.fillStyle = p.color;
-      ctx.globalAlpha = Math.max(0, p.alpha);
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
-      ctx.fill();
-    });
-    ctx.globalAlpha = 1.0;
-    particlesRef.current = particlesRef.current.filter(p => p.alpha > 0);
-
-    // Render Rider (glowing neon circle with wings)
-    ctx.shadowBlur = 15;
-    ctx.shadowColor = '#06b6d4';
-    ctx.fillStyle = '#22d3ee';
-    ctx.beginPath();
-    ctx.arc(80, riderYRef.current, 10, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.shadowBlur = 0;
-
-    ctx.fillStyle = '#ffffff';
-    ctx.beginPath();
-    ctx.arc(80, riderYRef.current, 4, 0, Math.PI * 2);
-    ctx.fill();
-
-    // Bottom dashboard HUD
-    ctx.fillStyle = '#ffffff';
-    ctx.font = "bold 11px 'JetBrains Mono', monospace";
-    ctx.textAlign = 'left';
-    ctx.fillText(`KESTABILAN: ${(100 - Math.abs(riderVyRef.current) * 12).toFixed(0)}%`, 15, 30);
-    ctx.textAlign = 'right';
-    ctx.fillText(`SKOR: ${score}`, CANVAS_WIDTH - 15, 30);
-  };
+    return () => {
+      stage.dispose();
+      stageRef.current = null;
+    };
+  }, [addScore, scoreRef, triggerGameOver]);
 
   return (
-    <GameContainer aspect="portrait" maxWidth="sm">
-      {gameState === 'playing' && (
-        <GameHUD 
-          stats={[
-            { id: 'score', label: 'SKOR', value: score, emphasized: true }
-          ]} 
-        />
-      )}
+    <div
+      className="relative w-full h-full min-h-[460px] bg-slate-950 overflow-hidden rounded-2xl border border-cyan-500/20"
+      onPointerDown={() => {
+        riderRef.current.boosting = true;
+        setFreqLabel('2.2 Hz');
+      }}
+      onPointerUp={() => {
+        riderRef.current.boosting = false;
+        setFreqLabel('1.0 Hz');
+      }}
+    >
+      <div ref={mountRef} className="absolute inset-0 w-full h-full cursor-pointer" />
+
+      <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex flex-wrap items-center justify-between gap-2 p-3.5">
+        <div className="flex items-center gap-3 rounded-xl border border-white/10 bg-slate-950/85 px-3.5 py-2 text-xs text-slate-200 tabular-nums">
+          <span className="flex items-center gap-1 font-semibold text-cyan-400">
+            <Waves className="w-3.5 h-3.5" /> FREKUENSI: {freqLabel}
+          </span>
+          <span aria-hidden="true">·</span>
+          <span>SKOR: <strong className="text-white">{score}</strong></span>
+        </div>
+      </div>
+
+      <ThreeDockOverlay
+        cameraPreset={cameraPreset}
+        onSelectPreset={handleSelectPreset}
+        quality={quality}
+        onCycleQuality={handleCycleQuality}
+        extraControls={
+          <span className="hidden sm:inline-flex items-center gap-1 text-[11px] text-slate-400 px-2 whitespace-nowrap shrink-0">
+            <Zap className="w-3 h-3 text-cyan-400" /> Tahan Space / Klik untuk Mempercepat Gelombang Sinus 3D
+          </span>
+        }
+      />
 
       <GameOverlay
         gameState={gameState}
         score={score}
-        onStart={startGame}
-        onRestart={startGame}
+        highScore={highScore}
         countdown={countdown}
-        instructions="Tahan spasi atau ketuk layar untuk menaikkan gelombang sine. Lewati celah dinding laser bercahaya!"
+        onStart={handleStart}
+        onRestart={handleStart}
+        title="Sine Rider 3D"
+        description="Kendalikan frekuensi gelombang sinus pesawat 3D untuk menembus cincin neon dan menghindari ranjau merah!"
+        themeColor="cyan"
       />
-
-      <div className="w-full h-full border-4 border-zinc-900 bg-black rounded-2xl overflow-hidden shadow-2xl relative">
-        <canvas
-          ref={canvasRef}
-          width={CANVAS_WIDTH}
-          height={CANVAS_HEIGHT}
-          className="w-full h-full block bg-zinc-950 cursor-pointer"
-          onMouseDown={handlePointerDown}
-          onMouseUp={handlePointerUp}
-          onTouchStart={(e) => { e.preventDefault(); handlePointerDown(); }}
-          onTouchEnd={(e) => { e.preventDefault(); handlePointerUp(); }}
-        />
-      </div>
-
-      {gameState === 'playing' && (
-        <div className="mt-4 flex gap-4 w-full md:hidden">
-          <button
-            onMouseDown={handlePointerDown}
-            onMouseUp={handlePointerUp}
-            onTouchStart={(e) => { e.preventDefault(); handlePointerDown(); }}
-            onTouchEnd={(e) => { e.preventDefault(); handlePointerUp(); }}
-            className="w-full py-4 bg-cyan-600 hover:bg-cyan-500 active:scale-95 rounded-xl text-sm font-black text-white flex items-center justify-center uppercase select-none"
-          >
-            SINE LIFT (TAHAN)
-          </button>
-        </div>
-      )}
-    </GameContainer>
+    </div>
   );
 }

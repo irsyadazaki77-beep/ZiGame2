@@ -6,6 +6,7 @@ import { useGameEngine } from '../../hooks/useGameEngine';
 import { disposeThreeScene } from '../../utils/threeCleanup';
 import { audio } from '../../utils/audio';
 import { screenShake } from '../../utils/screenShake';
+import { performanceService } from '../../services/performanceService';
 import { Crown, Swords, RotateCcw, Eye, ChevronDown, ChevronUp, Sparkles, ShieldAlert, Play, Zap, Shield, Flame, Snowflake } from 'lucide-react';
 
 interface GameProps {
@@ -13,6 +14,13 @@ interface GameProps {
   onGameOver: (score: number) => void;
   highScore: number;
 }
+
+// Reusable fragment geometries to eliminate GC during piece capture shatter
+const _fragGeos = [
+  new THREE.DodecahedronGeometry(0.08, 0),
+  new THREE.DodecahedronGeometry(0.11, 0),
+  new THREE.DodecahedronGeometry(0.06, 0)
+];
 
 type PieceType = 'p' | 'r' | 'n' | 'b' | 'q' | 'k';
 type PieceColor = 'w' | 'b';
@@ -808,9 +816,11 @@ export default function WizardChess3DGame({ onScoreUpdate, onGameOver, highScore
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.15;
-    renderer.setPixelRatio(isSoftwareGl ? 1 : Math.min(window.devicePixelRatio, 2));
+    const initialDpr = isSoftwareGl ? 1 : performanceService.getAdaptiveDPR();
+    renderer.setPixelRatio(initialDpr);
     renderer.setSize(width, height);
-    renderer.shadowMap.enabled = !isSoftwareGl;
+    const initialPerf = performanceService.getFastSettings();
+    renderer.shadowMap.enabled = !isSoftwareGl && initialPerf.enableShadows;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
     container.innerHTML = '';
@@ -837,10 +847,18 @@ export default function WizardChess3DGame({ onScoreUpdate, onGameOver, highScore
 
     const keyLight = new THREE.DirectionalLight(0xffedd5, 1.85);
     keyLight.position.set(6, 11, 7);
-    keyLight.castShadow = !isSoftwareGl;
+    keyLight.castShadow = !isSoftwareGl && initialPerf.enableShadows;
     keyLight.shadow.mapSize.set(1024, 1024);
     keyLight.shadow.camera.near = 1;
     keyLight.shadow.camera.far = 28;
+
+    // Live performance subscription for dynamic adaptive scaling
+    const unsubPerf = performanceService.subscribe((settings) => {
+      if (isDisposed) return;
+      const targetDpr = isSoftwareGl ? 1 : performanceService.getAdaptiveDPR();
+      renderer.setPixelRatio(targetDpr);
+      keyLight.castShadow = !isSoftwareGl && settings.enableShadows;
+    });
     const d = 6.5;
     keyLight.shadow.camera.left = -d;
     keyLight.shadow.camera.right = d;
@@ -1018,16 +1036,18 @@ export default function WizardChess3DGame({ onScoreUpdate, onGameOver, highScore
         metalness: 0.15
       });
 
-      for (let i = 0; i < 20; i++) {
-        const size = 0.06 + Math.random() * 0.09;
-        const fragGeo = new THREE.DodecahedronGeometry(size, 0);
+      const mult = performanceService.getFastSettings().particlesMultiplier ?? 1.0;
+      const fragCount = Math.max(5, Math.round(18 * mult));
+
+      for (let i = 0; i < fragCount; i++) {
+        const fragGeo = _fragGeos[i % _fragGeos.length];
         const fragMesh = new THREE.Mesh(fragGeo, fragMat);
         fragMesh.position.set(
           pos.x + (Math.random() - 0.5) * 0.25,
           pos.y + 0.15 + Math.random() * 0.45,
           pos.z + (Math.random() - 0.5) * 0.25
         );
-        fragMesh.castShadow = !isSoftwareGl;
+        fragMesh.castShadow = !isSoftwareGl && performanceService.getFastSettings().enableShadows;
         debrisRoot.add(fragMesh);
 
         fragmentsRef.current.push({
@@ -1043,7 +1063,7 @@ export default function WizardChess3DGame({ onScoreUpdate, onGameOver, highScore
             (Math.random() - 0.5) * 10
           ),
           life: 0,
-          maxLife: 1.6 + Math.random() * 0.6
+          maxLife: 1.4 + Math.random() * 0.5
         });
       }
     };
@@ -1259,9 +1279,14 @@ export default function WizardChess3DGame({ onScoreUpdate, onGameOver, highScore
       frameId = window.setTimeout(poll, 5);
     }
 
+    let fpsCounter = 0;
+    let fpsTimer = performance.now();
+
     function tick() {
       if (isDisposed) return;
+      const tickStart = performance.now();
       const dt = Math.min(clock.getDelta(), 0.1);
+      const now = performance.now();
       const isPlaying = (gameStateRef.current as string)?.toLowerCase() === 'playing';
 
       if (isPlaying) {
@@ -1306,7 +1331,6 @@ export default function WizardChess3DGame({ onScoreUpdate, onGameOver, highScore
           f.life += dt;
           if (f.life >= f.maxLife) {
             debrisRoot.remove(f.mesh);
-            f.mesh.geometry.dispose();
             fragmentsRef.current.splice(i, 1);
             continue;
           }
@@ -1347,6 +1371,17 @@ export default function WizardChess3DGame({ onScoreUpdate, onGameOver, highScore
       controls.update();
       renderer.render(scene, camera);
 
+      // Record frame-time and FPS for adaptive performance
+      const frameElapsed = performance.now() - tickStart;
+      performanceService.recordFrameTime(frameElapsed);
+
+      fpsCounter++;
+      if (now - fpsTimer >= 1000) {
+        performanceService.recordFramePerformance(fpsCounter);
+        fpsCounter = 0;
+        fpsTimer = now;
+      }
+
       if (isSoftwareGl) afterDraw(tick);
       else frameId = requestAnimationFrame(tick);
     }
@@ -1368,6 +1403,7 @@ export default function WizardChess3DGame({ onScoreUpdate, onGameOver, highScore
       isDisposed = true;
       cancelAnimationFrame(frameId);
       clearTimeout(frameId);
+      unsubPerf();
       if (aiTimeoutRef.current) clearTimeout(aiTimeoutRef.current);
       resizeObserver.disconnect();
       renderer.domElement.removeEventListener('pointerdown', onPointerDown);
@@ -1416,7 +1452,7 @@ export default function WizardChess3DGame({ onScoreUpdate, onGameOver, highScore
       {/* Top Right Score & Spell Energy HUD */}
       <div className="absolute top-3 right-3 z-10 flex items-center gap-4 px-3.5 py-2 rounded-xl bg-zinc-950/90 border border-white/10 text-xs text-zinc-200 pointer-events-auto tabular-nums">
         {comboMultiplier > 1 && (
-          <div className="px-2 py-0.5 rounded bg-gradient-to-r from-amber-500 to-rose-500 text-zinc-950 font-black text-[10px] animate-pulse">
+          <div className="px-2 py-0.5 rounded bg-gradient-to-r from-amber-500 to-rose-500 text-zinc-950 font-black text-[10px] font-mono tracking-wider shadow-xs">
             {comboMultiplier}x SPELL COMBO
           </div>
         )}

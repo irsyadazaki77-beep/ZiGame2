@@ -39,8 +39,20 @@ export class AppErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorB
     }
   };
 
-  handleHardReboot = () => {
-    window.location.reload();
+  handleHardReboot = async () => {
+    try {
+      if ('caches' in window) {
+        const cacheNames = await caches.keys();
+        await Promise.all(cacheNames.map((name) => caches.delete(name)));
+      }
+      if ('serviceWorker' in navigator) {
+        const registrations = await navigator.serviceWorker.getRegistrations();
+        await Promise.all(registrations.map((r) => r.unregister()));
+      }
+    } catch {
+      // Ignore errors during cache cleanup
+    }
+    window.location.href = window.location.pathname + '?v=' + Date.now();
   };
 
   render() {

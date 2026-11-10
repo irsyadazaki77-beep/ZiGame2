@@ -1,348 +1,386 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { useGameEngine } from '../../hooks/useGameEngine';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
+import * as THREE from 'three';
+import { GameComponentProps } from '../../types';
 import { audio } from '../../utils/audio';
+import { useGameEngine } from '../../hooks/useGameEngine';
 import { inputManager } from '../../services/inputService';
 import { GameOverlay } from '../gameplay/GameOverlay';
-import { MobileControls } from '../gameplay/MobileControls';
-import { Trophy } from 'lucide-react';
+import { ThreeDockOverlay } from '../gameplay/ThreeDockOverlay';
+import {
+  ThreeStageController,
+  CameraPreset3D,
+  QualityLevel3D
+} from '../../utils/threeStage';
+import { Grid, Sparkles, Zap } from 'lucide-react';
 
-interface GameProps {
-  onScoreUpdate: (score: number) => void;
-  onGameOver: (score: number) => void;
-  highScore: number;
-}
-
-type Board = number[][];
-
-const BOARD_SIZE = 4;
-
-const TILE_COLORS: Record<number, { bg: string; text: string; glow: string }> = {
-  2: { bg: 'bg-zinc-800 text-zinc-100 border-zinc-700', text: 'text-zinc-100', glow: 'shadow-none' },
-  4: { bg: 'bg-indigo-950 text-indigo-200 border-indigo-700', text: 'text-indigo-200', glow: 'shadow-[0_0_8px_rgba(99,102,241,0.2)]' },
-  8: { bg: 'bg-indigo-900 text-indigo-100 border-indigo-500', text: 'text-indigo-100', glow: 'shadow-[0_0_10px_rgba(99,102,241,0.3)]' },
-  16: { bg: 'bg-blue-900 text-blue-100 border-blue-500', text: 'text-blue-100', glow: 'shadow-[0_0_12px_rgba(59,130,246,0.35)]' },
-  32: { bg: 'bg-cyan-900 text-cyan-100 border-cyan-400', text: 'text-cyan-100', glow: 'shadow-[0_0_14px_rgba(6,182,212,0.4)]' },
-  64: { bg: 'bg-emerald-900 text-emerald-100 border-emerald-400', text: 'text-emerald-100', glow: 'shadow-[0_0_16px_rgba(16,185,129,0.45)]' },
-  128: { bg: 'bg-amber-900 text-amber-100 border-amber-400', text: 'text-amber-100', glow: 'shadow-[0_0_18px_rgba(245,158,11,0.5)]' },
-  256: { bg: 'bg-orange-900 text-orange-100 border-orange-400', text: 'text-orange-100', glow: 'shadow-[0_0_20px_rgba(249,115,22,0.55)]' },
-  512: { bg: 'bg-rose-900 text-rose-100 border-rose-400', text: 'text-rose-100', glow: 'shadow-[0_0_22px_rgba(244,63,94,0.6)]' },
-  1024: { bg: 'bg-pink-900 text-pink-100 border-pink-400', text: 'text-pink-100', glow: 'shadow-[0_0_24px_rgba(236,72,153,0.65)]' },
-  2048: { bg: 'bg-purple-900 text-purple-100 border-purple-300', text: 'text-purple-100', glow: 'shadow-[0_0_28px_rgba(168,85,247,0.8)]' }
+const VALUE_COLORS: Record<number, { bg: string; hex: number }> = {
+  2: { bg: '#1e293b', hex: 0x38bdf8 },
+  4: { bg: '#0f172a', hex: 0x06b6d4 },
+  8: { bg: '#3b0764', hex: 0xa855f7 },
+  16: { bg: '#500724', hex: 0xec4899 },
+  32: { bg: '#451a03', hex: 0xf59e0b },
+  64: { bg: '#450a0a', hex: 0xef4444 },
+  128: { bg: '#064e3b', hex: 0x10b981 },
+  256: { bg: '#1e1b4b', hex: 0x6366f1 },
+  512: { bg: '#422006', hex: 0xfacc15 },
+  1024: { bg: '#14532d', hex: 0x22c55e },
+  2048: { bg: '#701a75', hex: 0xf43f5e }
 };
 
-export default function Neon2048Game({ onScoreUpdate, onGameOver, highScore }: GameProps) {
-  const [board, setBoard] = useState<Board>(() => createEmptyBoard());
-  const [highestTile, setHighestTile] = useState(2);
-  const touchStartPos = useRef<{ x: number; y: number } | null>(null);
+function createTileLabelTexture(renderer: THREE.WebGLRenderer, value: number): THREE.CanvasTexture {
+  const canvas = document.createElement('canvas');
+  canvas.width = 256;
+  canvas.height = 256;
+  const ctx = canvas.getContext('2d');
+  const style = VALUE_COLORS[value] || { bg: '#311042', hex: 0xfacc15 };
+  if (ctx) {
+    ctx.fillStyle = style.bg;
+    ctx.fillRect(0, 0, 256, 256);
+    ctx.strokeStyle = `#${style.hex.toString(16).padStart(6, '0')}`;
+    ctx.lineWidth = 14;
+    ctx.strokeRect(10, 10, 236, 236);
+
+    ctx.fillStyle = '#ffffff';
+    ctx.font = value >= 1000 ? 'bold 74px sans-serif' : value >= 100 ? 'bold 88px sans-serif' : 'bold 104px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(String(value), 128, 132);
+  }
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+  return tex;
+}
+
+export default function Neon2048Game({
+  onGameOver,
+  onScoreUpdate,
+  highScore
+}: GameComponentProps) {
+  const mountRef = useRef<HTMLDivElement | null>(null);
+  const stageRef = useRef<ThreeStageController | null>(null);
 
   const {
     gameState,
     score,
-    updateScore,
-    triggerGameOver,
+    addScore,
     startWithCountdown,
     countdown,
-    resumeGame,
+    triggerGameOver,
+    scoreRef
   } = useGameEngine({
     gameId: 'neon-2048',
     onGameOver,
     onScoreUpdate
   });
 
-  function createEmptyBoard(): Board {
-    return Array.from({ length: BOARD_SIZE }, () => Array(BOARD_SIZE).fill(0));
-  }
+  const [maxTile, setMaxTile] = useState(2);
+  const [cameraPreset, setCameraPreset] = useState<CameraPreset3D>('isometric');
+  const [quality, setQuality] = useState<QualityLevel3D>('ultra');
 
-  function addRandomTile(currentBoard: Board): { board: Board; added: boolean } {
-    const emptyCells: { r: number; c: number }[] = [];
-    for (let r = 0; r < BOARD_SIZE; r++) {
-      for (let c = 0; c < BOARD_SIZE; c++) {
-        if (currentBoard[r][c] === 0) emptyCells.push({ r, c });
+  const gameStateRef = useRef(gameState);
+  useEffect(() => {
+    gameStateRef.current = gameState;
+  }, [gameState]);
+
+  const gridRef = useRef<number[][]>([
+    [0, 0, 0, 0],
+    [0, 0, 0, 0],
+    [0, 0, 0, 0],
+    [0, 0, 0, 0]
+  ]);
+  const syncBoard3DRef = useRef<() => void>(() => {});
+
+  const addRandomTile = useCallback((board: number[][]) => {
+    const empty: [number, number][] = [];
+    for (let r = 0; r < 4; r++) {
+      for (let c = 0; c < 4; c++) {
+        if (board[r][c] === 0) empty.push([r, c]);
       }
     }
+    if (empty.length > 0) {
+      const [r, c] = empty[Math.floor(Math.random() * empty.length)];
+      board[r][c] = Math.random() < 0.85 ? 2 : 4;
+    }
+  }, []);
 
-    if (emptyCells.length === 0) return { board: currentBoard, added: false };
-
-    const randomCell = emptyCells[Math.floor(Math.random() * emptyCells.length)];
-    const val = Math.random() < 0.9 ? 2 : 4;
-    const newBoard = currentBoard.map(row => [...row]);
-    newBoard[randomCell.r][randomCell.c] = val;
-    return { board: newBoard, added: true };
-  }
-
-  // Check if any valid moves remain
-  const checkHasMoves = useCallback((b: Board): boolean => {
-    // 1. Any empty cell
-    for (let r = 0; r < BOARD_SIZE; r++) {
-      for (let c = 0; c < BOARD_SIZE; c++) {
-        if (b[r][c] === 0) return true;
+  const canMove = useCallback((board: number[][]) => {
+    for (let r = 0; r < 4; r++) {
+      for (let c = 0; c < 4; c++) {
+        if (board[r][c] === 0) return true;
+        if (c < 3 && board[r][c] === board[r][c + 1]) return true;
+        if (r < 3 && board[r][c] === board[r + 1][c]) return true;
       }
     }
-
-    // 2. Any adjacent horizontal merger
-    for (let r = 0; r < BOARD_SIZE; r++) {
-      for (let c = 0; c < BOARD_SIZE - 1; c++) {
-        if (b[r][c] === b[r][c + 1]) return true;
-      }
-    }
-
-    // 3. Any adjacent vertical merger
-    for (let r = 0; r < BOARD_SIZE - 1; r++) {
-      for (let c = 0; c < BOARD_SIZE; c++) {
-        if (b[r][c] === b[r + 1][c]) return true;
-      }
-    }
-
     return false;
   }, []);
 
-  // Slide & Merge a single row
-  const slideRow = (row: number[]): { newRow: number[]; gainedScore: number; moved: boolean } => {
-    const nonZeros = row.filter(val => val !== 0);
-    const newRow: number[] = [];
-    let gainedScore = 0;
-    let skipNext = false;
+  const slideBoard = useCallback(
+    (dir: 'left' | 'right' | 'up' | 'down') => {
+      if (gameStateRef.current !== 'playing') return;
+      const b = gridRef.current.map((row) => [...row]);
+      let moved = false;
+      let gained = 0;
 
-    for (let i = 0; i < nonZeros.length; i++) {
-      if (skipNext) {
-        skipNext = false;
-        continue;
-      }
-      if (i < nonZeros.length - 1 && nonZeros[i] === nonZeros[i + 1]) {
-        const mergedVal = nonZeros[i] * 2;
-        newRow.push(mergedVal);
-        gainedScore += mergedVal;
-        skipNext = true;
-      } else {
-        newRow.push(nonZeros[i]);
-      }
-    }
-
-    while (newRow.length < BOARD_SIZE) {
-      newRow.push(0);
-    }
-
-    const moved = row.some((val, idx) => val !== newRow[idx]);
-    return { newRow, gainedScore, moved };
-  };
-
-  // Move in 4 directions
-  const handleMove = useCallback((direction: 'up' | 'down' | 'left' | 'right') => {
-    if (gameState !== 'playing') return;
-
-    let movedAny = false;
-    let totalScoreGain = 0;
-    const nextBoard: Board = createEmptyBoard();
-
-    if (direction === 'left') {
-      for (let r = 0; r < BOARD_SIZE; r++) {
-        const { newRow, gainedScore, moved } = slideRow(board[r]);
-        nextBoard[r] = newRow;
-        totalScoreGain += gainedScore;
-        if (moved) movedAny = true;
-      }
-    } else if (direction === 'right') {
-      for (let r = 0; r < BOARD_SIZE; r++) {
-        const reversed = [...board[r]].reverse();
-        const { newRow, gainedScore, moved } = slideRow(reversed);
-        nextBoard[r] = newRow.reverse();
-        totalScoreGain += gainedScore;
-        if (moved) movedAny = true;
-      }
-    } else if (direction === 'up') {
-      for (let c = 0; c < BOARD_SIZE; c++) {
-        const col = [board[0][c], board[1][c], board[2][c], board[3][c]];
-        const { newRow, gainedScore, moved } = slideRow(col);
-        for (let r = 0; r < BOARD_SIZE; r++) {
-          nextBoard[r][c] = newRow[r];
+      const processLine = (line: number[]) => {
+        const filtered = line.filter((v) => v !== 0);
+        const merged: number[] = [];
+        for (let i = 0; i < filtered.length; i++) {
+          if (i + 1 < filtered.length && filtered[i] === filtered[i + 1]) {
+            const val = filtered[i] * 2;
+            merged.push(val);
+            gained += val;
+            i++;
+          } else {
+            merged.push(filtered[i]);
+          }
         }
-        totalScoreGain += gainedScore;
-        if (moved) movedAny = true;
-      }
-    } else if (direction === 'down') {
-      for (let c = 0; c < BOARD_SIZE; c++) {
-        const col = [board[3][c], board[2][c], board[1][c], board[0][c]];
-        const { newRow, gainedScore, moved } = slideRow(col);
-        const reversed = newRow.reverse();
-        for (let r = 0; r < BOARD_SIZE; r++) {
-          nextBoard[r][c] = reversed[r];
+        while (merged.length < 4) merged.push(0);
+        return merged;
+      };
+
+      for (let i = 0; i < 4; i++) {
+        let line: number[] = [];
+        if (dir === 'left') line = b[i];
+        else if (dir === 'right') line = [...b[i]].reverse();
+        else if (dir === 'up') line = [b[0][i], b[1][i], b[2][i], b[3][i]];
+        else line = [b[3][i], b[2][i], b[1][i], b[0][i]];
+
+        const res = processLine(line);
+        if (dir === 'right' || dir === 'down') res.reverse();
+
+        for (let j = 0; j < 4; j++) {
+          const r = dir === 'left' || dir === 'right' ? i : j;
+          const c = dir === 'left' || dir === 'right' ? j : i;
+          if (b[r][c] !== res[j]) moved = true;
+          b[r][c] = res[j];
         }
-        totalScoreGain += gainedScore;
-        if (moved) movedAny = true;
       }
-    }
 
-    if (!movedAny) return;
+      if (moved) {
+        addRandomTile(b);
+        gridRef.current = b;
+        syncBoard3DRef.current();
+        if (gained > 0) {
+          addScore(gained);
+          audio.playCoin?.();
+          stageRef.current?.particles.burst(0, 0.8, 0, 20, 0xf43f5e, 6.5);
+          stageRef.current?.triggerTrauma(0.2);
+        } else {
+          audio.playClick?.();
+        }
 
-    // Play sounds & haptics
-    if (totalScoreGain > 0) {
-      audio.playPowerup();
-      inputManager.vibrateGamepad(60, 0.4);
-    } else {
-      audio.playScore();
-    }
+        const highest = Math.max(...b.flat());
+        setMaxTile(highest);
 
-    // Add random tile
-    const { board: spawnedBoard } = addRandomTile(nextBoard);
-    setBoard(spawnedBoard);
-
-    const newScore = (score || 0) + totalScoreGain;
-    updateScore(newScore);
-
-    // Compute highest tile
-    let maxT = 2;
-    for (let r = 0; r < BOARD_SIZE; r++) {
-      for (let c = 0; c < BOARD_SIZE; c++) {
-        if (spawnedBoard[r][c] > maxT) maxT = spawnedBoard[r][c];
+        if (!canMove(b)) {
+          stageRef.current?.triggerTrauma(0.7);
+          audio.playExplosion?.();
+          triggerGameOver(scoreRef.current + gained);
+        }
       }
-    }
-    setHighestTile(maxT);
+    },
+    [addRandomTile, addScore, canMove, scoreRef, triggerGameOver]
+  );
 
-    // Check game over
-    if (!checkHasMoves(spawnedBoard)) {
-      audio.playExplosion();
-      triggerGameOver();
-    }
-  }, [board, checkHasMoves, gameState, score, triggerGameOver, updateScore]);
+  const handleStart = useCallback(() => {
+    const fresh = [
+      [0, 0, 0, 0],
+      [0, 0, 0, 0],
+      [0, 0, 0, 0],
+      [0, 0, 0, 0]
+    ];
+    addRandomTile(fresh);
+    addRandomTile(fresh);
+    gridRef.current = fresh;
+    setMaxTile(2);
+    syncBoard3DRef.current();
+    startWithCountdown();
+  }, [addRandomTile, startWithCountdown]);
 
-  // Keyboard navigation
   useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (gameState !== 'playing') return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      const k = e.key.toLowerCase();
+      if (k === 'arrowleft' || k === 'a') slideBoard('left');
+      else if (k === 'arrowright' || k === 'd') slideBoard('right');
+      else if (k === 'arrowup' || k === 'w') slideBoard('up');
+      else if (k === 'arrowdown' || k === 's') slideBoard('down');
+    };
+    window.addEventListener('keydown', onKeyDown);
 
-      switch (e.key) {
-        case 'ArrowUp':
-        case 'w':
-        case 'W':
-          e.preventDefault();
-          handleMove('up');
-          break;
-        case 'ArrowDown':
-        case 's':
-        case 'S':
-          e.preventDefault();
-          handleMove('down');
-          break;
-        case 'ArrowLeft':
-        case 'a':
-        case 'A':
-          e.preventDefault();
-          handleMove('left');
-          break;
-        case 'ArrowRight':
-        case 'd':
-        case 'D':
-          e.preventDefault();
-          handleMove('right');
-          break;
+    const unsub = inputManager.subscribe({
+      onActionDown: (action) => {
+        if (action === 'LEFT') slideBoard('left');
+        if (action === 'RIGHT') slideBoard('right');
+        if (action === 'UP') slideBoard('up');
+        if (action === 'DOWN') slideBoard('down');
       }
+    });
+
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      unsub();
+    };
+  }, [slideBoard]);
+
+  const handleSelectPreset = useCallback((preset: CameraPreset3D) => {
+    setCameraPreset(preset);
+    stageRef.current?.setCameraPreset(preset);
+  }, []);
+
+  const handleCycleQuality = useCallback(() => {
+    setQuality((prev) => {
+      const next: QualityLevel3D =
+        prev === 'ultra' ? 'balanced' : prev === 'balanced' ? 'performance' : 'ultra';
+      stageRef.current?.setQualityLevel(next);
+      return next;
+    });
+  }, []);
+
+  useEffect(() => {
+    const container = mountRef.current;
+    if (!container) return;
+
+    let stage: ThreeStageController;
+    try {
+      stage = new ThreeStageController({
+        container,
+        backgroundColor: 0x0c050a,
+        fogColor: 0x0c050a,
+        fogDensity: 0.016,
+        initialPreset: 'isometric',
+        gridPrimaryColor: '#f43f5e',
+        gridSecondaryColor: '#170812',
+        cameraPresets: {
+          isometric: { position: [6.8, 9.5, 6.8], lookAt: [0, 0.3, 0], fov: 45 },
+          chase: { position: [0, 7.2, 8.8], lookAt: [0, 0.3, 0], fov: 48 },
+          diorama: { position: [0, 12.2, 1.2], lookAt: [0, 0, 0], fov: 45 }
+        }
+      });
+    } catch {
+      return;
+    }
+
+    stageRef.current = stage;
+    setQuality(stage.getQualityLevel());
+
+    // Build 4x4 3D Tabletop Base & 16 Tile Cube Meshes
+    const step = 1.48;
+    const baseTray = new THREE.Mesh(
+      new THREE.BoxGeometry(6.5, 0.32, 6.5),
+      new THREE.MeshPhysicalMaterial({
+        color: 0x0f172a,
+        metalness: 0.8,
+        roughness: 0.25,
+        clearcoat: 0.85
+      })
+    );
+    baseTray.position.y = 0.16;
+    baseTray.receiveShadow = true;
+    stage.scene.add(baseTray);
+
+    const texCache = new Map<number, THREE.CanvasTexture>();
+    const getTex = (val: number) => {
+      let t = texCache.get(val);
+      if (!t) {
+        t = createTileLabelTexture(stage.renderer, val);
+        texCache.set(val, t);
+      }
+      return t;
     };
 
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [gameState, handleMove]);
+    const cubeMeshes: THREE.Mesh[][] = [];
+    const cubeGeo = new THREE.BoxGeometry(1.28, 0.65, 1.28);
 
-  // Touch swipe handling
-  const handleTouchStart = (e: React.TouchEvent) => {
-    if (e.touches.length === 1) {
-      touchStartPos.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
-    }
-  };
-
-  const handleTouchEnd = (e: React.TouchEvent) => {
-    if (!touchStartPos.current || gameState !== 'playing') return;
-    const touch = e.changedTouches[0];
-    const dx = touch.clientX - touchStartPos.current.x;
-    const dy = touch.clientY - touchStartPos.current.y;
-    const dist = Math.hypot(dx, dy);
-
-    if (dist > 30) {
-      if (Math.abs(dx) > Math.abs(dy)) {
-        handleMove(dx > 0 ? 'right' : 'left');
-      } else {
-        handleMove(dy > 0 ? 'down' : 'up');
+    for (let r = 0; r < 4; r++) {
+      const rowMeshes: THREE.Mesh[] = [];
+      for (let c = 0; c < 4; c++) {
+        const mat = new THREE.MeshStandardMaterial({
+          roughness: 0.2,
+          metalness: 0.3
+        });
+        const m = new THREE.Mesh(cubeGeo, mat);
+        m.position.set((c - 1.5) * step, 0.65, (r - 1.5) * step);
+        m.castShadow = true;
+        m.visible = false;
+        stage.scene.add(m);
+        rowMeshes.push(m);
       }
+      cubeMeshes.push(rowMeshes);
     }
-    touchStartPos.current = null;
-  };
 
-  // Start lifecycle
-  const startGame = useCallback(() => {
-    const empty = createEmptyBoard();
-    const t1 = addRandomTile(empty);
-    const t2 = addRandomTile(t1.board);
-    setBoard(t2.board);
-    setHighestTile(2);
-    updateScore(0);
+    syncBoard3DRef.current = () => {
+      const b = gridRef.current;
+      for (let r = 0; r < 4; r++) {
+        for (let c = 0; c < 4; c++) {
+          const val = b[r][c];
+          const mesh = cubeMeshes[r][c];
+          if (val === 0) {
+            mesh.visible = false;
+          } else {
+            mesh.visible = true;
+            const mat = mesh.material as THREE.MeshStandardMaterial;
+            mat.map = getTex(val);
+            mat.needsUpdate = true;
+            const heightScale = 1 + Math.min(1.2, Math.log2(val) * 0.08);
+            mesh.scale.set(1, heightScale, 1);
+            mesh.position.y = 0.32 + 0.325 * heightScale;
+          }
+        }
+      }
+    };
+    syncBoard3DRef.current();
 
-    startWithCountdown(() => {});
-  }, [startWithCountdown, updateScore]);
+    stage.startLoop(() => {});
+
+    return () => {
+      texCache.forEach((t) => t.dispose());
+      stage.dispose();
+      stageRef.current = null;
+    };
+  }, []);
 
   return (
-    <div className="relative flex flex-col h-full w-full min-h-0 items-center justify-center overflow-hidden p-2 bg-[#090b14]">
-      {/* HUD */}
-      <div className="w-full max-w-[360px] flex-none flex justify-between items-center mb-3 px-3 py-1 bg-[#121622]/80 border border-white/[0.06] rounded-xl text-xs font-mono">
-        <div className="flex items-center gap-1.5">
-          <Trophy size={14} className="text-amber-400" />
-          <span className="text-zinc-400">TERTINGGI:</span>
-          <span className="text-amber-300 font-bold">{highestTile}</span>
+    <div className="relative w-full h-full min-h-[460px] bg-slate-950 overflow-hidden rounded-2xl border border-rose-500/20">
+      <div ref={mountRef} className="absolute inset-0 w-full h-full" />
+
+      <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex flex-wrap items-center justify-between gap-2 p-3.5">
+        <div className="flex items-center gap-3 rounded-xl border border-white/10 bg-slate-950/85 px-3.5 py-2 text-xs text-slate-200 tabular-nums">
+          <span className="flex items-center gap-1 font-semibold text-rose-400">
+            <Grid className="w-3.5 h-3.5" /> KUBUS TERTINGGI: {maxTile}
+          </span>
+          <span aria-hidden="true">·</span>
+          <span>SKOR: <strong className="text-white">{score}</strong></span>
         </div>
 
-        <div className="flex items-center gap-2">
-          <span className="text-zinc-400">SKOR:</span>
-          <span className="text-white font-bold">{score}</span>
+        <div className="flex items-center gap-1 rounded-xl border border-white/10 bg-slate-950/85 px-3 py-2 text-xs text-amber-400 font-semibold">
+          <Sparkles className="w-3.5 h-3.5" /> TARGET: 2048
         </div>
       </div>
 
-      {/* Grid Container */}
-      <div
-        className="relative flex-none w-full max-w-[360px] aspect-square bg-[#101424] p-3 rounded-2xl border border-white/[0.08] shadow-2xl overflow-hidden touch-none select-none"
-        onTouchStart={handleTouchStart}
-        onTouchEnd={handleTouchEnd}
-      >
-        <div className="grid grid-cols-4 grid-rows-4 gap-2.5 w-full h-full">
-          {board.map((row, r) =>
-            row.map((val, c) => {
-              const tileStyle = TILE_COLORS[val] || {
-                bg: 'bg-purple-950 text-white border-purple-400',
-                text: 'text-white',
-                glow: 'shadow-[0_0_30px_rgba(168,85,247,0.9)]'
-              };
+      <ThreeDockOverlay
+        cameraPreset={cameraPreset}
+        onSelectPreset={handleSelectPreset}
+        quality={quality}
+        onCycleQuality={handleCycleQuality}
+        extraControls={
+          <span className="hidden sm:inline-flex items-center gap-1 text-[11px] text-slate-400 px-2 whitespace-nowrap shrink-0">
+            <Zap className="w-3 h-3 text-rose-400" /> WASD / Panah: Geser & Gabungkan Kubus Angka 3D
+          </span>
+        }
+      />
 
-              return (
-                <div
-                  key={`${r}-${c}`}
-                  className={`flex items-center justify-center rounded-xl border transition-all duration-150 font-black select-none ${
-                    val === 0
-                      ? 'bg-white/[0.03] border-white/[0.04]'
-                      : `${tileStyle.bg} ${tileStyle.glow} text-lg sm:text-2xl scale-100 animate-in zoom-in-50`
-                  }`}
-                >
-                  {val > 0 ? val : ''}
-                </div>
-              );
-            })
-          )}
-        </div>
-
-        <GameOverlay
-          gameState={gameState}
-          score={score}
-          highScore={highScore}
-          countdown={countdown}
-          onStart={startGame}
-          onRestart={startGame}
-          onResume={resumeGame}
-          instructions="Gabungkan kotak berangka sama untuk mencapai 2048! Geser layar atau gunakan tombol panah WASD."
-        />
-      </div>
-
-      {/* Mobile D-Pad */}
-      {gameState === 'playing' && (
-        <div className="flex-none mt-3 md:hidden">
-          <MobileControls onDirection={handleMove} />
-        </div>
-      )}
+      <GameOverlay
+        gameState={gameState}
+        score={score}
+        highScore={highScore}
+        countdown={countdown}
+        onStart={handleStart}
+        onRestart={handleStart}
+        title="Neon 2048 Fusion 3D"
+        description="Geser dan gabungkan kubus energi 3D bernilai sama di atas papan diorama untuk mencapai kubus 2048!"
+        themeColor="rose"
+      />
     </div>
   );
 }

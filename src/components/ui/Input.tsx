@@ -7,11 +7,12 @@ export interface InputProps extends React.InputHTMLAttributes<HTMLInputElement> 
 }
 
 export const Input = React.forwardRef<HTMLInputElement, InputProps>(
-  ({ className = '', label, error, icon, type = 'text', ...props }, ref) => {
+  ({ className = '', label, error, icon, type = 'text', id, ...props }, ref) => {
+    const errorId = id ? `${id}-error` : error ? 'input-error-msg' : undefined;
     return (
       <div className="w-full flex flex-col gap-1.5">
         {label && (
-          <label className="text-xs font-mono font-bold text-text-secondary uppercase tracking-wider">
+          <label htmlFor={id} className="text-xs font-mono font-bold text-text-secondary uppercase tracking-wider">
             {label}
           </label>
         )}
@@ -23,7 +24,10 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
           )}
           <input
             ref={ref}
+            id={id}
             type={type}
+            aria-invalid={Boolean(error)}
+            aria-describedby={error ? errorId : undefined}
             className={`
               w-full bg-surface-sunken border border-border-medium text-text-primary font-sans text-sm rounded-[10px] py-2.5 px-3.5
               placeholder:text-text-muted transition-all focus:outline-none focus:border-indigo-500
@@ -36,7 +40,7 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
           />
         </div>
         {error && (
-          <span className="text-xs font-mono text-rose-400 tracking-wide mt-0.5 uppercase">
+          <span id={errorId} className="text-xs font-mono text-rose-400 tracking-wide mt-0.5 uppercase">
             {error}
           </span>
         )}

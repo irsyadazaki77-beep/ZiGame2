@@ -1,777 +1,334 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
+import * as THREE from 'three';
+import { GameComponentProps } from '../../types';
 import { audio } from '../../utils/audio';
 import { useGameEngine } from '../../hooks/useGameEngine';
-import { useUnifiedInput } from '../../hooks/useUnifiedInput';
+import { inputManager } from '../../services/inputService';
 import { GameOverlay } from '../gameplay/GameOverlay';
-import { Compass, Clock, Award, RotateCcw, Zap, Sparkles, Flag } from 'lucide-react';
+import { ThreeDockOverlay } from '../gameplay/ThreeDockOverlay';
+import {
+  ThreeStageController,
+  CameraPreset3D,
+  QualityLevel3D,
+  buildCyberActionHero3D
+} from '../../utils/threeStage';
+import { Orbit, Zap } from 'lucide-react';
 
-interface GravityShiftGameProps {
-  onGameOver: (score: number) => void;
-  onScoreUpdate: (score: number) => void;
-  highScore: number;
-}
-
-const CANVAS_WIDTH = 850;
-const CANVAS_HEIGHT = 480;
-
-interface Platform {
+interface GravityHazard3D {
+  mesh: THREE.Group;
   x: number;
-  y: number;
-  w: number;
-  h: number;
-  type: 'solid' | 'crumble' | 'moving' | 'boost';
-  vx?: number;
-  minX?: number;
-  maxX?: number;
-  crumbleTimer?: number;
-  crumbled?: boolean;
+  onCeiling: boolean;
+  type: 'spike' | 'orb';
 }
 
-interface Hazard {
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-  type: 'spike_up' | 'spike_down' | 'laser';
-  laserActive?: boolean;
-  cycleTimer?: number;
-}
+const CEILING_Y = 4.4;
 
-interface Collectible {
-  id: number;
-  x: number;
-  y: number;
-  collected: boolean;
-}
-
-interface InversionOrb {
-  x: number;
-  y: number;
-  radius: number;
-  cooldown: number;
-}
-
-interface Checkpoint {
-  x: number;
-  y: number;
-  activated: boolean;
-}
-
-interface LevelDef {
-  level: number;
-  name: string;
-  playerStart: { x: number; y: number };
-  goal: { x: number; y: number; w: number; h: number };
-  platforms: Platform[];
-  hazards: Hazard[];
-  collectibles: Collectible[];
-  orbs: InversionOrb[];
-  checkpoints: Checkpoint[];
-}
-
-const generateLevels = (): LevelDef[] => [
-  {
-    level: 1,
-    name: 'SEKTOR 1: ZERO-G PROTOCOL',
-    playerStart: { x: 50, y: 380 },
-    goal: { x: 780, y: 360, w: 40, h: 60 },
-    platforms: [
-      { x: 0, y: 420, w: 850, h: 60, type: 'solid' }, // Floor
-      { x: 0, y: 0, w: 850, h: 40, type: 'solid' }, // Ceiling
-      { x: 180, y: 300, w: 100, h: 20, type: 'solid' },
-      { x: 340, y: 160, w: 120, h: 20, type: 'solid' },
-      { x: 520, y: 300, w: 100, h: 20, type: 'solid' },
-      { x: 670, y: 220, w: 80, h: 20, type: 'solid' },
-    ],
-    hazards: [
-      { x: 260, y: 400, w: 60, h: 20, type: 'spike_up' },
-      { x: 420, y: 40, w: 80, h: 20, type: 'spike_down' },
-      { x: 590, y: 400, w: 60, h: 20, type: 'spike_up' },
-    ],
-    collectibles: [
-      { id: 1, x: 230, y: 260, collected: false },
-      { id: 2, x: 400, y: 120, collected: false },
-      { id: 3, x: 570, y: 260, collected: false },
-    ],
-    orbs: [
-      { x: 300, y: 250, radius: 14, cooldown: 0 },
-    ],
-    checkpoints: [
-      { x: 480, y: 380, activated: false },
-    ],
-  },
-  {
-    level: 2,
-    name: 'SEKTOR 2: LASER CORRIDORS',
-    playerStart: { x: 50, y: 380 },
-    goal: { x: 780, y: 80, w: 40, h: 60 },
-    platforms: [
-      { x: 0, y: 420, w: 850, h: 60, type: 'solid' },
-      { x: 0, y: 0, w: 850, h: 40, type: 'solid' },
-      { x: 140, y: 280, w: 80, h: 18, type: 'solid' },
-      { x: 280, y: 180, w: 90, h: 18, type: 'moving', vx: 1.2, minX: 260, maxX: 380 },
-      { x: 440, y: 300, w: 80, h: 18, type: 'crumble', crumbleTimer: 0, crumbled: false },
-      { x: 580, y: 160, w: 100, h: 18, type: 'solid' },
-      { x: 720, y: 140, w: 100, h: 20, type: 'solid' },
-    ],
-    hazards: [
-      { x: 200, y: 400, w: 90, h: 20, type: 'spike_up' },
-      { x: 350, y: 40, w: 80, h: 20, type: 'spike_down' },
-      { x: 500, y: 400, w: 100, h: 20, type: 'spike_up' },
-      { x: 380, y: 40, w: 12, h: 380, type: 'laser', laserActive: true, cycleTimer: 0 },
-      { x: 660, y: 40, w: 12, h: 380, type: 'laser', laserActive: true, cycleTimer: 1200 },
-    ],
-    collectibles: [
-      { id: 1, x: 180, y: 240, collected: false },
-      { id: 2, x: 480, y: 260, collected: false },
-      { id: 3, x: 630, y: 120, collected: false },
-    ],
-    orbs: [
-      { x: 220, y: 200, radius: 14, cooldown: 0 },
-      { x: 540, y: 220, radius: 14, cooldown: 0 },
-    ],
-    checkpoints: [
-      { x: 420, y: 380, activated: false },
-    ],
-  },
-  {
-    level: 3,
-    name: 'SEKTOR 3: QUANTUM MATRIX',
-    playerStart: { x: 50, y: 380 },
-    goal: { x: 780, y: 360, w: 40, h: 60 },
-    platforms: [
-      { x: 0, y: 420, w: 850, h: 60, type: 'solid' },
-      { x: 0, y: 0, w: 850, h: 40, type: 'solid' },
-      { x: 120, y: 320, w: 60, h: 18, type: 'crumble', crumbleTimer: 0, crumbled: false },
-      { x: 220, y: 200, w: 80, h: 18, type: 'moving', vx: 1.5, minX: 200, maxX: 340 },
-      { x: 380, y: 140, w: 70, h: 18, type: 'boost' },
-      { x: 500, y: 260, w: 80, h: 18, type: 'solid' },
-      { x: 620, y: 180, w: 70, h: 18, type: 'moving', vx: -1.5, minX: 600, maxX: 720 },
-      { x: 740, y: 320, w: 80, h: 20, type: 'solid' },
-    ],
-    hazards: [
-      { x: 160, y: 400, w: 120, h: 20, type: 'spike_up' },
-      { x: 320, y: 40, w: 100, h: 20, type: 'spike_down' },
-      { x: 460, y: 400, w: 140, h: 20, type: 'spike_up' },
-      { x: 600, y: 40, w: 100, h: 20, type: 'spike_down' },
-      { x: 290, y: 40, w: 12, h: 380, type: 'laser', laserActive: true, cycleTimer: 600 },
-      { x: 560, y: 40, w: 12, h: 380, type: 'laser', laserActive: true, cycleTimer: 1800 },
-    ],
-    collectibles: [
-      { id: 1, x: 150, y: 280, collected: false },
-      { id: 2, x: 415, y: 100, collected: false },
-      { id: 3, x: 655, y: 140, collected: false },
-    ],
-    orbs: [
-      { x: 340, y: 220, radius: 14, cooldown: 0 },
-      { x: 480, y: 180, radius: 14, cooldown: 0 },
-      { x: 680, y: 240, radius: 14, cooldown: 0 },
-    ],
-    checkpoints: [
-      { x: 360, y: 100, activated: false },
-      { x: 600, y: 380, activated: false },
-    ],
-  },
-];
-
-export default function GravityShiftGame({ onGameOver, onScoreUpdate, highScore }: GravityShiftGameProps) {
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+export default function GravityShiftGame({
+  onGameOver,
+  onScoreUpdate,
+  highScore
+}: GameComponentProps) {
+  const mountRef = useRef<HTMLDivElement | null>(null);
+  const stageRef = useRef<ThreeStageController | null>(null);
 
   const {
-    gameState, setGameState, gameStateRef, countdown, score, updateScore, triggerGameOver,
-    startWithCountdown, startLoop, stopLoop, setupCanvasContext, perfSettings,
-  gameLoopRef,
+    gameState,
+    score,
+    addScore,
+    startWithCountdown,
+    countdown,
+    triggerGameOver,
+    scoreRef
   } = useGameEngine({
-    onScoreUpdate, onGameOver
-  });
-  const [currentLevelIndex, setCurrentLevelIndex] = useState(0);
-  const [shardsCollected, setShardsCollected] = useState(0);
-  const [totalShards, setTotalShards] = useState(3);
-  const [deathCount, setDeathCount] = useState(0);
-  const [elapsedMs, setElapsedMs] = useState(0);
-  const [gravityDir, setGravityDir] = useState<1 | -1>(1); // 1: Down, -1: Up
-
-  const gravityDirRef = useRef<1 | -1>(1);
-  const lastTimeRef = useRef(0);
-  const keysRef = useRef<{ [key: string]: boolean }>({});
-
-  const levelsRef = useRef<LevelDef[]>(generateLevels());
-  const currentLevelRef = useRef<LevelDef>(levelsRef.current[0]);
-  const lastCheckpointRef = useRef<{ x: number; y: number; gravity: 1 | -1 }>({ x: 50, y: 380, gravity: 1 });
-
-  // Player physics ref
-  const playerRef = useRef({
-    x: 50,
-    y: 380,
-    vx: 0,
-    vy: 0,
-    w: 20,
-    h: 28,
-    speed: 4.0,
-    jumpForce: 7.5,
-    isGrounded: false,
-    color: '#06b6d4',
+    gameId: 'gravity-shift',
+    onGameOver,
+    onScoreUpdate
   });
 
-  const particlesRef = useRef<{ x: number; y: number; vx: number; vy: number; color: string; alpha: number; size: number }[]>([]);
+  const [polarity, setPolarity] = useState<'FLOOR' | 'CEILING'>('FLOOR');
+  const [cameraPreset, setCameraPreset] = useState<CameraPreset3D>('chase');
+  const [quality, setQuality] = useState<QualityLevel3D>('ultra');
 
-  useEffect(() => { gameStateRef.current = gameState; }, [gameState]);
-  useEffect(() => { gravityDirRef.current = gravityDir; }, [gravityDir]);
-
-  // Tab visibility auto-pause
+  const gameStateRef = useRef(gameState);
   useEffect(() => {
-    const handleVis = () => {
-      if (document.hidden && gameStateRef.current === 'playing') {
-        setGameState('paused');
-      }
-    };
-    document.addEventListener('visibilitychange', handleVis);
-    return () => document.removeEventListener('visibilitychange', handleVis);
-  }, []);
+    gameStateRef.current = gameState;
+  }, [gameState]);
 
-  const spawnParticles = (x: number, y: number, color: string, count = 10) => {
-    for (let i = 0; i < count; i++) {
-      const angle = Math.random() * Math.PI * 2;
-      const spd = Math.random() * 3 + 1;
-      particlesRef.current.push({
-        x,
-        y,
-        vx: Math.cos(angle) * spd,
-        vy: Math.sin(angle) * spd,
-        color,
-        alpha: 1,
-        size: Math.random() * 3 + 1,
-      });
-    }
-  };
+  const stateRef = useRef({
+    y: 0,
+    targetY: 0,
+    inverted: false,
+    speed: 13.5,
+    spawnTimer: 0,
+    distAcc: 0
+  });
+
+  const hazardsRef = useRef<GravityHazard3D[]>([]);
 
   const flipGravity = useCallback(() => {
     if (gameStateRef.current !== 'playing') return;
-    const player = playerRef.current;
-    if (!player.isGrounded) return; // Only flip when on a surface
-
-    const nextG: 1 | -1 = gravityDirRef.current === 1 ? -1 : 1;
-    gravityDirRef.current = nextG;
-    setGravityDir(nextG);
-    player.vy = nextG * 3; // impulse
-    player.isGrounded = false;
-    spawnParticles(player.x + player.w / 2, player.y + (nextG === 1 ? 0 : player.h), '#06b6d4', 12);
-    audio.playLaser();
+    const s = stateRef.current;
+    s.inverted = !s.inverted;
+    s.targetY = s.inverted ? CEILING_Y : 0;
+    setPolarity(s.inverted ? 'CEILING' : 'FLOOR');
+    audio.playJump?.();
+    stageRef.current?.kickFov(3.5);
   }, []);
 
-  const respawnAtCheckpoint = () => {
-    const cp = lastCheckpointRef.current;
-    const p = playerRef.current;
-    p.x = cp.x;
-    p.y = cp.y;
-    p.vx = 0;
-    p.vy = 0;
-    gravityDirRef.current = cp.gravity;
-    setGravityDir(cp.gravity);
-    setDeathCount((d) => d + 1);
-    spawnParticles(p.x, p.y, '#ef4444', 20);
-    audio.playExplosion();
-  };
-
-  const initLevel = useCallback((lvlIndex: number) => {
-    const lvl = JSON.parse(JSON.stringify(levelsRef.current[lvlIndex % levelsRef.current.length])) as LevelDef;
-    currentLevelRef.current = lvl;
-    setCurrentLevelIndex(lvlIndex);
-
-    const p = playerRef.current;
-    p.x = lvl.playerStart.x;
-    p.y = lvl.playerStart.y;
-    p.vx = 0;
-    p.vy = 0;
-    gravityDirRef.current = 1;
-    setGravityDir(1);
-    lastCheckpointRef.current = { x: lvl.playerStart.x, y: lvl.playerStart.y, gravity: 1 };
-
-    setShardsCollected(0);
-    setTotalShards(lvl.collectibles.length);
-  }, []);
-
-  const startGame = useCallback(() => {
-    levelsRef.current = generateLevels();
-    initLevel(0);
-    setDeathCount(0);
-    setElapsedMs(0);
-    updateScore(0);
-
+  const handleStart = useCallback(() => {
+    const stage = stageRef.current;
+    if (stage) {
+      hazardsRef.current.forEach((h) => stage.scene.remove(h.mesh));
+    }
+    hazardsRef.current = [];
+    stateRef.current = {
+      y: 0,
+      targetY: 0,
+      inverted: false,
+      speed: 13.5,
+      spawnTimer: 0.5,
+      distAcc: 0
+    };
+    setPolarity('FLOOR');
     startWithCountdown();
-  }, [initLevel]);
+  }, [startWithCountdown]);
 
-  // Unified input subscription
-    useUnifiedInput({
-    onActionDown: (action) => {
-      if (gameStateRef.current === 'ready') {
-        if (action === 'PRIMARY') startGame();
-        return;
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === ' ' || e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.key.toLowerCase() === 'w') {
+        flipGravity();
       }
-      if (gameStateRef.current === 'gameover') {
-        if (action === 'PRIMARY' || action === 'RESTART') startGame();
-        return;
-      }
-      if (gameStateRef.current === 'playing') {
-        if (action === 'PAUSE') setGameState('paused');
-        if (action === 'PRIMARY' || action === 'SECONDARY') {
+    };
+    window.addEventListener('keydown', onKeyDown);
+
+    const unsub = inputManager.subscribe({
+      onActionDown: (action) => {
+        if (action === 'ACTION_PRIMARY' || action === 'UP' || action === 'DOWN') {
           flipGravity();
         }
-      } else if (gameStateRef.current === 'paused') {
-        if (action === 'PAUSE' || action === 'PRIMARY') setGameState('playing');
       }
-    },
-    onRawKey: (key, isDown) => {
-      keysRef.current[key.toLowerCase()] = isDown;
-      keysRef.current[key] = isDown;
-    }
-  });
+    });
 
-  // Main game loop
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      unsub();
+    };
+  }, [flipGravity]);
+
+  const handleSelectPreset = useCallback((preset: CameraPreset3D) => {
+    setCameraPreset(preset);
+    stageRef.current?.setCameraPreset(preset);
+  }, []);
+
+  const handleCycleQuality = useCallback(() => {
+    setQuality((prev) => {
+      const next: QualityLevel3D =
+        prev === 'ultra' ? 'balanced' : prev === 'balanced' ? 'performance' : 'ultra';
+      stageRef.current?.setQualityLevel(next);
+      return next;
+    });
+  }, []);
+
   useEffect(() => {
-    if (gameState === 'playing') {
-      startLoop((timestamp, dtMs) => {
-        const dt = dtMs / 1000;
-        const ctx = setupCanvasContext(canvasRef.current, CANVAS_WIDTH, CANVAS_HEIGHT);
-        if (!ctx) return;
+    const container = mountRef.current;
+    if (!container) return;
 
-        const lvl = currentLevelRef.current;
-        const player = playerRef.current;
-        const gDir = gravityDirRef.current;
-
-        setElapsedMs((ms) => ms + dt * 1000);
-
-        // Horizontal Movement
-        let moveDir = 0;
-        const keys = keysRef.current;
-        if (keys['a'] || keys['arrowleft']) moveDir -= 1;
-        if (keys['d'] || keys['arrowright']) moveDir += 1;
-
-        player.vx = moveDir * player.speed;
-
-        // Apply Gravity Acceleration
-        const gravityAccel = 18.0 * gDir;
-        player.vy += gravityAccel * dt;
-
-        // Cap terminal velocity
-        if (Math.abs(player.vy) > 14) {
-          player.vy = Math.sign(player.vy) * 14;
-        }
-
-        const newX = player.x + player.vx;
-        let newY = player.y + player.vy;
-
-        // Platform collision checks
-        player.isGrounded = false;
-
-        lvl.platforms.forEach((plat) => {
-          if (plat.crumbled) return;
-
-          // Update moving platform
-          if (plat.type === 'moving' && plat.vx && plat.minX !== undefined && plat.maxX !== undefined) {
-            plat.x += plat.vx;
-            if (plat.x > plat.maxX || plat.x < plat.minX) plat.vx *= -1;
-          }
-
-          // Check AABB overlap
-          if (
-            newX + player.w > plat.x &&
-            newX < plat.x + plat.w &&
-            newY + player.h > plat.y &&
-            newY < plat.y + plat.h
-          ) {
-            if (gDir === 1) {
-              // Normal gravity: land on top of platform
-              if (player.y + player.h <= plat.y + 12 && player.vy >= 0) {
-                newY = plat.y - player.h;
-                player.vy = 0;
-                player.isGrounded = true;
-
-                if (plat.type === 'crumble') {
-                  plat.crumbleTimer = (plat.crumbleTimer || 0) + dt;
-                  if (plat.crumbleTimer > 0.6) {
-                    plat.crumbled = true;
-                    spawnParticles(plat.x + plat.w / 2, plat.y, '#eab308', 12);
-                    audio.playHit();
-                  }
-                } else if (plat.type === 'boost') {
-                  player.vy = -18;
-                  spawnParticles(player.x + player.w / 2, player.y + player.h, '#06b6d4', 16);
-                  audio.playPowerup();
-                }
-              }
-            } else {
-              // Inverted gravity: land on bottom of platform
-              if (player.y >= plat.y + plat.h - 12 && player.vy <= 0) {
-                newY = plat.y + plat.h;
-                player.vy = 0;
-                player.isGrounded = true;
-
-                if (plat.type === 'crumble') {
-                  plat.crumbleTimer = (plat.crumbleTimer || 0) + dt;
-                  if (plat.crumbleTimer > 0.6) {
-                    plat.crumbled = true;
-                    spawnParticles(plat.x + plat.w / 2, plat.y + plat.h, '#eab308', 12);
-                    audio.playHit();
-                  }
-                } else if (plat.type === 'boost') {
-                  player.vy = 18;
-                  spawnParticles(player.x + player.w / 2, player.y, '#06b6d4', 16);
-                  audio.playPowerup();
-                }
-              }
-            }
-          }
-        });
-
-        player.x = Math.max(0, Math.min(CANVAS_WIDTH - player.w, newX));
-        player.y = newY;
-
-        // Fall out of bounds
-        if (player.y < -50 || player.y > CANVAS_HEIGHT + 50) {
-          respawnAtCheckpoint();
-        }
-
-        // Hazards Collision (Spikes & Lasers)
-        lvl.hazards.forEach((h) => {
-          if (h.type === 'laser') {
-            h.cycleTimer = ((h.cycleTimer || 0) + dt * 1000) % 2400;
-            h.laserActive = h.cycleTimer < 1400;
-            if (!h.laserActive) return;
-          }
-
-          if (
-            player.x + player.w > h.x &&
-            player.x < h.x + h.w &&
-            player.y + player.h > h.y &&
-            player.y < h.y + h.h
-          ) {
-            respawnAtCheckpoint();
-          }
-        });
-
-        // Inversion Orbs Collision (Trigger mid-air flip)
-        lvl.orbs.forEach((orb) => {
-          if (orb.cooldown > 0) {
-            orb.cooldown -= dt;
-            return;
-          }
-
-          const centerX = player.x + player.w / 2;
-          const centerY = player.y + player.h / 2;
-          const dist = Math.hypot(centerX - orb.x, centerY - orb.y);
-
-          if (dist < orb.radius + 12) {
-            const nextG: 1 | -1 = gravityDirRef.current === 1 ? -1 : 1;
-            gravityDirRef.current = nextG;
-            setGravityDir(nextG);
-            player.vy = nextG * 6;
-            orb.cooldown = 1.0;
-            spawnParticles(orb.x, orb.y, '#a855f7', 15);
-            audio.playPowerup();
-          }
-        });
-
-        // Collectibles Collision
-        lvl.collectibles.forEach((col) => {
-          if (col.collected) return;
-          const centerX = player.x + player.w / 2;
-          const centerY = player.y + player.h / 2;
-          if (Math.hypot(centerX - col.x, centerY - col.y) < 20) {
-            col.collected = true;
-            setShardsCollected((s) => s + 1);
-            updateScore(score + 200);
-            spawnParticles(col.x, col.y, '#f59e0b', 12);
-            audio.playCoin();
-          }
-        });
-
-        // Checkpoint Collision
-        lvl.checkpoints.forEach((cp) => {
-          if (
-            player.x + player.w > cp.x - 20 &&
-            player.x < cp.x + 20 &&
-            player.y + player.h > cp.y - 20 &&
-            player.y < cp.y + 20
-          ) {
-            if (!cp.activated) {
-              cp.activated = true;
-              lastCheckpointRef.current = { x: cp.x, y: cp.y, gravity: gDir };
-              spawnParticles(cp.x, cp.y, '#10b981', 15);
-              audio.playPowerup();
-            }
-          }
-        });
-
-        // Goal reached
-        const goal = lvl.goal;
-        if (
-          player.x + player.w > goal.x &&
-          player.x < goal.x + goal.w &&
-          player.y + player.h > goal.y &&
-          player.y < goal.y + goal.h
-        ) {
-          audio.playLevelUp();
-          const levelClearScore = 1000 + Math.max(0, 500 - deathCount * 50);
-          updateScore(score + levelClearScore);
-
-          if (currentLevelIndex + 1 < levelsRef.current.length) {
-            initLevel(currentLevelIndex + 1);
-          } else {
-            // Game Beat!
-            triggerGameOver();
-          }
-        }
-
-        // In-place particle update (zero-allocation)
-        let partWriteIdx = 0;
-        for (let i = 0; i < particlesRef.current.length; i++) {
-          const p = particlesRef.current[i];
-          p.x += p.vx;
-          p.y += p.vy;
-          p.alpha -= 0.025;
-          if (p.alpha > 0) {
-            particlesRef.current[partWriteIdx++] = p;
-          }
-        }
-        particlesRef.current.length = partWriteIdx;
-
-      // RENDER PHASE
-      ctx.fillStyle = '#090b11';
-      ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
-
-      // Neon Grid Background (batched into single draw call)
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.03)';
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      for (let x = 0; x < CANVAS_WIDTH; x += 40) {
-        ctx.moveTo(x, 0);
-        ctx.lineTo(x, CANVAS_HEIGHT);
-      }
-      for (let y = 0; y < CANVAS_HEIGHT; y += 40) {
-        ctx.moveTo(0, y);
-        ctx.lineTo(CANVAS_WIDTH, y);
-      }
-      ctx.stroke();
-
-      // Platforms
-      lvl.platforms.forEach((plat) => {
-        if (plat.crumbled) return;
-
-        if (plat.type === 'solid') {
-          ctx.fillStyle = '#1e293b';
-          ctx.strokeStyle = '#38bdf8';
-          ctx.lineWidth = 1.5;
-          ctx.fillRect(plat.x, plat.y, plat.w, plat.h);
-          ctx.strokeRect(plat.x, plat.y, plat.w, plat.h);
-        } else if (plat.type === 'moving') {
-          ctx.fillStyle = '#1e1b4b';
-          ctx.strokeStyle = '#818cf8';
-          ctx.lineWidth = 2;
-          ctx.fillRect(plat.x, plat.y, plat.w, plat.h);
-          ctx.strokeRect(plat.x, plat.y, plat.w, plat.h);
-        } else if (plat.type === 'crumble') {
-          ctx.fillStyle = plat.crumbleTimer ? '#78350f' : '#451a03';
-          ctx.strokeStyle = '#f59e0b';
-          ctx.lineWidth = 1.5;
-          ctx.fillRect(plat.x, plat.y, plat.w, plat.h);
-          ctx.strokeRect(plat.x, plat.y, plat.w, plat.h);
-        } else if (plat.type === 'boost') {
-          ctx.fillStyle = '#064e3b';
-          ctx.strokeStyle = '#34d399';
-          ctx.lineWidth = 2;
-          ctx.fillRect(plat.x, plat.y, plat.w, plat.h);
-          ctx.strokeRect(plat.x, plat.y, plat.w, plat.h);
+    let stage: ThreeStageController;
+    try {
+      stage = new ThreeStageController({
+        container,
+        backgroundColor: 0x050a14,
+        fogColor: 0x050a14,
+        fogDensity: 0.018,
+        initialPreset: 'chase',
+        gridPrimaryColor: '#06b6d4',
+        gridSecondaryColor: '#081121',
+        cameraPresets: {
+          chase: { position: [0, 2.3, 11.5], lookAt: [1.5, 2.2, 0], fov: 52 },
+          isometric: { position: [-6.5, 6.5, 11.5], lookAt: [1.5, 2.2, 0], fov: 48 },
+          diorama: { position: [0, 2.2, 15.5], lookAt: [0, 2.2, 0], fov: 44 }
         }
       });
-
-      // Hazards
-      lvl.hazards.forEach((h) => {
-        if (h.type === 'spike_up') {
-          ctx.fillStyle = '#ef4444';
-          ctx.beginPath();
-          const spikes = Math.floor(h.w / 14);
-          for (let i = 0; i < spikes; i++) {
-            const sx = h.x + i * 14;
-            ctx.moveTo(sx, h.y + h.h);
-            ctx.lineTo(sx + 7, h.y);
-            ctx.lineTo(sx + 14, h.y + h.h);
-          }
-          ctx.fill();
-        } else if (h.type === 'spike_down') {
-          ctx.fillStyle = '#ef4444';
-          ctx.beginPath();
-          const spikes = Math.floor(h.w / 14);
-          for (let i = 0; i < spikes; i++) {
-            const sx = h.x + i * 14;
-            ctx.moveTo(sx, h.y);
-            ctx.lineTo(sx + 7, h.y + h.h);
-            ctx.lineTo(sx + 14, h.y);
-          }
-          ctx.fill();
-        } else if (h.type === 'laser' && h.laserActive) {
-          ctx.fillStyle = 'rgba(239, 68, 68, 0.8)';
-          ctx.shadowColor = '#ef4444';
-          ctx.shadowBlur = 12;
-          ctx.fillRect(h.x, h.y, h.w, h.h);
-          ctx.shadowBlur = 0;
-        }
-      });
-
-      // Inversion Orbs
-      lvl.orbs.forEach((orb) => {
-        ctx.fillStyle = orb.cooldown > 0 ? '#475569' : '#a855f7';
-        ctx.shadowColor = '#a855f7';
-        ctx.shadowBlur = orb.cooldown > 0 ? 0 : 12;
-        ctx.beginPath();
-        ctx.arc(orb.x, orb.y, orb.radius, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.shadowBlur = 0;
-
-        // Rotating ring
-        if (orb.cooldown <= 0) {
-          ctx.strokeStyle = '#e9d5ff';
-          ctx.lineWidth = 2;
-          ctx.beginPath();
-          ctx.arc(orb.x, orb.y, orb.radius + 5 + Math.sin(Date.now() / 150) * 2, 0, Math.PI * 2);
-          ctx.stroke();
-        }
-      });
-
-      // Collectibles (Shards)
-      lvl.collectibles.forEach((col) => {
-        if (col.collected) return;
-        ctx.save();
-        ctx.translate(col.x, col.y);
-        ctx.rotate(Date.now() / 300);
-
-        ctx.fillStyle = '#f59e0b';
-        ctx.shadowColor = '#f59e0b';
-        ctx.shadowBlur = 8;
-        ctx.fillRect(-6, -6, 12, 12);
-        ctx.shadowBlur = 0;
-
-        ctx.restore();
-      });
-
-      // Checkpoints
-      lvl.checkpoints.forEach((cp) => {
-        ctx.fillStyle = cp.activated ? '#10b981' : '#64748b';
-        ctx.shadowColor = cp.activated ? '#10b981' : 'transparent';
-        ctx.shadowBlur = cp.activated ? 10 : 0;
-        ctx.fillRect(cp.x - 4, cp.y - 20, 8, 40);
-        ctx.shadowBlur = 0;
-      });
-
-      // Goal Portal
-      const renderGoal = lvl.goal;
-      ctx.fillStyle = 'rgba(16, 185, 129, 0.25)';
-      ctx.strokeStyle = '#10b981';
-      ctx.lineWidth = 2;
-      ctx.fillRect(renderGoal.x, renderGoal.y, renderGoal.w, renderGoal.h);
-      ctx.strokeRect(renderGoal.x, renderGoal.y, renderGoal.w, renderGoal.h);
-
-      ctx.fillStyle = '#10b981';
-      ctx.font = 'bold 10px monospace';
-      ctx.textAlign = 'center';
-      ctx.fillText('PORTAL', renderGoal.x + renderGoal.w / 2, renderGoal.y + renderGoal.h / 2 + 3);
-
-      // Particles
-      particlesRef.current.forEach((p) => {
-        ctx.fillStyle = p.color;
-        ctx.globalAlpha = p.alpha;
-        ctx.beginPath();
-        ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.globalAlpha = 1;
-      });
-
-      // Player Runner
-      ctx.save();
-      ctx.translate(player.x + player.w / 2, player.y + player.h / 2);
-      ctx.scale(1, gDir); // Flip rendering when gravity is inverted
-
-      ctx.fillStyle = '#06b6d4';
-      ctx.shadowColor = '#06b6d4';
-      ctx.shadowBlur = 10;
-      ctx.fillRect(-player.w / 2, -player.h / 2, player.w, player.h);
-      ctx.shadowBlur = 0;
-
-      // Runner Visor
-      ctx.fillStyle = '#ffffff';
-      ctx.fillRect(player.vx >= 0 ? 2 : -8, -player.h / 2 + 4, 6, 6);
-
-      ctx.restore();
-      });
+    } catch {
+      return;
     }
-  }, [gameState, startLoop, setupCanvasContext, onGameOver, onScoreUpdate, currentLevelIndex, deathCount, initLevel, score, updateScore, triggerGameOver, flipGravity]);
 
-  const formatTimer = (ms: number) => {
-    const totalSec = Math.floor(ms / 1000);
-    const m = Math.floor(totalSec / 60);
-    const s = totalSec % 60;
-    const mill = Math.floor((ms % 1000) / 10);
-    return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}.${mill.toString().padStart(2, '0')}`;
-  };
+    stageRef.current = stage;
+    setQuality(stage.getQualityLevel());
+
+    // Build Upper Ceiling Deck
+    const ceilingMat = new THREE.MeshStandardMaterial({
+      color: 0x0f172a,
+      metalness: 0.75,
+      roughness: 0.35
+    });
+    const ceilingMesh = new THREE.Mesh(new THREE.BoxGeometry(40, 0.3, 6), ceilingMat);
+    ceilingMesh.position.set(0, CEILING_Y + 0.15, 0);
+    stage.scene.add(ceilingMesh);
+
+    const railMat = new THREE.MeshStandardMaterial({
+      color: 0x06b6d4,
+      emissive: 0x06b6d4,
+      emissiveIntensity: 0.85
+    });
+    const topRail = new THREE.Mesh(new THREE.BoxGeometry(40, 0.08, 0.15), railMat);
+    topRail.position.set(0, CEILING_Y, 2.2);
+    const botRail = topRail.clone();
+    botRail.position.set(0, 0.04, 2.2);
+    stage.scene.add(topRail, botRail);
+
+    // Build 8-part Cyber Runner Robot
+    const hero = buildCyberActionHero3D(0x06b6d4, 0xf43f5e);
+    hero.group.rotation.y = Math.PI / 2; // Face +X
+    hero.group.position.set(-4.5, 0, 0);
+    stage.scene.add(hero.group);
+
+    stage.startLoop((dt, elapsed) => {
+      if (gameStateRef.current !== 'playing') return;
+
+      const s = stateRef.current;
+      s.speed = Math.min(25, s.speed + dt * 0.35);
+      s.distAcc += s.speed * dt;
+      if (s.distAcc >= 2.5) {
+        const pts = Math.floor(s.distAcc / 2.5);
+        s.distAcc -= pts * 2.5;
+        addScore(pts);
+      }
+
+      s.y = THREE.MathUtils.damp(s.y, s.targetY, 14, dt);
+      hero.group.position.set(-4.5, s.y, 0);
+      const targetRotZ = s.inverted ? Math.PI : 0;
+      hero.group.rotation.z = THREE.MathUtils.damp(hero.group.rotation.z, targetRotZ, 14, dt);
+
+      const swing = Math.sin(elapsed * s.speed * 1.2) * 0.55;
+      hero.legL.rotation.x = swing;
+      hero.legR.rotation.x = -swing;
+
+      // Spawn hazards
+      s.spawnTimer -= dt;
+      if (s.spawnTimer <= 0) {
+        s.spawnTimer = Math.max(0.38, 1.05 - (s.speed - 13.5) * 0.035);
+        const onCeiling = Math.random() > 0.5;
+        const type: GravityHazard3D['type'] = Math.random() < 0.75 ? 'spike' : 'orb';
+        const g = new THREE.Group();
+
+        if (type === 'spike') {
+          const spikeMat = new THREE.MeshStandardMaterial({
+            color: 0xf43f5e,
+            emissive: 0xe11d48,
+            emissiveIntensity: 0.75,
+            roughness: 0.25
+          });
+          const cone1 = new THREE.Mesh(new THREE.ConeGeometry(0.42, 1.25, 6), spikeMat);
+          cone1.position.y = 0.62;
+          const cone2 = new THREE.Mesh(new THREE.ConeGeometry(0.32, 0.95, 6), spikeMat);
+          cone2.position.set(0.45, 0.48, 0);
+          g.add(cone1, cone2);
+          if (onCeiling) {
+            g.rotation.z = Math.PI;
+            g.position.set(16, CEILING_Y, 0);
+          } else {
+            g.position.set(16, 0, 0);
+          }
+        } else {
+          const orbMat = new THREE.MeshStandardMaterial({
+            color: 0x22d3ee,
+            emissive: 0x06b6d4,
+            emissiveIntensity: 0.9
+          });
+          const orb = new THREE.Mesh(new THREE.OctahedronGeometry(0.45, 0), orbMat);
+          g.add(orb);
+          g.position.set(16, onCeiling ? CEILING_Y - 0.85 : 0.85, 0);
+        }
+
+        stage.scene.add(g);
+        hazardsRef.current.push({ mesh: g, x: 16, onCeiling, type });
+      }
+
+      // Update hazards
+      for (let i = hazardsRef.current.length - 1; i >= 0; i--) {
+        const h = hazardsRef.current[i];
+        h.x -= s.speed * dt;
+        h.mesh.position.x = h.x;
+        if (h.type === 'orb') {
+          h.mesh.rotation.y += dt * 4;
+        }
+
+        // Check collision with hero at x = -4.5
+        if (Math.abs(h.x - -4.5) < 0.72) {
+          const sameSide = h.onCeiling ? s.y > CEILING_Y * 0.55 : s.y < CEILING_Y * 0.45;
+          if (sameSide) {
+            if (h.type === 'orb') {
+              stage.scene.remove(h.mesh);
+              hazardsRef.current.splice(i, 1);
+              addScore(30);
+              audio.playCoin?.();
+              stage.particles.burst(-4.5, s.y + (s.inverted ? -0.8 : 0.8), 0, 18, 0x22d3ee, 7);
+              continue;
+            } else {
+              stage.scene.remove(h.mesh);
+              hazardsRef.current.splice(i, 1);
+              stage.particles.burst(-4.5, s.y + (s.inverted ? -0.8 : 0.8), 0, 36, 0xf43f5e, 10);
+              stage.triggerTrauma(0.75);
+              audio.playExplosion?.();
+              triggerGameOver(scoreRef.current);
+              return;
+            }
+          }
+        }
+
+        if (h.x < -14) {
+          stage.scene.remove(h.mesh);
+          hazardsRef.current.splice(i, 1);
+        }
+      }
+    });
+
+    return () => {
+      stage.dispose();
+      stageRef.current = null;
+    };
+  }, [addScore, scoreRef, triggerGameOver]);
 
   return (
-    <div className="relative w-full h-full flex flex-col items-center justify-center select-none bg-[#090b11] font-sans">
-      {/* Top Precision Speedrun HUD */}
-      <div className="absolute top-2 left-3 right-3 flex items-center justify-between z-10 pointer-events-none text-xs font-mono">
-        <div className="flex items-center gap-3">
-          <div className="px-3 py-1 bg-zinc-900/90 border border-white/10 rounded-xl flex items-center gap-2">
-            <span className="text-zinc-400">STAGE:</span>
-            <span className="text-cyan-400 font-bold">{currentLevelRef.current.name}</span>
-          </div>
+    <div
+      className="relative w-full h-full min-h-[460px] bg-slate-950 overflow-hidden rounded-2xl border border-cyan-500/20"
+      onClick={flipGravity}
+    >
+      <div ref={mountRef} className="absolute inset-0 w-full h-full" />
 
-          <div className="px-3 py-1 bg-zinc-900/90 border border-white/10 rounded-xl flex items-center gap-2">
-            <Clock size={13} className="text-emerald-400" />
-            <span className="text-white font-bold">{formatTimer(elapsedMs)}</span>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-3">
-          <div className="px-3 py-1 bg-zinc-900/90 border border-white/10 rounded-xl flex items-center gap-2">
-            <Sparkles size={13} className="text-amber-400" />
-            <span className="text-zinc-400">SHARDS:</span>
-            <span className="text-amber-400 font-bold">{shardsCollected}/{totalShards}</span>
-          </div>
-
-          <div className="px-3 py-1 bg-zinc-900/90 border border-white/10 rounded-xl flex items-center gap-2">
-            <span className="text-zinc-400">GRAVITY:</span>
-            <span className={`font-bold ${gravityDir === 1 ? 'text-sky-400' : 'text-purple-400'}`}>
-              {gravityDir === 1 ? 'DOWN ↓' : 'UP ↑'}
-            </span>
-          </div>
-
-          <div className="px-3 py-1 bg-zinc-900/90 border border-white/10 rounded-xl flex items-center gap-2">
-            <span className="text-zinc-400">DEATHS:</span>
-            <span className="text-rose-400 font-bold">{deathCount}</span>
-          </div>
-
-          <div className="px-3 py-1 bg-zinc-900/90 border border-white/10 rounded-xl flex items-center gap-2">
-            <span className="text-zinc-400">SKOR:</span>
-            <span className="text-yellow-400 font-bold">{score}</span>
-          </div>
+      <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex flex-wrap items-center justify-between gap-2 p-3.5">
+        <div className="flex items-center gap-3 rounded-xl border border-white/10 bg-slate-950/85 px-3.5 py-2 text-xs text-slate-200 tabular-nums">
+          <span className="flex items-center gap-1 font-semibold text-cyan-400">
+            <Orbit className="w-3.5 h-3.5" /> GRAVITASI: {polarity}
+          </span>
+          <span aria-hidden="true">·</span>
+          <span>SKOR: <strong className="text-white">{score}</strong></span>
         </div>
       </div>
 
-      <canvas
-        ref={canvasRef}
-        width={CANVAS_WIDTH}
-        height={CANVAS_HEIGHT}
-        className="w-full h-full max-w-full max-h-full object-contain rounded-xl cursor-default"
+      <ThreeDockOverlay
+        cameraPreset={cameraPreset}
+        onSelectPreset={handleSelectPreset}
+        quality={quality}
+        onCycleQuality={handleCycleQuality}
+        extraControls={
+          <span className="hidden sm:inline-flex items-center gap-1 text-[11px] text-slate-400 px-2 whitespace-nowrap shrink-0">
+            <Zap className="w-3 h-3 text-cyan-400" /> Space / Klik: Balik Gravitasi 3D
+          </span>
+        }
       />
 
       <GameOverlay
         gameState={gameState}
-        countdown={countdown}
         score={score}
         highScore={highScore}
-        onStart={startGame}
-        onResume={() => setGameState('playing')}
-        onRestart={startGame}
-        instructions="A / D atau Panah Kiri/Kanan untuk berlari. Tekan SPASI / Panah Atas saat berpijak untuk membalikkan gravitasi ke atas/bawah! Hindari duri dan laser!"
+        countdown={countdown}
+        onStart={handleStart}
+        onRestart={handleStart}
+        title="Gravity Shift 3D"
+        description="Balikkan gravitasi antara lantai dan langit-langit koridor luar angkasa 3D untuk menghindari duri plasma!"
+        themeColor="cyan"
       />
     </div>
   );

@@ -14,12 +14,14 @@ import {
   ChevronRight,
   Vibrate,
   Activity,
-  Swords
+  Swords,
+  Cpu
 } from 'lucide-react';
 import { GameStats } from '../../types';
 import { audio } from '../../utils/audio';
 import { screenShake } from '../../utils/screenShake';
 import { haptics } from '../../utils/haptics';
+import { performanceService } from '../../services/performanceService';
 
 export interface BackgroundAmbient {
   id: string;
@@ -77,6 +79,11 @@ export const QuickArcadeSettings: React.FC<QuickArcadeSettingsProps> = React.mem
 }) => {
   const [isShakeEnabled, setIsShakeEnabled] = React.useState(() => screenShake.getEnabled());
   const [isHapticEnabled, setIsHapticEnabled] = React.useState(() => haptics.isEnabled());
+  const [perfSettings, setPerfSettings] = React.useState(() => performanceService.getFastSettings());
+
+  React.useEffect(() => {
+    return performanceService.subscribe((s) => setPerfSettings(s));
+  }, []);
 
   if (!isOpen) return null;
 
@@ -121,6 +128,8 @@ export const QuickArcadeSettings: React.FC<QuickArcadeSettingsProps> = React.mem
                   audio.playCoin();
                   onToggleMute();
                 }}
+                aria-label={isMuted ? "Aktifkan Suara Audio" : "Bisukan Suara Audio"}
+                aria-pressed={isMuted}
                 className={`p-3 rounded-xl border flex flex-col items-center gap-1.5 transition-all cursor-pointer ${
                   isMuted 
                     ? 'bg-rose-500/10 border-rose-500/30 text-rose-400' 
@@ -136,6 +145,8 @@ export const QuickArcadeSettings: React.FC<QuickArcadeSettingsProps> = React.mem
                   audio.playCoin();
                   setIsBgmOn(!isBgmOn);
                 }}
+                aria-label="Toggle Musik Latar BGM"
+                aria-pressed={isBgmOn}
                 className={`p-3 rounded-xl border flex flex-col items-center gap-1.5 transition-all cursor-pointer ${
                   isBgmOn 
                     ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' 
@@ -153,6 +164,73 @@ export const QuickArcadeSettings: React.FC<QuickArcadeSettingsProps> = React.mem
             <h3 className="text-[10px] font-bold font-mono text-zinc-500 uppercase tracking-widest">TAMPILAN & GRAFIS</h3>
             <div className="space-y-2.5">
               
+              {/* Dynamic Adaptive Performance Mode */}
+              <div className="p-3 bg-white/[0.02] border border-white/[0.06] rounded-xl space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Cpu size={15} className="text-cyan-400" />
+                    <span className="text-xs font-medium text-zinc-200">Mode Kinerja Grafis</span>
+                  </div>
+                  <span className="text-[10px] font-mono text-zinc-400 uppercase">
+                    {perfSettings.autoDetect ? `Adaptif (${perfSettings.tier})` : perfSettings.tier}
+                  </span>
+                </div>
+                <div className="grid grid-cols-4 gap-1 pt-1">
+                  <button
+                    onClick={() => {
+                      audio.playCoin();
+                      performanceService.updateCustomSetting({ autoDetect: true });
+                    }}
+                    className={`py-1.5 rounded-lg text-[10px] font-mono font-bold uppercase transition cursor-pointer ${
+                      perfSettings.autoDetect
+                        ? 'bg-cyan-500 text-zinc-950 font-black shadow-xs'
+                        : 'bg-white/[0.03] text-zinc-400 hover:text-white border border-white/[0.06]'
+                    }`}
+                  >
+                    Auto
+                  </button>
+                  <button
+                    onClick={() => {
+                      audio.playCoin();
+                      performanceService.setTier('low', false);
+                    }}
+                    className={`py-1.5 rounded-lg text-[10px] font-mono font-bold uppercase transition cursor-pointer ${
+                      !perfSettings.autoDetect && perfSettings.tier === 'low'
+                        ? 'bg-cyan-500 text-zinc-950 font-black shadow-xs'
+                        : 'bg-white/[0.03] text-zinc-400 hover:text-white border border-white/[0.06]'
+                    }`}
+                  >
+                    Low
+                  </button>
+                  <button
+                    onClick={() => {
+                      audio.playCoin();
+                      performanceService.setTier('medium', false);
+                    }}
+                    className={`py-1.5 rounded-lg text-[10px] font-mono font-bold uppercase transition cursor-pointer ${
+                      !perfSettings.autoDetect && perfSettings.tier === 'medium'
+                        ? 'bg-cyan-500 text-zinc-950 font-black shadow-xs'
+                        : 'bg-white/[0.03] text-zinc-400 hover:text-white border border-white/[0.06]'
+                    }`}
+                  >
+                    Med
+                  </button>
+                  <button
+                    onClick={() => {
+                      audio.playCoin();
+                      performanceService.setTier('high', false);
+                    }}
+                    className={`py-1.5 rounded-lg text-[10px] font-mono font-bold uppercase transition cursor-pointer ${
+                      !perfSettings.autoDetect && perfSettings.tier === 'high'
+                        ? 'bg-cyan-500 text-zinc-950 font-black shadow-xs'
+                        : 'bg-white/[0.03] text-zinc-400 hover:text-white border border-white/[0.06]'
+                    }`}
+                  >
+                    Ultra
+                  </button>
+                </div>
+              </div>
+              
               {/* CRT Toggle */}
               <div className="flex items-center justify-between p-3 bg-white/[0.02] border border-white/[0.06] rounded-xl">
                 <div className="flex items-center gap-2.5">
@@ -167,6 +245,8 @@ export const QuickArcadeSettings: React.FC<QuickArcadeSettingsProps> = React.mem
                     audio.playCoin();
                     setIsCrtFilter(!isCrtFilter);
                   }}
+                  aria-label="Toggle filter CRT retro"
+                  aria-pressed={isCrtFilter}
                   className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-hidden ${
                     isCrtFilter ? 'bg-indigo-600' : 'bg-zinc-800'
                   }`}
@@ -196,6 +276,8 @@ export const QuickArcadeSettings: React.FC<QuickArcadeSettingsProps> = React.mem
                     screenShake.setEnabled(next);
                     if (next) screenShake.trigger('medium');
                   }}
+                  aria-label="Toggle getaran screen shake kinetik"
+                  aria-pressed={isShakeEnabled}
                   className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-hidden ${
                     isShakeEnabled ? 'bg-indigo-600' : 'bg-zinc-800'
                   }`}
@@ -225,6 +307,8 @@ export const QuickArcadeSettings: React.FC<QuickArcadeSettingsProps> = React.mem
                     haptics.setEnabled(next);
                     if (next) haptics.trigger('medium');
                   }}
+                  aria-label="Toggle getaran haptic mobile"
+                  aria-pressed={isHapticEnabled}
                   className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-hidden ${
                     isHapticEnabled ? 'bg-indigo-600' : 'bg-zinc-800'
                   }`}
@@ -251,6 +335,8 @@ export const QuickArcadeSettings: React.FC<QuickArcadeSettingsProps> = React.mem
                     audio.playCoin();
                     setIsFocusMode(!isFocusMode);
                   }}
+                  aria-label="Toggle Mode Fokus Viewport"
+                  aria-pressed={isFocusMode}
                   className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-hidden ${
                     isFocusMode ? 'bg-indigo-600' : 'bg-zinc-800'
                   }`}
@@ -277,6 +363,8 @@ export const QuickArcadeSettings: React.FC<QuickArcadeSettingsProps> = React.mem
                     audio.playCoin();
                     toggleFullscreen();
                   }}
+                  aria-label={isFullscreen ? "Keluar dari Layar Penuh" : "Masuk Layar Penuh"}
+                  aria-pressed={isFullscreen}
                   className={`px-3 py-1 bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.08] rounded-lg text-xs font-medium text-zinc-200 active:scale-95 transition-all cursor-pointer`}
                 >
                   {isFullscreen ? 'Keluar' : 'Aktifkan'}

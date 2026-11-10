@@ -381,87 +381,93 @@ export default function ProfilePage({
       />
 
       {/* Tab Panels */}
-      {activeTab === 'overview' && (
-        <ProfileOverview
-          profile={profile}
-          games={games}
-          totalPlays={totalPlays}
-          totalCoinsEarned={totalCoinsEarned}
-          achievementUnlocks={achievementUnlocks}
-          playerRank={playerRank}
-          barChartData={barChartData}
-          recentlyPlayed={recentlyPlayed}
-          onSelectGame={onSelectGame}
-          onClearRecentlyPlayed={onClearRecentlyPlayed}
-        />
-      )}
+      <div 
+        role="tabpanel" 
+        id={`profile-tabpanel-${activeTab}`}
+        aria-labelledby={`profile-tab-${activeTab}`}
+      >
+        {activeTab === 'overview' && (
+          <ProfileOverview
+            profile={profile}
+            games={games}
+            totalPlays={totalPlays}
+            totalCoinsEarned={totalCoinsEarned}
+            achievementUnlocks={achievementUnlocks}
+            playerRank={playerRank}
+            barChartData={barChartData}
+            recentlyPlayed={recentlyPlayed}
+            onSelectGame={onSelectGame}
+            onClearRecentlyPlayed={onClearRecentlyPlayed}
+          />
+        )}
 
-      {activeTab === 'mastery' && (
-        <ProfileMastery
-          masteries={masteries}
-          games={games}
-          onSelectGame={onSelectGame}
-        />
-      )}
+        {activeTab === 'mastery' && (
+          <ProfileMastery
+            masteries={masteries}
+            games={games}
+            onSelectGame={onSelectGame}
+          />
+        )}
 
-      {activeTab === 'achievements' && (
-        <ProfileAchievements
-          achievements={achievements}
-        />
-      )}
+        {activeTab === 'achievements' && (
+          <ProfileAchievements
+            achievements={achievements}
+          />
+        )}
 
-      {activeTab === 'friends' && (
-        <ProfileFriends
-          friends={friends}
-          activities={activities}
-          privacy={privacy}
-          friendSearchName={friendSearchName}
-          setFriendSearchName={setFriendSearchName}
-          friendStatusMsg={friendStatusMsg}
-          onSendFriendRequest={handleSendFriendRequest}
-          onAcceptFriend={handleAcceptFriend}
-          onRejectFriend={handleRejectFriend}
-          onRemoveFriend={handleRemoveFriend}
-        />
-      )}
+        {activeTab === 'friends' && (
+          <ProfileFriends
+            friends={friends}
+            activities={activities}
+            privacy={privacy}
+            friendSearchName={friendSearchName}
+            setFriendSearchName={setFriendSearchName}
+            friendStatusMsg={friendStatusMsg}
+            onSendFriendRequest={handleSendFriendRequest}
+            onAcceptFriend={handleAcceptFriend}
+            onRejectFriend={handleRejectFriend}
+            onRemoveFriend={handleRemoveFriend}
+          />
+        )}
 
-      {activeTab === 'settings' && (
-        <ProfileSettings
-          profile={profile}
-          loggedInUser={loggedInUser}
-          onUpdateProfile={onUpdateProfile}
-          onResetStats={onResetStats}
-          onLogout={handleLogoutClick}
-        />
-      )}
+        {activeTab === 'settings' && (
+          <ProfileSettings
+            profile={profile}
+            loggedInUser={loggedInUser}
+            onUpdateProfile={onUpdateProfile}
+            onResetStats={onResetStats}
+            onLogout={handleLogoutClick}
+          />
+        )}
 
-      {activeTab === 'auth' && (
-        <ProfileAuth
-          loggedInUser={loggedInUser}
-          isRegistering={isRegistering}
-          setIsRegistering={setIsRegistering}
-          username={username}
-          setUsername={setUsername}
-          displayName={displayName}
-          setDisplayName={setDisplayName}
-          password={password}
-          setPassword={setPassword}
-          isLoading={isLoading}
-          authError={authError}
-          authSuccess={authSuccess}
-          cooldownRemaining={cooldownRemaining}
-          selectedAvatar={selectedAvatar}
-          setSelectedAvatar={setSelectedAvatar}
-          selectedColor={selectedColor}
-          setSelectedColor={setSelectedColor}
-          avatars={avatars}
-          colors={colors}
-          onLogin={handleLogin}
-          onRegister={handleRegister}
-          onGoogleLogin={handleGoogleLogin}
-          onLogout={handleLogoutClick}
-        />
-      )}
+        {activeTab === 'auth' && (
+          <ProfileAuth
+            loggedInUser={loggedInUser}
+            isRegistering={isRegistering}
+            setIsRegistering={setIsRegistering}
+            username={username}
+            setUsername={setUsername}
+            displayName={displayName}
+            setDisplayName={setDisplayName}
+            password={password}
+            setPassword={setPassword}
+            isLoading={isLoading}
+            authError={authError}
+            authSuccess={authSuccess}
+            cooldownRemaining={cooldownRemaining}
+            selectedAvatar={selectedAvatar}
+            setSelectedAvatar={setSelectedAvatar}
+            selectedColor={selectedColor}
+            setSelectedColor={setSelectedColor}
+            avatars={avatars}
+            colors={colors}
+            onLogin={handleLogin}
+            onRegister={handleRegister}
+            onGoogleLogin={handleGoogleLogin}
+            onLogout={handleLogoutClick}
+          />
+        )}
+      </div>
     </div>
   );
 }

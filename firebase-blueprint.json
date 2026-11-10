@@ -97,6 +97,36 @@
         "endAt": { "type": "number" },
         "status": { "type": "string" }
       }
+    },
+    "UserSecurity": {
+      "title": "UserSecurity",
+      "description": "Server-authoritative anti-cheat strike counter and account suspension state.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "strikeCount": { "type": "number" },
+        "isBanned": { "type": "boolean" },
+        "banReason": { "type": "string" },
+        "bannedAt": { "type": "number" },
+        "banExpiresAt": { "type": "number" },
+        "bannedBy": { "type": "string" },
+        "lastViolationAt": { "type": "number" },
+        "lastViolationReason": { "type": "string" }
+      }
+    },
+    "SecurityEvent": {
+      "title": "SecurityEvent",
+      "description": "Server-authoritative security audit log for bans, HMAC signature tampering, and payload violations.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "eventType": { "type": "string" },
+        "severity": { "type": "string" },
+        "reason": { "type": "string" },
+        "endpoint": { "type": "string" },
+        "timestamp": { "type": "string" }
+      }
     }
   },
   "firestore": {
@@ -127,6 +157,14 @@
     "/seasonalLeaderboards/{seasonId}/games/{gameId}/entries/{userId}": {
       "schema": { "$ref": "#/entities/LeaderboardEntry" },
       "description": "Historical seasonal leaderboards."
+    },
+    "/userSecurity/{userId}": {
+      "schema": { "$ref": "#/entities/UserSecurity" },
+      "description": "Server-authoritative user security and suspension records."
+    },
+    "/securityEvents/{eventId}": {
+      "schema": { "$ref": "#/entities/SecurityEvent" },
+      "description": "Server-authoritative security audit trail."
     }
   }
 }

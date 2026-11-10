@@ -46,6 +46,11 @@ export default function Shop({ profile, onUpdateProfile }: ShopProps) {
   const [gachaPreviewItem, setGachaPreviewItem] = useState<ShopItem | null>(null);
   const [isGuideOpen, setIsGuideOpen] = useState(false);
 
+  const [srAnnouncement, setSrAnnouncement] = useState('');
+  const spinIntervalRef = React.useRef<NodeJS.Timeout | null>(null);
+  const pendingRewardRef = React.useRef<ShopItem | null>(null);
+  const pendingCoinsRef = React.useRef<number | null>(null);
+
   const { showToast } = useToast();
   const { confirm } = useConfirm();
 
@@ -61,6 +66,7 @@ export default function Shop({ profile, onUpdateProfile }: ShopProps) {
     if (profile.coins < item.cost) {
       audio.playHit();
       showToast('Koin Kurang', 'Koin Anda tidak mencukupi untuk membeli item ini!', 'error');
+      setSrAnnouncement('Gagal membeli: koin Anda tidak mencukupi.');
       return;
     }
 
@@ -80,6 +86,7 @@ export default function Shop({ profile, onUpdateProfile }: ShopProps) {
     if (!result.success) {
       audio.playHit();
       showToast('Pembelian Gagal', result.message || 'Gagal memproses transaksi di server', 'error');
+      setSrAnnouncement(`Pembelian gagal: ${result.message || 'terjadi kesalahan'}`);
       return;
     }
 
@@ -102,6 +109,32 @@ export default function Shop({ profile, onUpdateProfile }: ShopProps) {
 
     onUpdateProfile(updatedProfile);
     showToast('Pembelian Berhasil', `${item.name} berhasil dibeli dan dipasang ke profil Anda!`, 'success');
+    setSrAnnouncement(`Pembelian berhasil. ${item.name} telah dipasang.`);
+  };
+
+  const handleFinishGacha = (finalReward: ShopItem, remainingCoins: number) => {
+    if (spinIntervalRef.current) clearInterval(spinIntervalRef.current);
+    setGachaReward(finalReward);
+    setGachaState('revealed');
+    audio.playScore();
+    setSrAnnouncement(`Gacha selesai! Selamat, Anda mendapatkan ${finalReward.name}.`);
+
+    // Unlock reward
+    if (finalReward.type === 'avatar' && !unlockedAvatars.includes(finalReward.value)) {
+      const newAvatars = [...unlockedAvatars, finalReward.value];
+      setUnlockedAvatars(newAvatars);
+      onUpdateProfile({ ...profile, coins: remainingCoins, unlockedAvatars: newAvatars });
+    } else if (finalReward.type === 'theme' && !unlockedThemes.includes(finalReward.value)) {
+      const newThemes = [...unlockedThemes, finalReward.value];
+      setUnlockedThemes(newThemes);
+      onUpdateProfile({ ...profile, coins: remainingCoins, unlockedThemes: newThemes });
+    }
+  };
+
+  const handleSkipGacha = () => {
+    if (gachaState === 'spinning' && pendingRewardRef.current) {
+      handleFinishGacha(pendingRewardRef.current, pendingCoinsRef.current ?? profile.coins);
+    }
   };
 
   const handleSpinGacha = async () => {
@@ -109,6 +142,7 @@ export default function Shop({ profile, onUpdateProfile }: ShopProps) {
 
     audio.playCoin();
     setGachaState('spinning');
+    setSrAnnouncement('Memutar mesin gacha...');
     const allPool = [...PREMIUM_AVATARS, ...PREMIUM_THEMES];
 
     const result = await economyService.gacha(profile.name); // Server authoritative
@@ -117,46 +151,35 @@ export default function Shop({ profile, onUpdateProfile }: ShopProps) {
       setGachaState('idle');
       audio.playHit();
       showToast('Gacha Gagal', result.message || 'Gagal memproses transaksi gacha.', 'error');
+      setSrAnnouncement(`Gacha gagal: ${result.message}`);
       return;
     }
 
-    // Deduct 50 coins immediately in UI state
+    const remainingCoins = result.remainingCoins ?? profile.coins - 50;
+    pendingCoinsRef.current = remainingCoins;
+
     onUpdateProfile({
       ...profile,
-      coins: result.remainingCoins ?? profile.coins - 50,
+      coins: remainingCoins,
     });
 
     const finalReward = allPool.find(item => item.id === result.rewardId);
+    pendingRewardRef.current = finalReward || null;
     
     let rolls = 0;
-    const interval = setInterval(() => {
+    spinIntervalRef.current = setInterval(() => {
       const rand = allPool[Math.floor(Math.random() * allPool.length)];
       setGachaPreviewItem(rand);
       audio.playClick();
       rolls++;
 
       if (rolls >= 15) {
-        clearInterval(interval);
-        
+        if (spinIntervalRef.current) clearInterval(spinIntervalRef.current);
         if (!finalReward) {
           setGachaState('idle');
           return;
         }
-
-        setGachaReward(finalReward);
-        setGachaState('revealed');
-        audio.playScore();
-
-        // Unlock reward
-        if (finalReward.type === 'avatar' && !unlockedAvatars.includes(finalReward.value)) {
-          const newAvatars = [...unlockedAvatars, finalReward.value];
-          setUnlockedAvatars(newAvatars);
-          onUpdateProfile({ ...profile, coins: result.remainingCoins ?? profile.coins - 50, unlockedAvatars: newAvatars });
-        } else if (finalReward.type === 'theme' && !unlockedThemes.includes(finalReward.value)) {
-          const newThemes = [...unlockedThemes, finalReward.value];
-          setUnlockedThemes(newThemes);
-          onUpdateProfile({ ...profile, coins: result.remainingCoins ?? profile.coins - 50, unlockedThemes: newThemes });
-        }
+        handleFinishGacha(finalReward, remainingCoins);
       }
     }, 120);
   };
@@ -209,6 +232,9 @@ export default function Shop({ profile, onUpdateProfile }: ShopProps) {
         onOpenGuide={() => setIsGuideOpen(true)}
       />
 
+      {/* Screen Reader Live Region for Announcements */}
+      <div className="sr-only" aria-live="polite">{srAnnouncement}</div>
+
       {/* Gacha & Gamble Widgets Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <GachaMachineWidget
@@ -216,6 +242,7 @@ export default function Shop({ profile, onUpdateProfile }: ShopProps) {
           unlockedAvatars={unlockedAvatars}
           unlockedThemes={unlockedThemes}
           onSpinGacha={handleSpinGacha}
+          onSkipGacha={handleSkipGacha}
           gachaState={gachaState}
           gachaReward={gachaReward}
           gachaPreviewItem={gachaPreviewItem}

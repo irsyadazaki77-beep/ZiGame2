@@ -412,15 +412,16 @@ export default function Home({
           </button>
         </div>
 
-        <div className="grid grid-cols-1 min-[420px]:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3.5 sm:gap-4">
+        <div className="flex overflow-x-auto snap-x snap-mandatory no-scrollbar sm:grid sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 sm:overflow-visible gap-3.5 sm:gap-4 -mx-4 px-4 sm:mx-0 sm:px-0 pb-2 sm:pb-0">
           {flagshipGames.map((game) => (
-            <GameCard
-              key={game.id}
-              game={game}
-              isFavorite={favorites.includes(game.id)}
-              onToggleFavorite={toggleFavorite}
-              onClick={() => onSelectGame(game.id)}
-            />
+            <div key={game.id} className="snap-start shrink-0 w-[240px] min-[420px]:w-[280px] sm:w-auto">
+              <GameCard
+                game={game}
+                isFavorite={favorites.includes(game.id)}
+                onToggleFavorite={toggleFavorite}
+                onClick={() => onSelectGame(game.id)}
+              />
+            </div>
           ))}
         </div>
       </section>
@@ -445,15 +446,16 @@ export default function Home({
           </button>
         </div>
 
-        <div className="grid grid-cols-1 min-[420px]:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3.5 sm:gap-4">
+        <div className="flex overflow-x-auto snap-x snap-mandatory no-scrollbar sm:grid sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 sm:overflow-visible gap-3.5 sm:gap-4 -mx-4 px-4 sm:mx-0 sm:px-0 pb-2 sm:pb-0">
           {recommendedGames.map((game) => (
-            <GameCard
-              key={game.id}
-              game={game}
-              isFavorite={favorites.includes(game.id)}
-              onToggleFavorite={toggleFavorite}
-              onClick={() => onSelectGame(game.id)}
-            />
+            <div key={game.id} className="snap-start shrink-0 w-[240px] min-[420px]:w-[280px] sm:w-auto">
+              <GameCard
+                game={game}
+                isFavorite={favorites.includes(game.id)}
+                onToggleFavorite={toggleFavorite}
+                onClick={() => onSelectGame(game.id)}
+              />
+            </div>
           ))}
         </div>
       </section>

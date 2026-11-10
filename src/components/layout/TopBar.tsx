@@ -34,7 +34,7 @@ export const TopBar: React.FC<TopBarProps> = ({
   }, []);
 
   return (
-    <header className="sticky top-0 z-40 bg-surface-base/90 backdrop-blur-xl border-b border-border-subtle px-3 sm:px-5 lg:px-6 h-13 sm:h-14 flex items-center justify-between flex-none pt-safe transition-colors duration-150">
+    <header className="sticky top-0 z-40 bg-surface-base/90 backdrop-blur-xl border-b border-border-subtle px-3 sm:px-5 lg:px-6 min-h-[3.5rem] py-2.5 flex items-center justify-between flex-none pt-safe transition-colors duration-150">
       <div className="flex items-center gap-2 sm:gap-3 min-w-0">
         {/* Mobile Brand Logo */}
         <div 
@@ -52,11 +52,13 @@ export const TopBar: React.FC<TopBarProps> = ({
           {onToggleSidebar && (
             <button
               onClick={onToggleSidebar}
-              className="p-1.5 rounded-lg bg-surface-subtle hover:bg-surface-card-hover text-text-secondary hover:text-text-primary transition cursor-pointer"
+              className="p-1.5 rounded-lg bg-surface-subtle hover:bg-surface-card-hover text-text-secondary hover:text-text-primary transition cursor-pointer flex items-center gap-1.5"
               title="Toggle Sidebar ([)"
-              aria-label="Toggle Sidebar"
+              aria-label="Toggle Sidebar ([)"
+              aria-expanded={!isSidebarCollapsed}
             >
               <PanelLeft size={16} />
+              <kbd className="hidden sm:inline-block text-[9px] font-mono px-1 py-0.2 rounded bg-surface-base text-text-muted border border-border-subtle">[</kbd>
             </button>
           )}
 

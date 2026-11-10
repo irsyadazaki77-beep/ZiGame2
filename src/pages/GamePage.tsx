@@ -331,6 +331,8 @@ export default function GamePage({ games, profile, dailyMissions, onScoreUpdate,
             competitiveInfo={competitiveInfo}
             onRestart={handleRestart}
             onOpenChallengeModal={() => setIsCreateChallengeOpen(true)}
+            isFullscreen={isFullscreen}
+            onToggleFullscreen={toggleFullscreen}
           />
 
           {/* Inter-Game Navigation Drawer */}

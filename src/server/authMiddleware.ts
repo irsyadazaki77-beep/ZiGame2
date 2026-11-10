@@ -192,11 +192,26 @@ export function enforceUserOwnership(req: Request, res: Response, next: NextFunc
       return sendApiError(res, 403, 'FORBIDDEN_USER_MISMATCH', 'Akses ditolak. Identitas pengguna tidak cocok.');
     }
 
-    // Strip or reject any attempt to pass isAdmin in body
+    // Strip or reject any attempt to pass isAdmin or role in body
     if (req.body.isAdmin !== undefined) {
       delete req.body.isAdmin;
     }
+    if (req.body.role !== undefined) {
+      delete req.body.role;
+    }
+  }
+
+  // Reject query userId spoofing on user-owned routes
+  if (req.query && typeof req.query.userId === 'string' && req.query.userId !== req.user.uid && !req.user.isAdmin) {
+    serverLogger.security('IDENTITY_SPOOF_ATTEMPT', 'User attempted to access another user resource via query.userId', {
+      authenticatedUid: req.user.uid,
+      attemptedUserId: req.query.userId,
+      path: req.originalUrl
+    }, req.user.uid, req.ip, req.id);
+
+    return sendApiError(res, 403, 'FORBIDDEN_USER_MISMATCH', 'Akses ditolak. Identitas pengguna tidak cocok.');
   }
 
   next();
 }
+

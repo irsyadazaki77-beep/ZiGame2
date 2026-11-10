@@ -22,6 +22,10 @@ export class PerformanceController implements IPerformanceController {
     performanceService.recordFramePerformance(fps);
   }
 
+  public recordFrameTime(durationMs: number): void {
+    performanceService.recordFrameTime(durationMs);
+  }
+
   public subscribe(listener: (settings: PerformanceSettings) => void): () => void {
     return performanceService.subscribe(listener);
   }

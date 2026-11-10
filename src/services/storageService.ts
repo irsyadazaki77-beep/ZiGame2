@@ -1,6 +1,19 @@
 import { PlayerProfile, GameStats, Achievement, DailyMission, RecentlyPlayedEntry } from '../types';
 import { migrationPipeline, CURRENT_SCHEMA_VERSION } from '../data/migrations';
 import { logger } from '../utils/logger';
+import {
+  readSignedVaultItem,
+  writeSignedVaultItem,
+  auditAndSealVaultKeys,
+  VaultIntegrityReport,
+  getTamperAttemptsCount
+} from '../utils/localVault';
+
+export interface OfflineMutationItem {
+  type: string;
+  payload: Record<string, unknown>;
+  timestamp: number;
+}
 
 const KEYS = {
   SCHEMA_VERSION: 'zigame_schema_version',
@@ -13,9 +26,21 @@ const KEYS = {
   UNLOCKED_AVATARS: 'arcade_unlocked_avatars',
   UNLOCKED_THEMES: 'arcade_unlocked_themes',
   AUTOLOCK: 'zigame_session_autolock',
+  SESSION_PIN_HASH: 'zigame_session_pin_hash',
+  SESSION_LOCKED: 'zigame_session_locked',
   ACTIVE_USER: 'zigame_active_user',
   OFFLINE_MUTATIONS: 'zigame_offline_mutation_queue'
 };
+
+const PROTECTED_VAULT_KEYS = [
+  KEYS.PROFILE,
+  KEYS.GAMES_STATS,
+  KEYS.ACHIEVEMENTS,
+  KEYS.DAILY_MISSIONS,
+  KEYS.RECENTLY_PLAYED,
+  KEYS.UNLOCKED_AVATARS,
+  KEYS.UNLOCKED_THEMES
+];
 
 // Initialize and execute migration pipeline upon boot
 try {
@@ -45,8 +70,7 @@ export const storageService = {
 
   getProfile: (): PlayerProfile | null => {
     try {
-      const data = localStorage.getItem(KEYS.PROFILE);
-      return data ? JSON.parse(data) : null;
+      return readSignedVaultItem<PlayerProfile>(KEYS.PROFILE);
     } catch (e) {
       logger.error("Failed to load profile from localStorage", { error: e as Error });
       return null;
@@ -55,7 +79,7 @@ export const storageService = {
 
   saveProfile: (profile: PlayerProfile): void => {
     try {
-      localStorage.setItem(KEYS.PROFILE, JSON.stringify(profile));
+      writeSignedVaultItem(KEYS.PROFILE, profile);
       incrementRevision();
     } catch (e) {
       logger.error("Failed to save profile to localStorage", { error: e as Error });
@@ -64,8 +88,7 @@ export const storageService = {
 
   getGamesStats: (): GameStats[] | null => {
     try {
-      const data = localStorage.getItem(KEYS.GAMES_STATS);
-      return data ? JSON.parse(data) : null;
+      return readSignedVaultItem<GameStats[]>(KEYS.GAMES_STATS);
     } catch (e) {
       logger.error("Failed to load games stats from localStorage", { error: e as Error });
       return null;
@@ -74,7 +97,7 @@ export const storageService = {
 
   saveGamesStats: (games: GameStats[]): void => {
     try {
-      localStorage.setItem(KEYS.GAMES_STATS, JSON.stringify(games));
+      writeSignedVaultItem(KEYS.GAMES_STATS, games);
       incrementRevision();
     } catch (e) {
       logger.error("Failed to save games stats to localStorage", { error: e as Error });
@@ -83,8 +106,7 @@ export const storageService = {
 
   getAchievements: (): Achievement[] | null => {
     try {
-      const data = localStorage.getItem(KEYS.ACHIEVEMENTS);
-      return data ? JSON.parse(data) : null;
+      return readSignedVaultItem<Achievement[]>(KEYS.ACHIEVEMENTS);
     } catch (e) {
       logger.error("Failed to load achievements from localStorage", { error: e as Error });
       return null;
@@ -93,7 +115,7 @@ export const storageService = {
 
   saveAchievements: (achievements: Achievement[]): void => {
     try {
-      localStorage.setItem(KEYS.ACHIEVEMENTS, JSON.stringify(achievements));
+      writeSignedVaultItem(KEYS.ACHIEVEMENTS, achievements);
       incrementRevision();
     } catch (e) {
       logger.error("Failed to save achievements to localStorage", { error: e as Error });
@@ -102,8 +124,7 @@ export const storageService = {
 
   getDailyMissions: (): DailyMission[] | null => {
     try {
-      const data = localStorage.getItem(KEYS.DAILY_MISSIONS);
-      return data ? JSON.parse(data) : null;
+      return readSignedVaultItem<DailyMission[]>(KEYS.DAILY_MISSIONS);
     } catch (e) {
       logger.error("Failed to load daily missions from localStorage", { error: e as Error });
       return null;
@@ -112,7 +133,7 @@ export const storageService = {
 
   saveDailyMissions: (missions: DailyMission[]): void => {
     try {
-      localStorage.setItem(KEYS.DAILY_MISSIONS, JSON.stringify(missions));
+      writeSignedVaultItem(KEYS.DAILY_MISSIONS, missions);
       incrementRevision();
     } catch (e) {
       logger.error("Failed to save daily missions to localStorage", { error: e as Error });
@@ -121,8 +142,8 @@ export const storageService = {
 
   getRecentlyPlayed: (): RecentlyPlayedEntry[] => {
     try {
-      const data = localStorage.getItem(KEYS.RECENTLY_PLAYED);
-      return data ? JSON.parse(data) : [];
+      const data = readSignedVaultItem<RecentlyPlayedEntry[]>(KEYS.RECENTLY_PLAYED);
+      return Array.isArray(data) ? data : [];
     } catch (e) {
       logger.error("Failed to load recently played from localStorage", { error: e as Error });
       return [];
@@ -131,7 +152,7 @@ export const storageService = {
 
   saveRecentlyPlayed: (entries: RecentlyPlayedEntry[]): void => {
     try {
-      localStorage.setItem(KEYS.RECENTLY_PLAYED, JSON.stringify(entries));
+      writeSignedVaultItem(KEYS.RECENTLY_PLAYED, entries);
       incrementRevision();
     } catch (e) {
       logger.error("Failed to save recently played to localStorage", { error: e as Error });
@@ -140,16 +161,16 @@ export const storageService = {
 
   getUnlockedAvatars: (): string[] => {
     try {
-      const data = localStorage.getItem(KEYS.UNLOCKED_AVATARS);
-      return data ? JSON.parse(data) : ['🎮', '🕹️', '👾', '🚀', '🦊', '🐱', '🐶', '🐼'];
-    } catch (e) {
+      const data = readSignedVaultItem<string[]>(KEYS.UNLOCKED_AVATARS);
+      return Array.isArray(data) ? data : ['🎮', '🕹️', '👾', '🚀', '🦊', '🐱', '🐶', '🐼'];
+    } catch {
       return ['🎮', '🕹️', '👾', '🚀', '🦊', '🐱', '🐶', '🐼'];
     }
   },
 
   saveUnlockedAvatars: (avatars: string[]): void => {
     try {
-      localStorage.setItem(KEYS.UNLOCKED_AVATARS, JSON.stringify(avatars));
+      writeSignedVaultItem(KEYS.UNLOCKED_AVATARS, avatars);
     } catch (e) {
       logger.error("Failed to save unlocked avatars", { error: e as Error });
     }
@@ -157,16 +178,18 @@ export const storageService = {
 
   getUnlockedThemes: (): string[] => {
     try {
-      const data = localStorage.getItem(KEYS.UNLOCKED_THEMES);
-      return data ? JSON.parse(data) : ['indigo', 'purple', 'rose', 'emerald', '#6366f1', '#a855f7', '#f43f5e', '#10b981'];
-    } catch (e) {
+      const data = readSignedVaultItem<string[]>(KEYS.UNLOCKED_THEMES);
+      return Array.isArray(data)
+        ? data
+        : ['indigo', 'purple', 'rose', 'emerald', '#6366f1', '#a855f7', '#f43f5e', '#10b981'];
+    } catch {
       return ['indigo', 'purple', 'rose', 'emerald', '#6366f1', '#a855f7', '#f43f5e', '#10b981'];
     }
   },
 
   saveUnlockedThemes: (themes: string[]): void => {
     try {
-      localStorage.setItem(KEYS.UNLOCKED_THEMES, JSON.stringify(themes));
+      writeSignedVaultItem(KEYS.UNLOCKED_THEMES, themes);
     } catch (e) {
       logger.error("Failed to save unlocked themes", { error: e as Error });
     }
@@ -185,6 +208,48 @@ export const storageService = {
       localStorage.setItem(KEYS.AUTOLOCK, value);
     } catch (e) {
       logger.error("Failed to save session autolock setting", { error: e as Error });
+    }
+  },
+
+  getSessionPinHash: (): string | null => {
+    try {
+      return localStorage.getItem(KEYS.SESSION_PIN_HASH);
+    } catch {
+      return null;
+    }
+  },
+
+  setSessionPinHash: (hash: string | null): void => {
+    try {
+      if (hash) {
+        localStorage.setItem(KEYS.SESSION_PIN_HASH, hash);
+      } else {
+        localStorage.removeItem(KEYS.SESSION_PIN_HASH);
+        localStorage.removeItem(KEYS.SESSION_LOCKED);
+      }
+    } catch (e) {
+      logger.error("Failed to save session PIN hash", { error: e as Error });
+    }
+  },
+
+  isSessionLocked: (): boolean => {
+    try {
+      return localStorage.getItem(KEYS.SESSION_LOCKED) === 'true';
+    } catch {
+      return false;
+    }
+  },
+
+  setSessionLocked: (locked: boolean): void => {
+    try {
+      if (locked) {
+        localStorage.setItem(KEYS.SESSION_LOCKED, 'true');
+      } else {
+        localStorage.removeItem(KEYS.SESSION_LOCKED);
+      }
+      window.dispatchEvent(new CustomEvent('zigame-session-lock-change', { detail: { locked } }));
+    } catch (e) {
+      logger.error("Failed to update session lock state", { error: e as Error });
     }
   },
 
@@ -211,16 +276,16 @@ export const storageService = {
   },
 
   // Offline mutation queue for resilience
-  getOfflineMutationQueue: (): any[] => {
+  getOfflineMutationQueue: (): OfflineMutationItem[] => {
     try {
       const q = localStorage.getItem(KEYS.OFFLINE_MUTATIONS);
-      return q ? JSON.parse(q) : [];
+      return q ? (JSON.parse(q) as OfflineMutationItem[]) : [];
     } catch {
       return [];
     }
   },
 
-  pushOfflineMutation: (mutation: { type: string; payload: any; timestamp: number }): void => {
+  pushOfflineMutation: (mutation: OfflineMutationItem): void => {
     try {
       const q = storageService.getOfflineMutationQueue();
       q.push(mutation);
@@ -234,6 +299,15 @@ export const storageService = {
     try {
       localStorage.setItem(KEYS.OFFLINE_MUTATIONS, JSON.stringify([]));
     } catch {}
+  },
+
+  verifyVaultIntegrity: (): VaultIntegrityReport => {
+    return auditAndSealVaultKeys(PROTECTED_VAULT_KEYS);
+  },
+
+  getTamperAttemptsCount: (): number => {
+    return getTamperAttemptsCount();
   }
 };
+
 

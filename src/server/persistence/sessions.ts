@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import { requireCanonicalGameId } from '../../config/canonicalGames';
 import { isFirestoreAvailable, getDb, memoryStore, assertPersistenceOperational, StoredGameSession } from './db';
+import { computeSessionSignature } from './security';
 
 export const SESSION_MAX_LIFETIME_MS = 60 * 60 * 1000; // 1 hour max session lifetime
 
@@ -10,6 +11,7 @@ export async function createGameSession(userId: string, gameId: string): Promise
 
   const sessionId = `ses_${Date.now()}_${crypto.randomBytes(16).toString('hex')}`;
   const nonce = crypto.randomBytes(16).toString('hex');
+  const signature = computeSessionSignature(sessionId, userId, canonicalId, nonce);
   const now = Date.now();
 
   const session: StoredGameSession = {
@@ -17,6 +19,7 @@ export async function createGameSession(userId: string, gameId: string): Promise
     userId,
     gameId: canonicalId,
     nonce,
+    signature,
     startTime: now,
     expiresAt: now + SESSION_MAX_LIFETIME_MS,
     consumed: false,

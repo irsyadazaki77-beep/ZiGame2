@@ -5,6 +5,7 @@ import { useGameEngine } from '../../hooks/useGameEngine';
 import { disposeThreeScene } from '../../utils/threeCleanup';
 import { audio } from '../../utils/audio';
 import { screenShake } from '../../utils/screenShake';
+import { performanceService } from '../../services/performanceService';
 import { Flag, Gauge, RotateCcw, Eye, ChevronDown, ChevronUp, Ghost, Zap, Play, Shield, Sparkles, AlertTriangle } from 'lucide-react';
 
 interface GameProps {
@@ -71,6 +72,9 @@ const _right = new THREE.Vector3();
 const _up = new THREE.Vector3(0, 1, 0);
 const _camDesired = new THREE.Vector3();
 const _camLook = new THREE.Vector3();
+const _hoodOffset = new THREE.Vector3(0, 0.82, 0);
+const _overheadOffset = new THREE.Vector3(0, 14, 6);
+const _chaseOffset = new THREE.Vector3(0, 1.85, 0);
 
 function createTrackRoadTexture(maxAnisotropy: number): THREE.CanvasTexture {
   const canvas = document.createElement('canvas');
@@ -421,9 +425,11 @@ export default function DeskRacerGame({ onScoreUpdate, onGameOver, highScore }: 
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.12;
-    renderer.setPixelRatio(isSoftwareGl ? 1 : Math.min(window.devicePixelRatio, 2));
+    const initialDpr = isSoftwareGl ? 1 : performanceService.getAdaptiveDPR();
+    renderer.setPixelRatio(initialDpr);
     renderer.setSize(width, height);
-    renderer.shadowMap.enabled = !isSoftwareGl;
+    const initialPerf = performanceService.getFastSettings();
+    renderer.shadowMap.enabled = !isSoftwareGl && initialPerf.enableShadows;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
     container.innerHTML = '';
@@ -441,10 +447,18 @@ export default function DeskRacerGame({ onScoreUpdate, onGameOver, highScore }: 
 
     const deskLampLight = new THREE.DirectionalLight(0xfff7ed, 1.9);
     deskLampLight.position.set(12, 24, 14);
-    deskLampLight.castShadow = !isSoftwareGl;
+    deskLampLight.castShadow = !isSoftwareGl && initialPerf.enableShadows;
     deskLampLight.shadow.mapSize.set(1024, 1024);
     deskLampLight.shadow.camera.near = 2;
     deskLampLight.shadow.camera.far = 75;
+
+    // Live performance subscription for dynamic adaptive scaling
+    const unsubPerf = performanceService.subscribe((settings) => {
+      if (isDisposed) return;
+      const targetDpr = isSoftwareGl ? 1 : performanceService.getAdaptiveDPR();
+      renderer.setPixelRatio(targetDpr);
+      deskLampLight.castShadow = !isSoftwareGl && settings.enableShadows;
+    });
     const sd = 32;
     deskLampLight.shadow.camera.left = -sd;
     deskLampLight.shadow.camera.right = sd;
@@ -808,8 +822,12 @@ export default function DeskRacerGame({ onScoreUpdate, onGameOver, highScore }: 
       frameId = window.setTimeout(poll, 5);
     }
 
+    let fpsCounter = 0;
+    let fpsTimer = performance.now();
+
     function tick() {
       if (isDisposed) return;
+      const tickStart = performance.now();
       const dt = Math.min(clock.getDelta(), 0.08);
       const now = performance.now();
       const elapsedTotal = clock.getElapsedTime();
@@ -1073,12 +1091,12 @@ export default function DeskRacerGame({ onScoreUpdate, onGameOver, highScore }: 
 
         const cMode = cameraModeRef.current;
         if (cMode === 'hood') {
-          _camDesired.copy(playerCar.position).add(new THREE.Vector3(0, 0.82, 0));
+          _camDesired.copy(playerCar.position).add(_hoodOffset);
           _camLook.copy(playerCar.position).addScaledVector(_tangent, 8);
           camera.position.lerp(_camDesired, 0.45);
           camera.lookAt(_camLook);
         } else if (cMode === 'overhead') {
-          _camDesired.copy(playerCar.position).add(new THREE.Vector3(0, 14, 6));
+          _camDesired.copy(playerCar.position).add(_overheadOffset);
           camera.position.lerp(_camDesired, 0.15);
           camera.lookAt(playerCar.position);
         } else {
@@ -1086,7 +1104,7 @@ export default function DeskRacerGame({ onScoreUpdate, onGameOver, highScore }: 
           _camDesired
             .copy(playerCar.position)
             .addScaledVector(_tangent, -4.2)
-            .add(new THREE.Vector3(0, 1.85, 0));
+            .add(_chaseOffset);
           _camLook.copy(playerCar.position).addScaledVector(_tangent, 5.5);
           camera.position.x = THREE.MathUtils.damp(camera.position.x, _camDesired.x, 8, dt);
           camera.position.y = THREE.MathUtils.damp(camera.position.y, _camDesired.y, 8, dt);
@@ -1113,6 +1131,17 @@ export default function DeskRacerGame({ onScoreUpdate, onGameOver, highScore }: 
 
       renderer.render(scene, camera);
 
+      // Record frame-time and FPS for adaptive performance
+      const frameElapsed = performance.now() - tickStart;
+      performanceService.recordFrameTime(frameElapsed);
+
+      fpsCounter++;
+      if (now - fpsTimer >= 1000) {
+        performanceService.recordFramePerformance(fpsCounter);
+        fpsCounter = 0;
+        fpsTimer = now;
+      }
+
       if (isSoftwareGl) afterDraw(tick);
       else frameId = requestAnimationFrame(tick);
     }
@@ -1134,6 +1163,7 @@ export default function DeskRacerGame({ onScoreUpdate, onGameOver, highScore }: 
       isDisposed = true;
       cancelAnimationFrame(frameId);
       clearTimeout(frameId);
+      unsubPerf();
       resizeObserver.disconnect();
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('keyup', onKeyUp);
@@ -1183,7 +1213,7 @@ export default function DeskRacerGame({ onScoreUpdate, onGameOver, highScore }: 
       {/* Top Right Speedometer, Power-Up & Combo HUD */}
       <div className="absolute top-3 right-3 z-10 flex items-center gap-4 px-4 py-2 rounded-xl bg-zinc-950/90 border border-white/10 text-xs text-white pointer-events-auto tabular-nums">
         {comboMultiplier > 1 && (
-          <div className="px-2.5 py-1 rounded-lg bg-gradient-to-r from-amber-500 to-rose-500 text-zinc-950 font-black text-xs uppercase animate-pulse">
+          <div className="px-2.5 py-1 rounded-lg bg-gradient-to-r from-amber-500 to-rose-500 text-zinc-950 font-black text-xs uppercase font-mono tracking-wider shadow-xs">
             {comboMultiplier}x COMBO
           </div>
         )}

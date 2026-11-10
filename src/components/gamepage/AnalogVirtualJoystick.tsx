@@ -18,6 +18,7 @@ export const AnalogVirtualJoystick: React.FC<AnalogVirtualJoystickProps> = ({
   const [knobPos, setKnobPos] = useState({ x: 0, y: 0 });
   const [isDragging, setIsDragging] = useState(false);
   const activeActionRef = useRef<InputAction | null>(null);
+  const touchIdRef = useRef<number | null>(null);
 
   const radius = size / 2;
   const maxDistance = radius - 16;
@@ -76,20 +77,27 @@ export const AnalogVirtualJoystick: React.FC<AnalogVirtualJoystickProps> = ({
 
   const handleTouchStart = (e: React.TouchEvent) => {
     if (e.cancelable) e.preventDefault();
+    const touch = e.changedTouches[0];
+    if (!touch) return;
+    touchIdRef.current = touch.identifier;
     setIsDragging(true);
-    const touch = e.touches[0];
     updatePosition(touch.clientX, touch.clientY);
   };
 
   const handleTouchMove = (e: React.TouchEvent) => {
     if (e.cancelable) e.preventDefault();
-    if (!isDragging) return;
-    const touch = e.touches[0];
-    updatePosition(touch.clientX, touch.clientY);
+    if (!isDragging || touchIdRef.current === null) return;
+    for (let i = 0; i < e.touches.length; i++) {
+      if (e.touches[i].identifier === touchIdRef.current) {
+        updatePosition(e.touches[i].clientX, e.touches[i].clientY);
+        break;
+      }
+    }
   };
 
   const resetJoystick = useCallback(() => {
     setIsDragging(false);
+    touchIdRef.current = null;
     setKnobPos({ x: 0, y: 0 });
     if (activeActionRef.current) {
       inputManager.dispatchAction(activeActionRef.current, false, 'touch');
@@ -100,7 +108,13 @@ export const AnalogVirtualJoystick: React.FC<AnalogVirtualJoystickProps> = ({
 
   const handleTouchEnd = (e: React.TouchEvent) => {
     if (e.cancelable) e.preventDefault();
-    resetJoystick();
+    if (touchIdRef.current === null) return;
+    for (let i = 0; i < e.changedTouches.length; i++) {
+      if (e.changedTouches[i].identifier === touchIdRef.current) {
+        resetJoystick();
+        break;
+      }
+    }
   };
 
   // Mouse fallback for responsive preview testing

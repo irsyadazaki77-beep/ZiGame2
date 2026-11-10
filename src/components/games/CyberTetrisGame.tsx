@@ -1,42 +1,75 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
+import * as THREE from 'three';
+import { GameComponentProps } from '../../types';
 import { audio } from '../../utils/audio';
-import { GameContainer } from '../gameplay/GameContainer';
-import { GameHUD } from '../gameplay/GameHUD';
+import { useGameEngine } from '../../hooks/useGameEngine';
+import { inputManager } from '../../services/inputService';
 import { GameOverlay } from '../gameplay/GameOverlay';
-import { MobileControls } from '../gameplay/MobileControls';
-
-interface GameProps {
-  onGameOver: (score: number) => void;
-  onScoreUpdate: (score: number) => void;
-  highScore: number;
-}
+import { ThreeDockOverlay } from '../gameplay/ThreeDockOverlay';
+import {
+  ThreeStageController,
+  CameraPreset3D,
+  QualityLevel3D
+} from '../../utils/threeStage';
+import { Layers, Zap } from 'lucide-react';
 
 const COLS = 10;
-const ROWS = 15;
+const ROWS = 16;
 
-const SHAPES = [
-  [[1, 1, 1, 1]], // I
-  [[1, 1, 1], [0, 1, 0]], // T
-  [[1, 1], [1, 1]], // O
-  [[1, 1, 0], [0, 1, 1]], // Z
-  [[0, 1, 1], [1, 1, 0]], // S
-  [[1, 1, 1], [1, 0, 0]], // L
-  [[1, 1, 1], [0, 0, 1]], // J
+const TETROMINOES = [
+  { shape: [[1, 1, 1, 1]], color: 0x06b6d4 }, // I
+  {
+    shape: [
+      [1, 1],
+      [1, 1]
+    ],
+    color: 0xfacc15
+  }, // O
+  {
+    shape: [
+      [0, 1, 0],
+      [1, 1, 1]
+    ],
+    color: 0xa855f7
+  }, // T
+  {
+    shape: [
+      [1, 0, 0],
+      [1, 1, 1]
+    ],
+    color: 0x3b82f6
+  }, // J
+  {
+    shape: [
+      [0, 0, 1],
+      [1, 1, 1]
+    ],
+    color: 0xf97316
+  }, // L
+  {
+    shape: [
+      [0, 1, 1],
+      [1, 1, 0]
+    ],
+    color: 0x22c55e
+  }, // S
+  {
+    shape: [
+      [1, 1, 0],
+      [0, 1, 1]
+    ],
+    color: 0xef4444
+  } // Z
 ];
 
-const COLORS = [
-  'bg-cyan-500 border-cyan-400 shadow-[0_0_8px_rgba(6,182,212,0.5)]',
-  'bg-purple-500 border-purple-400 shadow-[0_0_8px_rgba(168,85,247,0.5)]',
-  'bg-yellow-500 border-yellow-400 shadow-[0_0_8px_rgba(234,179,8,0.5)]',
-  'bg-red-500 border-red-400 shadow-[0_0_8px_rgba(239,68,68,0.5)]',
-  'bg-emerald-500 border-emerald-400 shadow-[0_0_8px_rgba(16,185,129,0.5)]',
-  'bg-orange-500 border-orange-400 shadow-[0_0_8px_rgba(249,115,22,0.5)]',
-  'bg-blue-500 border-blue-400 shadow-[0_0_8px_rgba(59,130,246,0.5)]',
-];
+export default function CyberTetrisGame({
+  onGameOver,
+  onScoreUpdate,
+  highScore
+}: GameComponentProps) {
+  const mountRef = useRef<HTMLDivElement | null>(null);
+  const stageRef = useRef<ThreeStageController | null>(null);
 
-import { useGameEngine } from '../../hooks/useGameEngine';
-
-export default function CyberTetrisGame({ onGameOver, onScoreUpdate, highScore }: GameProps) {
   const {
     gameState,
     score,
@@ -44,453 +77,353 @@ export default function CyberTetrisGame({ onGameOver, onScoreUpdate, highScore }
     startWithCountdown,
     countdown,
     triggerGameOver,
-    pauseGame,
-    resumeGame,
-    startLoop,
-    stopLoop,
-    gameStateRef,
-    scoreRef,
+    scoreRef
   } = useGameEngine({
-    gameId: 'cybertetris',
+    gameId: 'cyber-tetris',
     onGameOver,
-    onScoreUpdate,
+    onScoreUpdate
   });
 
-  const [board, setBoard] = useState<number[][]>(() => Array(ROWS).fill(null).map(() => Array(COLS).fill(0)));
-  const [level, setLevel] = useState(1);
   const [linesCleared, setLinesCleared] = useState(0);
+  const [level, setLevel] = useState(1);
+  const [cameraPreset, setCameraPreset] = useState<CameraPreset3D>('chase');
+  const [quality, setQuality] = useState<QualityLevel3D>('ultra');
 
-  const boardRef = useRef<number[][]>([]);
-
-  // Active falling piece
-  const currentPiece = useRef<number[][]>([]);
-  const currentPos = useRef<{ r: number; c: number }>({ r: 0, c: 0 });
-  const currentColorIdx = useRef<number>(0);
-
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const cabinetRef = useRef<HTMLDivElement | null>(null);
-  const particlesRef = useRef<{ x: number; y: number; vx: number; vy: number; color: string; radius: number; alpha: number; decay: number }[]>([]);
-  const floatingTextsRef = useRef<{ x: number; y: number; text: string; color: string; alpha: number; vy: number }[]>([]);
-  const shakeRef = useRef<number>(0);
-
+  const gameStateRef = useRef(gameState);
   useEffect(() => {
-    boardRef.current = board;
-  }, [board]);
+    gameStateRef.current = gameState;
+  }, [gameState]);
 
-  const spawnPiece = () => {
-    const idx = Math.floor(Math.random() * SHAPES.length);
-    currentPiece.current = SHAPES[idx];
-    currentColorIdx.current = idx + 1; // 1-indexed for colored cells
+  const tetrisRef = useRef({
+    board: Array.from({ length: ROWS }, () => Array(COLS).fill(0)) as number[][],
+    piece: TETROMINOES[0].shape,
+    color: TETROMINOES[0].color,
+    px: 3,
+    py: 0,
+    dropTimer: 0,
+    lines: 0,
+    level: 1
+  });
 
-    // Center piece at the top
-    const startCol = Math.floor((COLS - currentPiece.current[0].length) / 2);
-    currentPos.current = { r: 0, c: startCol };
-
-    // Check collision right away (Game over state)
-    if (checkCollision(0, startCol, currentPiece.current)) {
-      endGame();
-    }
-  };
-
-  const checkCollision = (nextR: number, nextC: number, piece: number[][]): boolean => {
-    const currentBoard = boardRef.current;
-    for (let r = 0; r < piece.length; r++) {
-      for (let c = 0; c < piece[r].length; c++) {
-        if (piece[r][c] !== 0) {
-          const boardR = nextR + r;
-          const boardC = nextC + c;
-
-          // Check walls
-          if (boardC < 0 || boardC >= COLS || boardR >= ROWS) {
-            return true;
-          }
-
-          // Check static blocks
-          if (boardR >= 0 && currentBoard[boardR][boardC] !== 0) {
-            return true;
-          }
-        }
+  const collides = useCallback((board: number[][], shape: number[][], nx: number, ny: number) => {
+    for (let r = 0; r < shape.length; r++) {
+      for (let c = 0; c < shape[r].length; c++) {
+        if (!shape[r][c]) continue;
+        const bx = nx + c;
+        const by = ny + r;
+        if (bx < 0 || bx >= COLS || by >= ROWS) return true;
+        if (by >= 0 && board[by][bx] !== 0) return true;
       }
     }
     return false;
-  };
-
-  const triggerLineClearEffects = (rows: number[]) => {
-    let shakeAmt = 5;
-    let feedbackText = "SINGLE!";
-    let textColor = "#06b6d4"; // cyan
-
-    if (rows.length === 2) {
-      shakeAmt = 12;
-      feedbackText = "DOUBLE! +300";
-      textColor = "#a855f7"; // purple
-    } else if (rows.length === 3) {
-      shakeAmt = 20;
-      feedbackText = "TRIPLE! +600";
-      textColor = "#fbbf24"; // gold
-    } else if (rows.length >= 4) {
-      shakeAmt = 35;
-      feedbackText = "TETRIS! +1000";
-      textColor = "#ec4899"; // pink
-    }
-
-    shakeRef.current = Math.max(shakeRef.current, shakeAmt);
-
-    if (rows.length > 0) {
-      const midRow = rows[Math.floor(rows.length / 2)];
-      const yPos = (midRow + 0.5) * (420 / ROWS);
-      floatingTextsRef.current.push({
-        x: 140, // center of 280
-        y: yPos,
-        text: feedbackText,
-        color: textColor,
-        alpha: 1.0,
-        vy: -0.6
-      });
-
-      rows.forEach(r => {
-        const yCoord = (r + 0.5) * (420 / ROWS);
-        for (let i = 0; i < 20; i++) {
-          particlesRef.current.push({
-            x: Math.random() * 260 + 10,
-            y: yCoord + (Math.random() - 0.5) * 10,
-            vx: (Math.random() - 0.5) * 5,
-            vy: (Math.random() - 0.5) * 3,
-            color: textColor,
-            radius: Math.random() * 2.5 + 1.5,
-            alpha: 1.0,
-            decay: Math.random() * 0.04 + 0.02
-          });
-        }
-      });
-    }
-  };
-
-  const triggerMergeEffects = (piece: number[][], rStart: number, cStart: number) => {
-    shakeRef.current = Math.max(shakeRef.current, 3);
-    for (let r = 0; r < piece.length; r++) {
-      for (let c = 0; c < piece[r].length; c++) {
-        if (piece[r][c] !== 0) {
-          const cellX = (cStart + c + 0.5) * (280 / COLS);
-          const cellY = (rStart + r + 1) * (420 / ROWS);
-          for (let i = 0; i < 3; i++) {
-            particlesRef.current.push({
-              x: cellX + (Math.random() - 0.5) * 12,
-              y: cellY - 2,
-              vx: (Math.random() - 0.5) * 2,
-              vy: -Math.random() * 1.5,
-              color: '#6b7280', // grey dust
-              radius: Math.random() * 1.5 + 1,
-              alpha: 0.7,
-              decay: 0.05
-            });
-          }
-        }
-      }
-    }
-  };
-
-  const mergePiece = () => {
-    const nextBoard = boardRef.current.map(row => [...row]);
-    const piece = currentPiece.current;
-    const { r: startR, c: startC } = currentPos.current;
-
-    for (let r = 0; r < piece.length; r++) {
-      for (let c = 0; c < piece[r].length; c++) {
-        if (piece[r][c] !== 0) {
-          const boardR = startR + r;
-          const boardC = startC + c;
-          if (boardR >= 0 && boardR < ROWS) {
-            nextBoard[boardR][boardC] = currentColorIdx.current;
-          }
-        }
-      }
-    }
-
-    // Check for row completions
-    const rowsToClear: number[] = [];
-    for (let r = 0; r < ROWS; r++) {
-      if (nextBoard[r].every(val => val !== 0)) {
-        rowsToClear.push(r);
-      }
-    }
-
-    if (rowsToClear.length > 0) {
-      audio.playLevelUp();
-      triggerLineClearEffects(rowsToClear);
-      // Filter out completed rows
-      const remainingRows = nextBoard.filter((_, idx) => !rowsToClear.includes(idx));
-      // Re-populate with empty rows at the top
-      while (remainingRows.length < ROWS) {
-        remainingRows.unshift(Array(COLS).fill(0));
-      }
-
-      setBoard(remainingRows);
-      
-      // Update scores based on line clears
-      const multiplier = [0, 100, 300, 600, 1000];
-      const clearedCount = rowsToClear.length;
-      addScore(multiplier[clearedCount] * level);
-      setLinesCleared(prev => {
-        const next = prev + clearedCount;
-        if (next >= level * 10) {
-          setLevel(l => l + 1);
-        }
-        return next;
-      });
-    } else {
-      audio.playHit();
-      triggerMergeEffects(piece, startR, startC);
-      setBoard(nextBoard);
-    }
-
-    spawnPiece();
-  };
-
-  const moveLeft = () => {
-    if (gameStateRef.current !== 'playing') return;
-    const { r, c } = currentPos.current;
-    if (!checkCollision(r, c - 1, currentPiece.current)) {
-      audio.playCoin();
-      currentPos.current.c = c - 1;
-      forceUpdateBoardState();
-    }
-  };
-
-  const moveRight = () => {
-    if (gameStateRef.current !== 'playing') return;
-    const { r, c } = currentPos.current;
-    if (!checkCollision(r, c + 1, currentPiece.current)) {
-      audio.playCoin();
-      currentPos.current.c = c + 1;
-      forceUpdateBoardState();
-    }
-  };
-
-  const rotatePiece = () => {
-    if (gameStateRef.current !== 'playing') return;
-    const piece = currentPiece.current;
-    const N = piece.length;
-    const M = piece[0].length;
-
-    // Transpose and reverse rows
-    const rotated = Array(M).fill(null).map(() => Array(N).fill(0));
-    for (let r = 0; r < N; r++) {
-      for (let c = 0; c < M; c++) {
-        rotated[c][N - 1 - r] = piece[r][c];
-      }
-    }
-
-    const { r, c } = currentPos.current;
-    if (!checkCollision(r, c, rotated)) {
-      audio.playJump();
-      currentPiece.current = rotated;
-      forceUpdateBoardState();
-    }
-  };
-
-  const dropDown = () => {
-    if (gameStateRef.current !== 'playing') return;
-    const { r, c } = currentPos.current;
-    if (!checkCollision(r + 1, c, currentPiece.current)) {
-      currentPos.current.r = r + 1;
-      forceUpdateBoardState();
-    } else {
-      mergePiece();
-    }
-  };
-
-  // Trigger UI update
-  const [, setTick] = useState(0);
-  const forceUpdateBoardState = () => {
-    setTick(t => t + 1);
-  };
-
-  // Keyboard navigation
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (gameState !== 'playing') return;
-      if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') {
-        e.preventDefault();
-        moveLeft();
-      } else if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') {
-        e.preventDefault();
-        moveRight();
-      } else if (e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W') {
-        e.preventDefault();
-        rotatePiece();
-      } else if (e.key === 'ArrowDown' || e.key === 's' || e.key === 'S') {
-        e.preventDefault();
-        dropDown();
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [gameState]);
-
-  // Main automatic drop timer loop
-  useEffect(() => {
-    let timerId: NodeJS.Timeout;
-    if (gameState === 'playing') {
-      timerId = setInterval(() => {
-        dropDown();
-      }, Math.max(1000 - level * 100, 150));
-    }
-    return () => clearInterval(timerId);
-  }, [gameState, level]);
-
-  const startNewGame = () => {
-    startWithCountdown(() => {
-      setBoard(Array(ROWS).fill(null).map(() => Array(COLS).fill(0)));
-      setLevel(1);
-      setLinesCleared(0);
-      spawnPiece();
-      forceUpdateBoardState();
-      startLoop(render);
-    });
-  };
-
-  const endGame = () => {
-    triggerGameOver(score);
-  };
-
-  const render = () => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    ctx.clearRect(0, 0, 280, 420);
-
-    // Direct DOM camera shake on the grid cabinet stage
-    const cabinet = cabinetRef.current;
-    if (cabinet) {
-      if (shakeRef.current > 0) {
-        const dx = (Math.random() - 0.5) * shakeRef.current;
-        const dy = (Math.random() - 0.5) * shakeRef.current;
-        cabinet.style.transform = `translate(${dx}px, ${dy}px)`;
-        // decay shake
-        shakeRef.current *= 0.88;
-        if (shakeRef.current < 0.5) {
-          shakeRef.current = 0;
-          cabinet.style.transform = 'none';
-        }
-      } else {
-        cabinet.style.transform = 'none';
-      }
-    }
-
-    // Update & Render neon block clear particles
-    particlesRef.current.forEach(p => {
-      p.x += p.vx;
-      p.y += p.vy;
-      p.alpha -= p.decay;
-
-      ctx.fillStyle = p.color;
-      ctx.shadowColor = p.color;
-      ctx.shadowBlur = 4;
-      ctx.globalAlpha = Math.max(0, p.alpha);
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
-      ctx.fill();
-    });
-    ctx.shadowBlur = 0;
-    ctx.globalAlpha = 1.0;
-    particlesRef.current = particlesRef.current.filter(p => p.alpha > 0);
-
-    // Update & Render floating multiplier score texts
-    floatingTextsRef.current.forEach(t => {
-      t.y += t.vy;
-      t.alpha -= 0.022;
-
-      ctx.fillStyle = t.color;
-      ctx.shadowColor = t.color;
-      ctx.shadowBlur = 3;
-      ctx.globalAlpha = Math.max(0, t.alpha);
-      ctx.font = 'bold 9px "Press Start 2P", monospace';
-      ctx.textAlign = 'center';
-      ctx.fillText(t.text, t.x, t.y);
-    });
-    ctx.shadowBlur = 0;
-    ctx.globalAlpha = 1.0;
-    floatingTextsRef.current = floatingTextsRef.current.filter(t => t.alpha > 0);
-  };
-
-  useEffect(() => {
-    return () => {
-      stopLoop();
-      if (cabinetRef.current) {
-        cabinetRef.current.style.transform = 'none';
-      }
-    };
   }, []);
 
+  const spawnNextPiece = useCallback(() => {
+    const t = tetrisRef.current;
+    const pick = TETROMINOES[Math.floor(Math.random() * TETROMINOES.length)];
+    t.piece = pick.shape.map((row) => [...row]);
+    t.color = pick.color;
+    t.px = Math.floor((COLS - t.piece[0].length) / 2);
+    t.py = 0;
+    if (collides(t.board, t.piece, t.px, t.py)) {
+      stageRef.current?.triggerTrauma(0.75);
+      audio.playExplosion?.();
+      triggerGameOver(scoreRef.current);
+    }
+  }, [collides, scoreRef, triggerGameOver]);
+
+  const lockPiece = useCallback(() => {
+    const t = tetrisRef.current;
+    const stage = stageRef.current;
+    for (let r = 0; r < t.piece.length; r++) {
+      for (let c = 0; c < t.piece[r].length; c++) {
+        if (t.piece[r][c]) {
+          const by = t.py + r;
+          const bx = t.px + c;
+          if (by >= 0 && by < ROWS && bx >= 0 && bx < COLS) {
+            t.board[by][bx] = t.color;
+          }
+        }
+      }
+    }
+
+    // Check full lines
+    let cleared = 0;
+    for (let r = ROWS - 1; r >= 0; r--) {
+      if (t.board[r].every((cell) => cell !== 0)) {
+        t.board.splice(r, 1);
+        t.board.unshift(Array(COLS).fill(0));
+        cleared += 1;
+        r += 1; // Recheck row index
+      }
+    }
+
+    if (cleared > 0) {
+      t.lines += cleared;
+      t.level = 1 + Math.floor(t.lines / 5);
+      setLinesCleared(t.lines);
+      setLevel(t.level);
+      const pts = [0, 100, 250, 500, 800][Math.min(4, cleared)] * t.level;
+      addScore(pts);
+      stage?.particles.burst(0, 4, 0, 28 * cleared, 0x22d3ee, 8.5);
+      stage?.triggerTrauma(0.32);
+      if (cleared >= 2) stage?.kickFov(4);
+      audio.playCoin?.();
+    } else {
+      addScore(10);
+      audio.playClick?.();
+    }
+
+    spawnNextPiece();
+  }, [addScore, spawnNextPiece]);
+
+  const movePiece = useCallback(
+    (dx: number, dy: number) => {
+      if (gameStateRef.current !== 'playing') return;
+      const t = tetrisRef.current;
+      if (!collides(t.board, t.piece, t.px + dx, t.py + dy)) {
+        t.px += dx;
+        t.py += dy;
+        return true;
+      } else if (dy > 0) {
+        lockPiece();
+      }
+      return false;
+    },
+    [collides, lockPiece]
+  );
+
+  const rotatePiece = useCallback(() => {
+    if (gameStateRef.current !== 'playing') return;
+    const t = tetrisRef.current;
+    const rotated = t.piece[0].map((_, idx) => t.piece.map((row) => row[idx]).reverse());
+    if (!collides(t.board, rotated, t.px, t.py)) {
+      t.piece = rotated;
+      audio.playClick?.();
+    }
+  }, [collides]);
+
+  const hardDrop = useCallback(() => {
+    if (gameStateRef.current !== 'playing') return;
+    const t = tetrisRef.current;
+    while (!collides(t.board, t.piece, t.px, t.py + 1)) {
+      t.py += 1;
+    }
+    stageRef.current?.triggerTrauma(0.2);
+    lockPiece();
+  }, [collides, lockPiece]);
+
+  const handleStart = useCallback(() => {
+    const pick = TETROMINOES[Math.floor(Math.random() * TETROMINOES.length)];
+    tetrisRef.current = {
+      board: Array.from({ length: ROWS }, () => Array(COLS).fill(0)),
+      piece: pick.shape.map((row) => [...row]),
+      color: pick.color,
+      px: 3,
+      py: 0,
+      dropTimer: 0,
+      lines: 0,
+      level: 1
+    };
+    setLinesCleared(0);
+    setLevel(1);
+    startWithCountdown();
+  }, [startWithCountdown]);
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      const k = e.key.toLowerCase();
+      if (k === 'arrowleft' || k === 'a') movePiece(-1, 0);
+      else if (k === 'arrowright' || k === 'd') movePiece(1, 0);
+      else if (k === 'arrowdown' || k === 's') movePiece(0, 1);
+      else if (k === 'arrowup' || k === 'w') rotatePiece();
+      else if (e.key === ' ') hardDrop();
+    };
+    window.addEventListener('keydown', onKeyDown);
+
+    const unsub = inputManager.subscribe({
+      onActionDown: (action) => {
+        if (action === 'LEFT') movePiece(-1, 0);
+        if (action === 'RIGHT') movePiece(1, 0);
+        if (action === 'DOWN') movePiece(0, 1);
+        if (action === 'UP') rotatePiece();
+        if (action === 'ACTION_PRIMARY') hardDrop();
+      }
+    });
+
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      unsub();
+    };
+  }, [hardDrop, movePiece, rotatePiece]);
+
+  const handleSelectPreset = useCallback((preset: CameraPreset3D) => {
+    setCameraPreset(preset);
+    stageRef.current?.setCameraPreset(preset);
+  }, []);
+
+  const handleCycleQuality = useCallback(() => {
+    setQuality((prev) => {
+      const next: QualityLevel3D =
+        prev === 'ultra' ? 'balanced' : prev === 'balanced' ? 'performance' : 'ultra';
+      stageRef.current?.setQualityLevel(next);
+      return next;
+    });
+  }, []);
+
+  useEffect(() => {
+    const container = mountRef.current;
+    if (!container) return;
+
+    let stage: ThreeStageController;
+    try {
+      stage = new ThreeStageController({
+        container,
+        backgroundColor: 0x040914,
+        fogColor: 0x040914,
+        fogDensity: 0.014,
+        initialPreset: 'chase',
+        gridPrimaryColor: '#06b6d4',
+        gridSecondaryColor: '#071122',
+        cameraPresets: {
+          chase: { position: [0, 5.2, 13.8], lookAt: [0, 4.8, 0], fov: 50 },
+          isometric: { position: [7.5, 7.8, 12.5], lookAt: [0, 4.8, 0], fov: 46 },
+          diorama: { position: [0, 5.8, 15.2], lookAt: [0, 4.8, 0], fov: 45 }
+        }
+      });
+    } catch {
+      return;
+    }
+
+    stageRef.current = stage;
+    setQuality(stage.getQualityLevel());
+
+    const cellStep = 0.62;
+    const towerW = COLS * cellStep;
+    const towerH = ROWS * cellStep;
+
+    // 3D Matrix Frame Pillars
+    const frameMat = new THREE.MeshStandardMaterial({
+      color: 0x06b6d4,
+      emissive: 0x0891b2,
+      emissiveIntensity: 0.55,
+      metalness: 0.8,
+      roughness: 0.2
+    });
+    const pillarL = new THREE.Mesh(new THREE.BoxGeometry(0.18, towerH + 0.4, 0.7), frameMat);
+    pillarL.position.set(-towerW / 2 - 0.15, towerH / 2, 0);
+    const pillarR = pillarL.clone();
+    pillarR.position.x = towerW / 2 + 0.15;
+    stage.scene.add(pillarL, pillarR);
+
+    // Instanced 3D Crystal Cubes for Board + Active Piece
+    const totalCells = COLS * ROWS;
+    const cubeGeo = new THREE.BoxGeometry(0.56, 0.56, 0.56);
+    const cubeMat = new THREE.MeshPhysicalMaterial({
+      color: 0xffffff,
+      metalness: 0.35,
+      roughness: 0.18,
+      clearcoat: 0.9
+    });
+    const instanced = new THREE.InstancedMesh(cubeGeo, cubeMat, totalCells);
+    instanced.frustumCulled = false;
+    stage.scene.add(instanced);
+
+    const dummyMat = new THREE.Matrix4();
+    const dummyCol = new THREE.Color();
+
+    stage.startLoop((dt) => {
+      const t = tetrisRef.current;
+
+      if (gameStateRef.current === 'playing') {
+        const dropInterval = Math.max(0.14, 0.68 - (t.level - 1) * 0.055);
+        t.dropTimer += dt;
+        if (t.dropTimer >= dropInterval) {
+          t.dropTimer = 0;
+          movePiece(0, 1);
+        }
+      }
+
+      // Render Board + Active Piece into InstancedMesh
+      let idx = 0;
+      for (let r = 0; r < ROWS; r++) {
+        for (let c = 0; c < COLS; c++) {
+          let cellColor = t.board[r][c];
+          const pr = r - t.py;
+          const pc = c - t.px;
+          if (
+            pr >= 0 &&
+            pr < t.piece.length &&
+            pc >= 0 &&
+            pc < t.piece[pr].length &&
+            t.piece[pr][pc]
+          ) {
+            cellColor = t.color;
+          }
+
+          if (cellColor !== 0) {
+            const wx = (c - (COLS - 1) / 2) * cellStep;
+            const wy = (ROWS - 1 - r) * cellStep + 0.32;
+            dummyMat.makeScale(1, 1, 1);
+            dummyMat.setPosition(wx, wy, 0);
+            instanced.setMatrixAt(idx, dummyMat);
+            dummyCol.setHex(cellColor);
+            instanced.setColorAt(idx, dummyCol);
+          } else {
+            dummyMat.makeScale(0, 0, 0);
+            dummyMat.setPosition(0, -999, 0);
+            instanced.setMatrixAt(idx, dummyMat);
+          }
+          idx++;
+        }
+      }
+      instanced.instanceMatrix.needsUpdate = true;
+      if (instanced.instanceColor) instanced.instanceColor.needsUpdate = true;
+    });
+
+    return () => {
+      stage.dispose();
+      stageRef.current = null;
+    };
+  }, [movePiece]);
+
   return (
-    <GameContainer aspect="portrait" maxWidth="sm">
-      {(gameState === 'playing' || gameState === 'paused') && (
-        <GameHUD 
-          stats={[
-            { id: 'level', label: 'LEVEL', value: level },
-            { id: 'lines', label: 'BARIS', value: linesCleared },
-            { id: 'score', label: 'SKOR', value: score, emphasized: true }
-          ]} 
-        />
-      )}
+    <div className="relative w-full h-full min-h-[460px] bg-slate-950 overflow-hidden rounded-2xl border border-cyan-500/20">
+      <div ref={mountRef} className="absolute inset-0 w-full h-full" />
+
+      <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex flex-wrap items-center justify-between gap-2 p-3.5">
+        <div className="flex items-center gap-3 rounded-xl border border-white/10 bg-slate-950/85 px-3.5 py-2 text-xs text-slate-200 tabular-nums">
+          <span className="flex items-center gap-1 font-semibold text-cyan-400">
+            <Layers className="w-3.5 h-3.5" /> LEVEL {level} · BARIS: {linesCleared}
+          </span>
+          <span aria-hidden="true">·</span>
+          <span>SKOR: <strong className="text-white">{score}</strong></span>
+        </div>
+      </div>
+
+      <ThreeDockOverlay
+        cameraPreset={cameraPreset}
+        onSelectPreset={handleSelectPreset}
+        quality={quality}
+        onCycleQuality={handleCycleQuality}
+        extraControls={
+          <span className="hidden sm:inline-flex items-center gap-1 text-[11px] text-slate-400 px-2 whitespace-nowrap shrink-0">
+            <Zap className="w-3 h-3 text-cyan-400" /> A/D: Geser · W/Up: Putar · Space: Hard Drop 3D
+          </span>
+        }
+      />
 
       <GameOverlay
         gameState={gameState}
         score={score}
         highScore={highScore}
-        onStart={startNewGame}
-        onRestart={startNewGame}
-        onResume={resumeGame}
         countdown={countdown}
-        instructions="Tumpuk dan rapikan barisan balok neon yang jatuh untuk membersihkan jalur grid."
+        onStart={handleStart}
+        onRestart={handleStart}
+        title="Cyber Tetris Pulse 3D"
+        description="Susun balok kristal Tetrimino 3D di menara matriks kaca dan ledakkan baris penuh!"
+        themeColor="cyan"
       />
-
-      <div ref={cabinetRef} className="relative w-full aspect-[10/15] mx-auto bg-zinc-950 rounded-xl border-4 border-zinc-900 shadow-2xl overflow-hidden transition-transform duration-75">
-        <canvas ref={canvasRef} width={280} height={420} className="absolute inset-0 pointer-events-none z-20 w-full h-full" />
-        <div className="grid grid-cols-10 gap-px w-full h-full p-1">
-          {Array(ROWS).fill(null).map((_, r) =>
-            Array(COLS).fill(null).map((_, c) => {
-              let blockColorIdx = board[r]?.[c] || 0;
-              
-              const piece = currentPiece.current;
-              const { r: startR, c: startC } = currentPos.current;
-              
-              if (
-                r >= startR && r < startR + piece.length &&
-                c >= startC && c < startC + piece[0].length
-              ) {
-                if (piece[r - startR][c - startC] !== 0) {
-                  blockColorIdx = currentColorIdx.current;
-                }
-              }
-
-              return (
-                <div
-                  key={`${r}-${c}`}
-                  className={`w-full h-full rounded-sm border ${
-                    blockColorIdx !== 0
-                      ? COLORS[blockColorIdx - 1]
-                      : 'bg-zinc-950 border-zinc-900/40 shadow-inner'
-                  }`}
-                />
-              );
-            })
-          )}
-        </div>
-      </div>
-
-      {(gameState === 'playing' || gameState === 'paused') && (
-        <MobileControls
-          onUp={rotatePiece}
-          onDown={dropDown}
-          onLeft={moveLeft}
-          onRight={moveRight}
-        />
-      )}
-    </GameContainer>
+    </div>
   );
 }

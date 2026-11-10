@@ -1,6 +1,8 @@
 import { isFirebaseReady, auth } from './firebase';
 import { withRetry } from '../utils/resilience';
 import { logger } from '../utils/logger';
+import { computePayloadProofClient } from '../utils/sessionCrypto';
+import { toCanonicalGameId } from '../config/canonicalGames';
 
 export interface ScoreSubmissionParams {
   gameId: string;
@@ -22,6 +24,14 @@ export interface ScoreSubmissionResult {
   message?: string;
 }
 
+interface SessionCryptoMeta {
+  nonce: string;
+  signature?: string;
+  gameId: string;
+}
+
+const sessionCryptoStore = new Map<string, SessionCryptoMeta>();
+
 async function getAuthHeaders(): Promise<Record<string, string>> {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json'
@@ -40,7 +50,7 @@ async function getAuthHeaders(): Promise<Record<string, string>> {
 }
 
 export const scoreService = {
-  startSession: async (gameId: string, nonce?: string): Promise<{ sessionId?: string; nonce?: string; startTime?: number }> => {
+  startSession: async (gameId: string, nonce?: string): Promise<{ sessionId?: string; nonce?: string; signature?: string; startTime?: number }> => {
     try {
       const headers = await getAuthHeaders();
       if (!headers['Authorization']) {
@@ -54,9 +64,17 @@ export const scoreService = {
       });
       if (res.ok) {
         const data = await res.json();
+        if (data.sessionId && data.nonce) {
+          sessionCryptoStore.set(data.sessionId, {
+            nonce: data.nonce,
+            signature: data.signature,
+            gameId: toCanonicalGameId(gameId)
+          });
+        }
         return {
           sessionId: data.sessionId,
           nonce: data.nonce,
+          signature: data.signature,
           startTime: data.startTime
         };
       }
@@ -97,20 +115,38 @@ export const scoreService = {
         };
       }
 
+      const cryptoMeta = sessionCryptoStore.get(activeSessionId);
+      const canonicalGameId = cryptoMeta?.gameId || toCanonicalGameId(gameId);
+      const cleanScore = Math.floor(score);
+      let clientProof: string | undefined;
+      if (cryptoMeta?.nonce) {
+        clientProof = await computePayloadProofClient(activeSessionId, canonicalGameId, cleanScore, cryptoMeta.nonce);
+      }
+
       return await withRetry(async () => {
         const headers = await getAuthHeaders();
+        if (cryptoMeta?.signature) {
+          headers['X-Session-Signature'] = cryptoMeta.signature;
+        }
+        if (clientProof) {
+          headers['X-Client-Proof'] = clientProof;
+        }
+
         const res = await fetch('/api/submit-score', {
           method: 'POST',
           headers,
           body: JSON.stringify({
             gameId,
-            score,
+            score: cleanScore,
             playerName,
             playerAvatar,
             sessionId: activeSessionId,
             durationMs,
             masteryLevel,
-            idempotencyKey
+            idempotencyKey,
+            nonce: cryptoMeta?.nonce,
+            signature: cryptoMeta?.signature,
+            clientProof
           })
         });
 
@@ -122,6 +158,7 @@ export const scoreService = {
           throw error;
         }
 
+        sessionCryptoStore.delete(activeSessionId!);
         const data = await res.json();
         return {
           success: !!data.success,
@@ -146,3 +183,4 @@ export const scoreService = {
     }
   }
 };
+

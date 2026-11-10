@@ -1,628 +1,566 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
+import * as THREE from 'three';
+import { GameComponentProps } from '../../types';
 import { audio } from '../../utils/audio';
 import { useGameEngine } from '../../hooks/useGameEngine';
-import { useUnifiedInput } from '../../hooks/useUnifiedInput';
 import { inputManager } from '../../services/inputService';
 import { GameOverlay } from '../gameplay/GameOverlay';
-import { Zap, Shield, Sparkles, Trophy, Flame, Crosshair, Award, Orbit, Radio, Compass } from 'lucide-react';
+import { ThreeDockOverlay } from '../gameplay/ThreeDockOverlay';
+import {
+  ThreeStageController,
+  CameraPreset3D,
+  QualityLevel3D,
+  buildCyberActionHero3D
+} from '../../utils/threeStage';
+import { Shield, Sword, Sparkles, Heart } from 'lucide-react';
 
-interface VoidSurvivorGameProps {
-  onGameOver: (score: number) => void;
-  onScoreUpdate: (score: number) => void;
-  highScore: number;
+interface VoidMonster3D {
+  mesh: THREE.Group;
+  x: number;
+  z: number;
+  hp: number;
+  maxHp: number;
+  speed: number;
+  type: 'swarmer' | 'brute' | 'voidlord';
+  radius: number;
+  xpValue: number;
 }
 
-const CANVAS_WIDTH = 900;
-const CANVAS_HEIGHT = 540;
-
-interface UpgradeOption {
-  id: string;
-  name: string;
-  description: string;
-  icon: string;
-  type: 'weapon' | 'passive';
-  tier: number;
+interface VoidBolt3D {
+  mesh: THREE.Mesh;
+  x: number;
+  z: number;
+  vx: number;
+  vz: number;
+  damage: number;
 }
 
-const ALL_UPGRADES: UpgradeOption[] = [
-  { id: 'plasma_cannon', name: 'Plasma Cannon', description: 'Tembakan plasma beruntun dengan penetrasi musuh.', icon: '⚡', type: 'weapon', tier: 1 },
-  { id: 'orbital_drones', name: 'Orbital Drones', description: 'Drone laser berputar mengelilingi pemain melumat musuh.', icon: '🛸', type: 'weapon', tier: 1 },
-  { id: 'void_lightning', name: 'Void Lightning', description: 'Petir kosmik menyambar target secara berantai.', icon: '🌩️', type: 'weapon', tier: 1 },
-  { id: 'singularity_vortex', name: 'Singularity Vortex', description: 'Menciptakan lubang hitam yang menyedot dan meremukkan musuh.', icon: '🌀', type: 'weapon', tier: 1 },
-  { id: 'cosmic_shield', name: 'Cosmic Shield', description: 'Perisai energi yang menyerap kerusakan dan melepaskan gelombang kejut.', icon: '🛡️', type: 'passive', tier: 1 },
-  { id: 'hyper_thrusters', name: 'Hyper Thrusters', description: 'Meningkatkan kecepatan gerak dan akselerasi kapal +20%.', icon: '🚀', type: 'passive', tier: 1 },
-  { id: 'magnetic_core', name: 'Magnetic Core', description: 'Meningkatkan radius magnet pengambil orb XP +50%.', icon: '🧲', type: 'passive', tier: 1 },
-  { id: 'critical_matrix', name: 'Critical Resonance', description: 'Peluang serangan kritikal +15% dengan damage 2.5x.', icon: '🎯', type: 'passive', tier: 1 },
-];
-
-interface Enemy {
-  active: boolean; x: number; y: number; vx: number; vy: number;
-  hp: number; maxHp: number; speed: number; radius: number;
-  type: 'crawler' | 'stalker' | 'brute' | 'wraith' | 'boss';
-  color: string; shootCooldown?: number; isBoss?: boolean;
+interface XpGem3D {
+  mesh: THREE.Mesh;
+  x: number;
+  z: number;
+  value: number;
 }
 
-interface Projectile {
-  active: boolean; x: number; y: number; vx: number; vy: number;
-  damage: number; radius: number; pierce: number; color: string;
-  lifetime: number; isCrit?: boolean;
-  type: 'plasma' | 'drone' | 'lightning' | 'vortex' | 'enemy';
+const ARENA_BOUND = 15.5;
+
+function buildVoidMonsterMesh(type: VoidMonster3D['type']): THREE.Group {
+  const g = new THREE.Group();
+  const color = type === 'voidlord' ? 0xf43f5e : type === 'brute' ? 0xa855f7 : 0x8b5cf6;
+  const scale = type === 'voidlord' ? 1.55 : type === 'brute' ? 1.15 : 0.72;
+
+  const bodyMat = new THREE.MeshStandardMaterial({
+    color,
+    roughness: 0.35,
+    metalness: 0.65
+  });
+  const eyeMat = new THREE.MeshStandardMaterial({
+    color: 0xfef08a,
+    emissive: 0xfacc15,
+    emissiveIntensity: 0.95
+  });
+  const spikeMat = new THREE.MeshStandardMaterial({
+    color: 0x1e1b4b,
+    roughness: 0.6,
+    metalness: 0.8
+  });
+
+  // 1. Core Carapace
+  const core = new THREE.Mesh(new THREE.DodecahedronGeometry(0.48 * scale, 0), bodyMat);
+  core.position.y = 0.55 * scale;
+  core.castShadow = true;
+  g.add(core);
+
+  // 2. Glowing Void Eye
+  const eye = new THREE.Mesh(new THREE.SphereGeometry(0.18 * scale, 10, 10), eyeMat);
+  eye.position.set(0, 0.62 * scale, 0.38 * scale);
+  g.add(eye);
+
+  // 3 & 4. Shoulder Spikes
+  const spikeGeo = new THREE.ConeGeometry(0.16 * scale, 0.55 * scale, 6);
+  const spikeL = new THREE.Mesh(spikeGeo, spikeMat);
+  spikeL.position.set(-0.42 * scale, 0.85 * scale, 0);
+  spikeL.rotation.z = 0.45;
+  const spikeR = spikeL.clone();
+  spikeR.position.x = 0.42 * scale;
+  spikeR.rotation.z = -0.45;
+  g.add(spikeL, spikeR);
+
+  return g;
 }
 
-interface XpOrb {
-  active: boolean; x: number; y: number; value: number; color: string; radius: number;
-}
-
-interface Particle {
-  active: boolean; x: number; y: number; vx: number; vy: number;
-  color: string; alpha: number; size: number; decay: number;
-}
-
-export default function VoidSurvivorGame({ onGameOver, onScoreUpdate, highScore }: VoidSurvivorGameProps) {
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+export default function VoidSurvivorGame({
+  onGameOver,
+  onScoreUpdate,
+  highScore
+}: GameComponentProps) {
+  const mountRef = useRef<HTMLDivElement | null>(null);
+  const stageRef = useRef<ThreeStageController | null>(null);
 
   const {
     gameState,
-    setGameState,
-    gameStateRef,
-    countdown,
     score,
-    updateScore,
     addScore,
-    triggerGameOver,
     startWithCountdown,
-    startLoop,
-    stopLoop,
-    setupCanvasContext,
-    perfSettings
-  , gameLoopRef} = useGameEngine({
-    onScoreUpdate,
-    onGameOver
+    countdown,
+    triggerGameOver,
+    scoreRef
+  } = useGameEngine({
+    gameId: 'void-survivor',
+    onGameOver,
+    onScoreUpdate
   });
 
-  const [subState, setSubState] = useState<'levelup' | null>(null);
+  const [hp, setHp] = useState(100);
   const [level, setLevel] = useState(1);
-  const [xp, setXp] = useState(0);
-  const [xpNeeded, setXpNeeded] = useState(100);
-  const [kills, setKills] = useState(0);
-  const [survivalTime, setSurvivalTime] = useState(0);
-  const [health, setHealth] = useState(100);
-  const [maxHealth, setMaxHealth] = useState(100);
-  const [activeUpgrades, setActiveUpgrades] = useState<{ [id: string]: number }>({ plasma_cannon: 1 });
-  const activeUpgradesRef = useRef<{ [id: string]: number }>({ plasma_cannon: 1 });
+  const [bladeCount, setBladeCount] = useState(2);
+  const [cameraPreset, setCameraPreset] = useState<CameraPreset3D>('isometric');
+  const [quality, setQuality] = useState<QualityLevel3D>('ultra');
 
+  const gameStateRef = useRef(gameState);
   useEffect(() => {
-    activeUpgradesRef.current = activeUpgrades;
-  }, [activeUpgrades]);
+    gameStateRef.current = gameState;
+  }, [gameState]);
 
-  const [levelUpOptions, setLevelUpOptions] = useState<UpgradeOption[]>([]);
-
-  const secTimerRef = useRef(0);
-  const spawnTimerRef = useRef(0);
-
-  const playerRef = useRef({
-    x: CANVAS_WIDTH / 2, y: CANVAS_HEIGHT / 2, vx: 0, vy: 0,
-    speed: 3.2, radius: 14, hp: 100, maxHp: 100, shield: 50, maxShield: 50, shieldRegenTimer: 0,
-    xp: 0, level: 1, magnetRadius: 100, critChance: 0.1, critMultiplier: 2.0,
-    plasmaCooldown: 0, lightningCooldown: 0, vortexCooldown: 0, droneAngle: 0, droneCount: 0,
+  const heroStateRef = useRef({
+    x: 0,
+    z: 0,
+    hp: 100,
+    maxHp: 100,
+    xp: 0,
+    nextXp: 50,
+    level: 1,
+    speed: 7.2,
+    bladeCount: 2,
+    boltCooldown: 0,
+    fireRate: 0.45,
+    damage: 1,
+    invuln: 0,
+    spawnTimer: 0
   });
 
-  const MAX_ENEMIES = perfSettings.tier === 'low' ? 75 : 150;
-  const enemiesPool = useRef<Enemy[]>([]);
-  const MAX_PROJECTILES = perfSettings.tier === 'low' ? 100 : 200;
-  const projectilesPool = useRef<Projectile[]>([]);
-  const MAX_ORBS = perfSettings.tier === 'low' ? 90 : 180;
-  const orbsPool = useRef<XpOrb[]>([]);
-  const MAX_PARTICLES = perfSettings.tier === 'low' ? 75 : 150;
-  const particlesPool = useRef<Particle[]>([]);
+  const keysRef = useRef<Record<string, boolean>>({});
+  const monstersRef = useRef<VoidMonster3D[]>([]);
+  const boltsRef = useRef<VoidBolt3D[]>([]);
+  const gemsRef = useRef<XpGem3D[]>([]);
+  const bladesGroupRef = useRef<THREE.Group | null>(null);
 
-  useEffect(() => {
-    enemiesPool.current = Array.from({ length: MAX_ENEMIES }, () => ({
-      active: false, x: 0, y: 0, vx: 0, vy: 0, hp: 10, maxHp: 10, speed: 1, radius: 10, type: 'crawler', color: '#a855f7',
-    }));
-    projectilesPool.current = Array.from({ length: MAX_PROJECTILES }, () => ({
-      active: false, x: 0, y: 0, vx: 0, vy: 0, damage: 10, radius: 4, pierce: 1, color: '#06b6d4', lifetime: 60, type: 'plasma',
-    }));
-    orbsPool.current = Array.from({ length: MAX_ORBS }, () => ({
-      active: false, x: 0, y: 0, value: 10, color: '#38bdf8', radius: 4,
-    }));
-    particlesPool.current = Array.from({ length: MAX_PARTICLES }, () => ({
-      active: false, x: 0, y: 0, vx: 0, vy: 0, color: '#fff', alpha: 1, size: 2, decay: 0.02,
-    }));
-  }, [MAX_ENEMIES, MAX_PROJECTILES, MAX_ORBS, MAX_PARTICLES]);
-
-  const spawnParticle = useCallback((x: number, y: number, color: string, speed = 2, size = 3) => {
-    const p = particlesPool.current.find((item) => !item.active);
-    if (!p) return;
-    const angle = Math.random() * Math.PI * 2;
-    const spd = Math.random() * speed + 0.5;
-    p.active = true; p.x = x; p.y = y; p.vx = Math.cos(angle) * spd; p.vy = Math.sin(angle) * spd;
-    p.color = color; p.alpha = 1; p.size = Math.random() * size + 1; p.decay = Math.random() * 0.02 + 0.02;
-  }, []);
-
-  const spawnXpOrb = useCallback((x: number, y: number, value: number) => {
-    const orb = orbsPool.current.find((item) => !item.active);
-    if (!orb) return;
-    orb.active = true; orb.x = x; orb.y = y; orb.value = value;
-    orb.color = value >= 50 ? '#f59e0b' : value >= 25 ? '#a855f7' : '#38bdf8';
-    orb.radius = value >= 50 ? 6 : 4;
-  }, []);
-
-  const spawnEnemy = useCallback((type: 'crawler' | 'stalker' | 'brute' | 'wraith' | 'boss', isBoss = false, currentSurvivalTime: number) => {
-    const e = enemiesPool.current.find((item) => !item.active);
-    if (!e) return;
-
-    const edge = Math.floor(Math.random() * 4);
-    let x = 0, y = 0;
-    if (edge === 0) { x = Math.random() * CANVAS_WIDTH; y = -20; }
-    else if (edge === 1) { x = CANVAS_WIDTH + 20; y = Math.random() * CANVAS_HEIGHT; }
-    else if (edge === 2) { x = Math.random() * CANVAS_WIDTH; y = CANVAS_HEIGHT + 20; }
-    else { x = -20; y = Math.random() * CANVAS_HEIGHT; }
-
-    e.active = true; e.x = x; e.y = y; e.type = type; e.isBoss = isBoss;
-    const waveFactor = 1 + (currentSurvivalTime / 60) * 0.3;
-
-    if (type === 'crawler') { e.hp = Math.round(15 * waveFactor); e.speed = 2.0; e.radius = 9; e.color = '#c084fc'; }
-    else if (type === 'stalker') { e.hp = Math.round(30 * waveFactor); e.speed = 1.4; e.radius = 12; e.color = '#38bdf8'; e.shootCooldown = 120; }
-    else if (type === 'brute') { e.hp = Math.round(120 * waveFactor); e.speed = 1.0; e.radius = 18; e.color = '#f43f5e'; }
-    else if (type === 'wraith') { e.hp = Math.round(45 * waveFactor); e.speed = 2.4; e.radius = 11; e.color = '#10b981'; }
-    else if (type === 'boss') { e.hp = Math.round(1500 * waveFactor); e.speed = 1.2; e.radius = 32; e.color = '#e11d48'; e.shootCooldown = 80; }
-    e.maxHp = e.hp;
-  }, []);
-
-  const spawnProjectile = useCallback((x: number, y: number, vx: number, vy: number, damage: number, type: 'plasma' | 'drone' | 'lightning' | 'vortex' | 'enemy', pierce = 1, color = '#06b6d4', radius = 4) => {
-    const p = projectilesPool.current.find((item) => !item.active);
-    if (!p) return;
-    p.active = true; p.x = x; p.y = y; p.vx = vx; p.vy = vy; p.damage = damage; p.type = type; p.pierce = pierce; p.color = color; p.radius = radius; p.lifetime = 120;
-  }, []);
-
-  const triggerLevelUp = useCallback(() => {
-    if (gameLoopRef?.current) cancelAnimationFrame(gameLoopRef.current);
-    setSubState('levelup');
-    setGameState('paused');
-    audio.playLevelUp();
-    
-    const shuffled = [...ALL_UPGRADES].sort(() => 0.5 - Math.random());
-    const options = shuffled.slice(0, 3).map((opt) => ({
-      ...opt,
-      tier: (activeUpgrades[opt.id] || 0) + 1,
-    }));
-    setLevelUpOptions(options);
-  }, [activeUpgrades, setGameState, stopLoop]);
-
-  const selectUpgrade = useCallback((upgrade: UpgradeOption) => {
-    setActiveUpgrades((prev) => ({ ...prev, [upgrade.id]: (prev[upgrade.id] || 0) + 1 }));
-
-    const player = playerRef.current;
-    if (upgrade.id === 'hyper_thrusters') player.speed += 0.5;
-    else if (upgrade.id === 'magnetic_core') player.magnetRadius += 40;
-    else if (upgrade.id === 'critical_matrix') { player.critChance += 0.1; player.critMultiplier += 0.4; }
-    else if (upgrade.id === 'cosmic_shield') { player.maxShield += 30; player.shield = player.maxShield; }
-    else if (upgrade.id === 'orbital_drones') player.droneCount = Math.min(6, (player.droneCount || 0) + 1);
-
-    setSubState(null);
-    setGameState('playing');
-    audio.playPowerup();
-  }, [setGameState]);
-
-  const startGame = useCallback(() => {
-    const p = playerRef.current;
-    p.x = CANVAS_WIDTH / 2; p.y = CANVAS_HEIGHT / 2;
-    p.hp = 100; p.maxHp = 100; p.shield = 50; p.maxShield = 50;
-    p.speed = 3.2; p.xp = 0; p.level = 1;
-    p.magnetRadius = 100; p.critChance = 0.1; p.critMultiplier = 2.0;
-    p.plasmaCooldown = 0; p.lightningCooldown = 0; p.vortexCooldown = 0; p.droneCount = 1;
-
-    enemiesPool.current.forEach((e) => { e.active = false; });
-    projectilesPool.current.forEach((pr) => { pr.active = false; });
-    orbsPool.current.forEach((o) => { o.active = false; });
-    particlesPool.current.forEach((pa) => { pa.active = false; });
-
-    secTimerRef.current = 0;
-    spawnTimerRef.current = 0;
-    survivalTimeRef.current = 0;
-    setSurvivalTime(0);
-    setLevel(1);
-    setXp(0);
-    setXpNeeded(100);
-    setKills(0);
-    setHealth(100);
-    setMaxHealth(100);
-    setActiveUpgrades({ plasma_cannon: 1, orbital_drones: 1 });
-    activeUpgradesRef.current = { plasma_cannon: 1, orbital_drones: 1 };
-    setSubState(null);
-    updateScore(0);
-
-    startWithCountdown();
-  }, [startWithCountdown, updateScore]);
-
-  useUnifiedInput({
-    onActionDown: (action) => {
-      if (gameStateRef.current === 'ready') {
-        if (action === 'PRIMARY') startGame();
-      } else if (gameStateRef.current === 'gameover') {
-        if (action === 'PRIMARY' || action === 'RESTART') startGame();
-      } else if (gameStateRef.current === 'playing') {
-        if (action === 'PAUSE') setGameState('paused');
-      } else if (gameStateRef.current === 'paused' && subState !== 'levelup') {
-        if (action === 'PAUSE' || action === 'PRIMARY') setGameState('playing');
-      }
-    },
-  });
-
-  const survivalTimeRef = useRef(0);
-
-  // Game Loop
-  useEffect(() => {
-    if (gameState === 'playing' && subState !== 'levelup') {
-      startLoop((timestamp, dtMs) => {
-        const dt = dtMs / 1000;
-        const ctx = setupCanvasContext(canvasRef.current, CANVAS_WIDTH, CANVAS_HEIGHT);
-        if (!ctx) return;
-
-        const player = playerRef.current;
-
-        secTimerRef.current += dt;
-        if (secTimerRef.current >= 1.0) {
-          secTimerRef.current -= 1.0;
-          survivalTimeRef.current++;
-          setSurvivalTime(survivalTimeRef.current);
-          addScore(10);
-
-          if (survivalTimeRef.current % 120 === 0) {
-            spawnEnemy('boss', true, survivalTimeRef.current);
-            audio.playExplosion();
-          }
-        }
-
-        const currentSurvivalTime = survivalTimeRef.current;
-
-        let dx = 0, dy = 0;
-        if (inputManager.isActionActive('UP')) dy -= 1;
-        if (inputManager.isActionActive('DOWN')) dy += 1;
-        if (inputManager.isActionActive('LEFT')) dx -= 1;
-        if (inputManager.isActionActive('RIGHT')) dx += 1;
-
-        if (dx !== 0 && dy !== 0) {
-          dx *= 0.7071; dy *= 0.7071;
-        }
-
-        player.x = Math.max(player.radius, Math.min(CANVAS_WIDTH - player.radius, player.x + dx * player.speed * (dt * 60)));
-        player.y = Math.max(player.radius, Math.min(CANVAS_HEIGHT - player.radius, player.y + dy * player.speed * (dt * 60)));
-
-        player.shieldRegenTimer += dt;
-        if (player.shieldRegenTimer > 4 && player.shield < player.maxShield) {
-          player.shield = Math.min(player.maxShield, player.shield + dt * 10);
-        }
-
-        spawnTimerRef.current += dt;
-        const spawnInterval = Math.max(0.2, 1.2 - (currentSurvivalTime / 180) * 0.8);
-        if (spawnTimerRef.current >= spawnInterval) {
-          spawnTimerRef.current = 0;
-          const roll = Math.random();
-          if (roll < 0.6) spawnEnemy('crawler', false, currentSurvivalTime);
-          else if (roll < 0.8) spawnEnemy('stalker', false, currentSurvivalTime);
-          else if (roll < 0.92) spawnEnemy('wraith', false, currentSurvivalTime);
-          else spawnEnemy('brute', false, currentSurvivalTime);
-        }
-
-        // Weapon firing
-        const plasmaLvl = activeUpgradesRef.current['plasma_cannon'] || 1;
-        player.plasmaCooldown -= dt;
-        if (player.plasmaCooldown <= 0) {
-          player.plasmaCooldown = Math.max(0.18, 0.45 - plasmaLvl * 0.05);
-          let closestEnemy: Enemy | null = null;
-          let closestDist = Infinity;
-          enemiesPool.current.forEach((e) => {
-            if (!e.active) return;
-            const dist = Math.hypot(e.x - player.x, e.y - player.y);
-            if (dist < closestDist) { closestDist = dist; closestEnemy = e; }
-          });
-
-          if (closestEnemy) {
-            const angle = Math.atan2((closestEnemy as Enemy).y - player.y, (closestEnemy as Enemy).x - player.x);
-            const spd = 9 * (dt * 60);
-            const isCrit = Math.random() < player.critChance;
-            const dmg = (18 + plasmaLvl * 6) * (isCrit ? player.critMultiplier : 1);
-            spawnProjectile(player.x, player.y, Math.cos(angle) * spd, Math.sin(angle) * spd, dmg, 'plasma', plasmaLvl >= 3 ? 2 : 1, isCrit ? '#f59e0b' : '#06b6d4', 5);
-            audio.playLaser();
-          }
-        }
-
-        const lightningLvl = activeUpgradesRef.current['void_lightning'] || 0;
-        if (lightningLvl > 0) {
-          player.lightningCooldown -= dt;
-          if (player.lightningCooldown <= 0) {
-            player.lightningCooldown = Math.max(0.8, 2.0 - lightningLvl * 0.25);
-            let hitCount = 0;
-            enemiesPool.current.forEach((e) => {
-              if (!e.active || hitCount >= 2 + lightningLvl) return;
-              const dist = Math.hypot(e.x - player.x, e.y - player.y);
-              if (dist < 320) {
-                e.hp -= 35 + lightningLvl * 12; hitCount++;
-                for (let i = 0; i < 4; i++) spawnParticle(e.x, e.y, '#a855f7', 3);
-                if (e.hp <= 0) {
-                  e.active = false; spawnXpOrb(e.x, e.y, e.type === 'boss' ? 100 : 15);
-                  setKills((k) => k + 1);
-                }
-              }
-            });
-            if (hitCount > 0) audio.playHit();
-          }
-        }
-
-        player.droneAngle += dt * 3;
-
-        const vortexLvl = activeUpgradesRef.current['singularity_vortex'] || 0;
-        if (vortexLvl > 0) {
-          player.vortexCooldown -= dt;
-          if (player.vortexCooldown <= 0) {
-            player.vortexCooldown = 4.0;
-            const activeEnemies = enemiesPool.current.filter((e) => e.active);
-            if (activeEnemies.length > 0) {
-              const target = activeEnemies[Math.floor(Math.random() * activeEnemies.length)];
-              spawnProjectile(target.x, target.y, 0, 0, 15 * vortexLvl, 'vortex', 999, '#a855f7', 40);
-            }
-          }
-        }
-
-        // Projectiles Update
-        projectilesPool.current.forEach((p) => {
-          if (!p.active) return;
-          p.x += p.vx; p.y += p.vy; p.lifetime -= dt * 60;
-          if (p.x < -30 || p.x > CANVAS_WIDTH + 30 || p.y < -30 || p.y > CANVAS_HEIGHT + 30 || p.lifetime <= 0) {
-            p.active = false; return;
-          }
-
-          enemiesPool.current.forEach((e) => {
-            if (!e.active || !p.active) return;
-            const dist = Math.hypot(e.x - p.x, e.y - p.y);
-            if (dist < e.radius + p.radius) {
-              e.hp -= p.damage; p.pierce--;
-              for (let i = 0; i < 3; i++) spawnParticle(p.x, p.y, p.color, 2);
-              if (p.pierce <= 0 && p.type !== 'vortex') p.active = false;
-              if (e.hp <= 0) {
-                e.active = false; spawnXpOrb(e.x, e.y, e.type === 'boss' ? 200 : e.type === 'brute' ? 40 : 15);
-                setKills((k) => k + 1); addScore(e.isBoss ? 500 : 25); audio.playExplosion();
-              }
-            }
-          });
-        });
-
-        // Drones Collision
-        if (player.droneCount > 0) {
-          const droneDist = 55;
-          for (let i = 0; i < player.droneCount; i++) {
-            const angle = player.droneAngle + (i * Math.PI * 2) / player.droneCount;
-            const dx = player.x + Math.cos(angle) * droneDist;
-            const dy = player.y + Math.sin(angle) * droneDist;
-            enemiesPool.current.forEach((e) => {
-              if (!e.active) return;
-              const dist = Math.hypot(e.x - dx, e.y - dy);
-              if (dist < e.radius + 8) {
-                e.hp -= 25 * dt; spawnParticle(dx, dy, '#06b6d4', 1.5);
-                if (e.hp <= 0) {
-                  e.active = false; spawnXpOrb(e.x, e.y, 20); setKills((k) => k + 1);
-                }
-              }
-            });
-          }
-        }
-
-        // Enemies Update
-        enemiesPool.current.forEach((e) => {
-          if (!e.active) return;
-          const angle = Math.atan2(player.y - e.y, player.x - e.x);
-          e.vx = Math.cos(angle) * e.speed * (dt * 60);
-          e.vy = Math.sin(angle) * e.speed * (dt * 60);
-          e.x += e.vx; e.y += e.vy;
-
-          if (e.shootCooldown !== undefined) {
-            e.shootCooldown -= dt * 60;
-            if (e.shootCooldown <= 0) {
-              e.shootCooldown = e.type === 'boss' ? 60 : 140;
-              const bAngle = Math.atan2(player.y - e.y, player.x - e.x);
-              spawnProjectile(e.x, e.y, Math.cos(bAngle) * 4, Math.sin(bAngle) * 4, 12, 'enemy', 1, '#f43f5e', 4);
-            }
-          }
-
-          const dist = Math.hypot(e.x - player.x, e.y - player.y);
-          if (dist < e.radius + player.radius) {
-            const dmg = 25 * dt;
-            player.shieldRegenTimer = 0;
-            if (player.shield > 0) {
-              player.shield -= dmg;
-              if (player.shield < 0) { player.hp += player.shield; player.shield = 0; }
-            } else { player.hp -= dmg; }
-            setHealth(Math.max(0, Math.round(player.hp)));
-            spawnParticle(player.x, player.y, '#ef4444', 2);
-            if (player.hp <= 0) { audio.playGameOver(); triggerGameOver(); }
-          }
-        });
-
-        // XP Orbs
-        orbsPool.current.forEach((orb) => {
-          if (!orb.active) return;
-          const dist = Math.hypot(player.x - orb.x, player.y - orb.y);
-          if (dist < player.magnetRadius) {
-            const angle = Math.atan2(player.y - orb.y, player.x - orb.x);
-            const pullSpeed = 8 * (dt * 60);
-            orb.x += Math.cos(angle) * pullSpeed; orb.y += Math.sin(angle) * pullSpeed;
-          }
-          if (dist < player.radius + orb.radius + 5) {
-            orb.active = false; audio.playCoin();
-            player.xp += orb.value; setXp(player.xp);
-            const needed = player.level * 120; setXpNeeded(needed);
-            if (player.xp >= needed) {
-              player.xp -= needed; player.level += 1; setLevel(player.level);
-              triggerLevelUp();
-            }
-          }
-        });
-
-        // Particles
-        particlesPool.current.forEach((p) => {
-          if (!p.active) return;
-          p.x += p.vx * (dt * 60); p.y += p.vy * (dt * 60); p.alpha -= p.decay * (dt * 60);
-          if (p.alpha <= 0) p.active = false;
-        });
-
-        // Render Phase
-        ctx.fillStyle = '#06070a';
-        ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
-
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
-        for (let i = 0; i < 40; i++) {
-          const sx = ((i * 123 + (Date.now() / 80)) % CANVAS_WIDTH);
-          const sy = ((i * 321) % CANVAS_HEIGHT);
-          ctx.fillRect(sx, sy, 1.5, 1.5);
-        }
-
-        projectilesPool.current.forEach((p) => {
-          if (!p.active || p.type !== 'vortex') return;
-          ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(Date.now() / 200);
-          const grad = ctx.createRadialGradient(0, 0, 5, 0, 0, p.radius);
-          grad.addColorStop(0, 'rgba(168, 85, 247, 0.8)');
-          grad.addColorStop(0.5, 'rgba(99, 102, 241, 0.4)');
-          grad.addColorStop(1, 'rgba(0, 0, 0, 0)');
-          ctx.fillStyle = grad; ctx.beginPath(); ctx.arc(0, 0, p.radius, 0, Math.PI * 2); ctx.fill(); ctx.restore();
-        });
-
-        orbsPool.current.forEach((orb) => {
-          if (!orb.active) return;
-          ctx.fillStyle = orb.color; ctx.shadowColor = orb.color; ctx.shadowBlur = 6;
-          ctx.beginPath(); ctx.arc(orb.x, orb.y, orb.radius, 0, Math.PI * 2); ctx.fill(); ctx.shadowBlur = 0;
-        });
-
-        enemiesPool.current.forEach((e) => {
-          if (!e.active) return;
-          ctx.save(); ctx.translate(e.x, e.y);
-          ctx.fillStyle = e.color; ctx.shadowColor = e.color; ctx.shadowBlur = e.isBoss ? 16 : 6;
-          ctx.beginPath(); ctx.arc(0, 0, e.radius, 0, Math.PI * 2); ctx.fill(); ctx.shadowBlur = 0;
-
-          if (e.hp < e.maxHp || e.isBoss) {
-            const barW = e.radius * 2; const hpPct = Math.max(0, e.hp / e.maxHp);
-            ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(-barW / 2, -e.radius - 8, barW, 4);
-            ctx.fillStyle = e.isBoss ? '#f43f5e' : '#22c55e'; ctx.fillRect(-barW / 2, -e.radius - 8, barW * hpPct, 4);
-          }
-          ctx.restore();
-        });
-
-        projectilesPool.current.forEach((p) => {
-          if (!p.active || p.type === 'vortex') return;
-          ctx.fillStyle = p.color; ctx.shadowColor = p.color; ctx.shadowBlur = 8;
-          ctx.beginPath(); ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2); ctx.fill(); ctx.shadowBlur = 0;
-        });
-
-        if (player.droneCount > 0) {
-          const droneDist = 55;
-          for (let i = 0; i < player.droneCount; i++) {
-            const angle = player.droneAngle + (i * Math.PI * 2) / player.droneCount;
-            const dx = player.x + Math.cos(angle) * droneDist;
-            const dy = player.y + Math.sin(angle) * droneDist;
-            ctx.fillStyle = '#06b6d4'; ctx.shadowColor = '#06b6d4'; ctx.shadowBlur = 10;
-            ctx.beginPath(); ctx.arc(dx, dy, 6, 0, Math.PI * 2); ctx.fill();
-            ctx.strokeStyle = 'rgba(6, 182, 212, 0.25)'; ctx.lineWidth = 1.5;
-            ctx.beginPath(); ctx.moveTo(player.x, player.y); ctx.lineTo(dx, dy); ctx.stroke(); ctx.shadowBlur = 0;
-          }
-        }
-
-        particlesPool.current.forEach((p) => {
-          if (!p.active) return;
-          ctx.fillStyle = p.color; ctx.globalAlpha = p.alpha;
-          ctx.beginPath(); ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2); ctx.fill(); ctx.globalAlpha = 1;
-        });
-
-        ctx.save(); ctx.translate(player.x, player.y);
-        if (player.shield > 0) {
-          ctx.strokeStyle = `rgba(56, 189, 248, ${0.4 + (player.shield / player.maxShield) * 0.4})`;
-          ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(0, 0, player.radius + 8, 0, Math.PI * 2); ctx.stroke();
-        }
-        ctx.fillStyle = '#38bdf8'; ctx.shadowColor = '#38bdf8'; ctx.shadowBlur = 12;
-        ctx.beginPath(); ctx.arc(0, 0, player.radius, 0, Math.PI * 2); ctx.fill(); ctx.shadowBlur = 0;
-        ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.arc(0, 0, 5, 0, Math.PI * 2); ctx.fill(); ctx.restore();
-
-      });
+  const rebuildOrbitBlades = useCallback((count: number) => {
+    const g = bladesGroupRef.current;
+    if (!g) return;
+    while (g.children.length > 0) {
+      g.remove(g.children[0]);
     }
-  }, [gameState, subState, startLoop, setupCanvasContext, addScore, triggerLevelUp, triggerGameOver, spawnEnemy, spawnParticle, spawnProjectile, spawnXpOrb]);
+    const bladeMat = new THREE.MeshStandardMaterial({
+      color: 0x22d3ee,
+      emissive: 0x06b6d4,
+      emissiveIntensity: 0.9,
+      roughness: 0.15,
+      metalness: 0.8
+    });
+    for (let i = 0; i < count; i++) {
+      const angle = (i / count) * Math.PI * 2;
+      const blade = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.08, 0.85), bladeMat);
+      blade.position.set(Math.cos(angle) * 2.2, 0.65, Math.sin(angle) * 2.2);
+      blade.rotation.y = -angle;
+      g.add(blade);
+    }
+  }, []);
 
-  const formatTime = (sec: number) => {
-    const m = Math.floor(sec / 60); const s = sec % 60;
-    return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
-  };
+  const handleStart = useCallback(() => {
+    const stage = stageRef.current;
+    if (stage) {
+      monstersRef.current.forEach((m) => stage.scene.remove(m.mesh));
+      boltsRef.current.forEach((b) => stage.scene.remove(b.mesh));
+      gemsRef.current.forEach((gm) => stage.scene.remove(gm.mesh));
+    }
+    monstersRef.current = [];
+    boltsRef.current = [];
+    gemsRef.current = [];
+
+    heroStateRef.current = {
+      x: 0,
+      z: 0,
+      hp: 100,
+      maxHp: 100,
+      xp: 0,
+      nextXp: 50,
+      level: 1,
+      speed: 7.2,
+      bladeCount: 2,
+      boltCooldown: 0,
+      fireRate: 0.42,
+      damage: 1,
+      invuln: 0,
+      spawnTimer: 0.5
+    };
+    setHp(100);
+    setLevel(1);
+    setBladeCount(2);
+    rebuildOrbitBlades(2);
+    startWithCountdown();
+  }, [rebuildOrbitBlades, startWithCountdown]);
+
+  const handleSelectPreset = useCallback((preset: CameraPreset3D) => {
+    setCameraPreset(preset);
+    stageRef.current?.setCameraPreset(preset);
+  }, []);
+
+  const handleCycleQuality = useCallback(() => {
+    setQuality((prev) => {
+      const next: QualityLevel3D =
+        prev === 'ultra' ? 'balanced' : prev === 'balanced' ? 'performance' : 'ultra';
+      stageRef.current?.setQualityLevel(next);
+      return next;
+    });
+  }, []);
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      keysRef.current[e.key.toLowerCase()] = true;
+    };
+    const onKeyUp = (e: KeyboardEvent) => {
+      keysRef.current[e.key.toLowerCase()] = false;
+    };
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('keyup', onKeyUp);
+
+    const unsub = inputManager.subscribe({
+      onActionDown: (action) => {
+        if (action === 'LEFT') keysRef.current['arrowleft'] = true;
+        if (action === 'RIGHT') keysRef.current['arrowright'] = true;
+        if (action === 'UP') keysRef.current['arrowup'] = true;
+        if (action === 'DOWN') keysRef.current['arrowdown'] = true;
+      },
+      onActionUp: (action) => {
+        if (action === 'LEFT') keysRef.current['arrowleft'] = false;
+        if (action === 'RIGHT') keysRef.current['arrowright'] = false;
+        if (action === 'UP') keysRef.current['arrowup'] = false;
+        if (action === 'DOWN') keysRef.current['arrowdown'] = false;
+      }
+    });
+
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('keyup', onKeyUp);
+      unsub();
+    };
+  }, []);
+
+  useEffect(() => {
+    const container = mountRef.current;
+    if (!container) return;
+
+    let stage: ThreeStageController;
+    try {
+      stage = new ThreeStageController({
+        container,
+        backgroundColor: 0x090614,
+        fogColor: 0x090614,
+        fogDensity: 0.016,
+        initialPreset: 'isometric',
+        gridSize: 40,
+        gridPrimaryColor: '#a855f7',
+        gridSecondaryColor: '#0c081d',
+        cameraPresets: {
+          isometric: { position: [10.5, 13.5, 10.5], lookAt: [0, 0.4, 0], fov: 46 },
+          chase: { position: [0, 8.5, 12.5], lookAt: [0, 0.5, 0], fov: 54 },
+          diorama: { position: [0, 20.5, 2.0], lookAt: [0, 0, 0], fov: 48 }
+        }
+      });
+    } catch {
+      return;
+    }
+
+    stageRef.current = stage;
+    setQuality(stage.getQualityLevel());
+
+    // Build 8-part Cyber Hero
+    const hero = buildCyberActionHero3D(0xa855f7, 0x22d3ee);
+    stage.scene.add(hero.group);
+
+    // Orbiting Plasma Blades Group
+    const bladesGroup = new THREE.Group();
+    stage.scene.add(bladesGroup);
+    bladesGroupRef.current = bladesGroup;
+    rebuildOrbitBlades(2);
+
+    const boltGeo = new THREE.SphereGeometry(0.18, 8, 8);
+    const boltMat = new THREE.MeshStandardMaterial({
+      color: 0x38bdf8,
+      emissive: 0x06b6d4,
+      emissiveIntensity: 0.95
+    });
+
+    const gemGeo = new THREE.OctahedronGeometry(0.24, 0);
+    const gemMat = new THREE.MeshStandardMaterial({
+      color: 0x10b981,
+      emissive: 0x059669,
+      emissiveIntensity: 0.85
+    });
+
+    stage.startLoop((dt, elapsed) => {
+      if (gameStateRef.current !== 'playing') return;
+
+      const hs = heroStateRef.current;
+      const keys = keysRef.current;
+
+      let mx = 0;
+      let mz = 0;
+      if (keys['arrowleft'] || keys['a']) mx -= 1;
+      if (keys['arrowright'] || keys['d']) mx += 1;
+      if (keys['arrowup'] || keys['w']) mz -= 1;
+      if (keys['arrowdown'] || keys['s']) mz += 1;
+
+      if (mx !== 0 || mz !== 0) {
+        const len = Math.hypot(mx, mz);
+        mx /= len;
+        mz /= len;
+        hs.x = THREE.MathUtils.clamp(hs.x + mx * hs.speed * dt, -ARENA_BOUND, ARENA_BOUND);
+        hs.z = THREE.MathUtils.clamp(hs.z + mz * hs.speed * dt, -ARENA_BOUND, ARENA_BOUND);
+        hero.group.rotation.y = Math.atan2(mx, mz);
+        const swing = Math.sin(elapsed * 14) * 0.45;
+        hero.legL.rotation.x = swing;
+        hero.legR.rotation.x = -swing;
+        hero.armL.rotation.x = -swing * 0.7;
+        hero.armR.rotation.x = swing * 0.7;
+      } else {
+        hero.legL.rotation.x = 0;
+        hero.legR.rotation.x = 0;
+      }
+
+      hero.group.position.set(hs.x, 0, hs.z);
+      bladesGroup.position.set(hs.x, 0, hs.z);
+      bladesGroup.rotation.y = elapsed * 3.8;
+
+      stage.setFollowTarget(hs.x, 0, hs.z, 0.75);
+
+      if (hs.invuln > 0) hs.invuln -= dt;
+
+      // Auto-fire arcane bolt at nearest monster
+      hs.boltCooldown -= dt;
+      if (hs.boltCooldown <= 0 && monstersRef.current.length > 0) {
+        let nearest: VoidMonster3D | null = null;
+        let minDist = Infinity;
+        for (const m of monstersRef.current) {
+          const d = Math.hypot(m.x - hs.x, m.z - hs.z);
+          if (d < minDist) {
+            minDist = d;
+            nearest = m;
+          }
+        }
+        if (nearest && minDist < 16) {
+          hs.boltCooldown = hs.fireRate;
+          const dx = nearest.x - hs.x;
+          const dz = nearest.z - hs.z;
+          const dist = Math.max(0.01, Math.hypot(dx, dz));
+          const mesh = new THREE.Mesh(boltGeo, boltMat);
+          mesh.position.set(hs.x, 0.75, hs.z);
+          stage.scene.add(mesh);
+          boltsRef.current.push({
+            mesh,
+            x: hs.x,
+            z: hs.z,
+            vx: (dx / dist) * 16,
+            vz: (dz / dist) * 16,
+            damage: hs.damage
+          });
+          audio.playLaser?.();
+        }
+      }
+
+      // Spawn Void Monsters around perimeter
+      hs.spawnTimer -= dt;
+      if (hs.spawnTimer <= 0 && monstersRef.current.length < 36) {
+        hs.spawnTimer = Math.max(0.32, 1.15 - hs.level * 0.06);
+        const angle = Math.random() * Math.PI * 2;
+        const dist = 11 + Math.random() * 4;
+        const sx = THREE.MathUtils.clamp(hs.x + Math.cos(angle) * dist, -ARENA_BOUND, ARENA_BOUND);
+        const sz = THREE.MathUtils.clamp(hs.z + Math.sin(angle) * dist, -ARENA_BOUND, ARENA_BOUND);
+
+        const r = Math.random();
+        const type: VoidMonster3D['type'] =
+          hs.level >= 3 && r < 0.12 ? 'voidlord' : hs.level >= 2 && r < 0.35 ? 'brute' : 'swarmer';
+
+        const mesh = buildVoidMonsterMesh(type);
+        mesh.position.set(sx, 0, sz);
+        stage.scene.add(mesh);
+
+        monstersRef.current.push({
+          mesh,
+          x: sx,
+          z: sz,
+          hp: type === 'voidlord' ? 6 + hs.level : type === 'brute' ? 3 : 1,
+          maxHp: type === 'voidlord' ? 6 + hs.level : type === 'brute' ? 3 : 1,
+          speed: type === 'swarmer' ? 3.6 : type === 'brute' ? 2.5 : 2.1,
+          type,
+          radius: type === 'voidlord' ? 0.95 : type === 'brute' ? 0.72 : 0.52,
+          xpValue: type === 'voidlord' ? 30 : type === 'brute' ? 15 : 8
+        });
+      }
+
+      // Update Bolts
+      for (let i = boltsRef.current.length - 1; i >= 0; i--) {
+        const b = boltsRef.current[i];
+        b.x += b.vx * dt;
+        b.z += b.vz * dt;
+        b.mesh.position.set(b.x, 0.75, b.z);
+        if (Math.abs(b.x) > ARENA_BOUND + 4 || Math.abs(b.z) > ARENA_BOUND + 4) {
+          stage.scene.remove(b.mesh);
+          boltsRef.current.splice(i, 1);
+        }
+      }
+
+      // Update Monsters & Collisions
+      for (let i = monstersRef.current.length - 1; i >= 0; i--) {
+        const m = monstersRef.current[i];
+        const dx = hs.x - m.x;
+        const dz = hs.z - m.z;
+        const dist = Math.max(0.01, Math.hypot(dx, dz));
+        m.x += (dx / dist) * m.speed * dt;
+        m.z += (dz / dist) * m.speed * dt;
+        m.mesh.position.set(m.x, Math.abs(Math.sin(elapsed * 6 + i)) * 0.15, m.z);
+        m.mesh.lookAt(hs.x, 0.5, hs.z);
+
+        // Orbiting blades damage check
+        if (Math.abs(dist - 2.2) < m.radius + 0.35) {
+          m.hp -= dt * 4.5;
+          stage.particles.burst(m.x, 0.65, m.z, 2, 0x22d3ee, 4);
+        }
+
+        // Bolt hits
+        for (let j = boltsRef.current.length - 1; j >= 0; j--) {
+          const b = boltsRef.current[j];
+          if (Math.hypot(b.x - m.x, b.z - m.z) < m.radius + 0.25) {
+            m.hp -= b.damage;
+            stage.scene.remove(b.mesh);
+            boltsRef.current.splice(j, 1);
+            stage.particles.burst(m.x, 0.65, m.z, 7, 0xa855f7, 5.5);
+            if (m.hp <= 0) break;
+          }
+        }
+
+        if (m.hp <= 0) {
+          stage.scene.remove(m.mesh);
+          monstersRef.current.splice(i, 1);
+          addScore(m.xpValue * 2);
+          stage.particles.burst(m.x, 0.65, m.z, m.type === 'voidlord' ? 32 : 14, 0xc084fc, 7.5);
+          stage.triggerTrauma(m.type === 'voidlord' ? 0.45 : 0.16);
+          audio.playExplosion?.();
+
+          const gem = new THREE.Mesh(gemGeo, gemMat);
+          gem.position.set(m.x, 0.35, m.z);
+          stage.scene.add(gem);
+          gemsRef.current.push({ mesh: gem, x: m.x, z: m.z, value: m.xpValue });
+          continue;
+        }
+
+        // Hero contact damage
+        if (dist < m.radius + 0.48 && hs.invuln <= 0) {
+          hs.hp = Math.max(0, hs.hp - (m.type === 'voidlord' ? 20 : 12));
+          setHp(hs.hp);
+          hs.invuln = 0.65;
+          stage.triggerTrauma(0.5);
+          stage.particles.burst(hs.x, 0.8, hs.z, 20, 0xef4444, 7);
+          if (hs.hp <= 0) {
+            triggerGameOver(scoreRef.current);
+            return;
+          }
+        }
+      }
+
+      // Collect XP Gems
+      for (let i = gemsRef.current.length - 1; i >= 0; i--) {
+        const gm = gemsRef.current[i];
+        gm.mesh.rotation.y += dt * 3;
+        const d = Math.hypot(hs.x - gm.x, hs.z - gm.z);
+        if (d < 3.5) {
+          gm.x = THREE.MathUtils.damp(gm.x, hs.x, 9, dt);
+          gm.z = THREE.MathUtils.damp(gm.z, hs.z, 9, dt);
+          gm.mesh.position.set(gm.x, 0.35, gm.z);
+        }
+        if (d < 0.75) {
+          stage.scene.remove(gm.mesh);
+          gemsRef.current.splice(i, 1);
+          hs.xp += gm.value;
+          addScore(gm.value);
+          audio.playCoin?.();
+          if (hs.xp >= hs.nextXp) {
+            hs.xp -= hs.nextXp;
+            hs.level += 1;
+            hs.nextXp = Math.floor(hs.nextXp * 1.35);
+            hs.bladeCount = Math.min(6, hs.bladeCount + 1);
+            hs.fireRate = Math.max(0.16, hs.fireRate * 0.9);
+            hs.hp = Math.min(hs.maxHp, hs.hp + 25);
+            setLevel(hs.level);
+            setBladeCount(hs.bladeCount);
+            setHp(hs.hp);
+            rebuildOrbitBlades(hs.bladeCount);
+            stage.particles.burst(hs.x, 1.0, hs.z, 36, 0x22d3ee, 9);
+            stage.kickFov(5);
+          }
+        }
+      }
+    });
+
+    return () => {
+      stage.dispose();
+      stageRef.current = null;
+    };
+  }, [addScore, rebuildOrbitBlades, scoreRef, triggerGameOver]);
 
   return (
-    <div className="relative w-full h-full flex flex-col items-center justify-center select-none bg-[#06070a] font-sans">
-      <div className="absolute top-2 left-3 right-3 flex flex-col gap-1.5 z-10 pointer-events-none">
-        <div className="flex items-center justify-between text-xs font-mono">
-          <div className="flex items-center gap-3">
-            <div className="px-3 py-1 bg-zinc-900/90 border border-white/10 rounded-xl flex items-center gap-2">
-              <Compass size={13} className="text-cyan-400" />
-              <span className="text-zinc-400">TIME:</span>
-              <span className="text-cyan-400 font-bold">{formatTime(survivalTime)}</span>
-            </div>
-            <div className="px-3 py-1 bg-zinc-900/90 border border-white/10 rounded-xl flex items-center gap-2">
-              <Crosshair size={13} className="text-rose-400" />
-              <span className="text-zinc-400">KILLS:</span>
-              <span className="text-white font-bold">{kills}</span>
-            </div>
-          </div>
-          <div className="flex items-center gap-3">
-            <div className="px-3 py-1 bg-zinc-900/90 border border-white/10 rounded-xl flex items-center gap-2">
-              <Shield size={13} className="text-sky-400" />
-              <span className="text-zinc-400">HP:</span>
-              <span className="text-sky-400 font-bold">{health}/{maxHealth}</span>
-            </div>
-            <div className="px-3 py-1 bg-zinc-900/90 border border-white/10 rounded-xl flex items-center gap-2">
-              <span className="text-zinc-400">LVL:</span>
-              <span className="text-amber-400 font-bold">{level}</span>
-            </div>
-            <div className="px-3 py-1 bg-zinc-900/90 border border-white/10 rounded-xl flex items-center gap-2">
-              <span className="text-zinc-400">SKOR:</span>
-              <span className="text-yellow-400 font-bold">{score}</span>
-            </div>
-          </div>
+    <div className="relative w-full h-full min-h-[460px] bg-slate-950 overflow-hidden rounded-2xl border border-purple-500/20">
+      <div ref={mountRef} className="absolute inset-0 w-full h-full" />
+
+      <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex flex-wrap items-center justify-between gap-2 p-3.5">
+        <div className="flex items-center gap-3 rounded-xl border border-white/10 bg-slate-950/85 px-3.5 py-2 text-xs text-slate-200 tabular-nums">
+          <span className="flex items-center gap-1 font-semibold text-purple-400">
+            <Sparkles className="w-3.5 h-3.5" /> LVL {level}
+          </span>
+          <span aria-hidden="true">·</span>
+          <span>SKOR: <strong className="text-white">{score}</strong></span>
         </div>
-        <div className="w-full h-1.5 bg-zinc-900/80 rounded-full overflow-hidden border border-white/[0.06]">
-          <div className="h-full bg-gradient-to-r from-cyan-500 to-indigo-500 transition-all duration-200" style={{ width: `${Math.min(100, (xp / xpNeeded) * 100)}%` }} />
+
+        <div className="flex items-center gap-3 rounded-xl border border-white/10 bg-slate-950/85 px-3.5 py-2 text-xs text-slate-200 tabular-nums">
+          <span className="flex items-center gap-1 text-cyan-400 font-medium">
+            <Sword className="w-3.5 h-3.5" /> {bladeCount} ORBIT BLADES
+          </span>
+          <span aria-hidden="true">·</span>
+          <span className="flex items-center gap-1 text-emerald-400 font-semibold">
+            <Heart className="w-3.5 h-3.5" /> {hp}% HP
+          </span>
         </div>
       </div>
 
-      <canvas ref={canvasRef} className="w-full h-full max-w-full max-h-full object-contain rounded-xl" style={{ backgroundColor: '#06070a' }} />
+      <ThreeDockOverlay
+        cameraPreset={cameraPreset}
+        onSelectPreset={handleSelectPreset}
+        quality={quality}
+        onCycleQuality={handleCycleQuality}
+        presetLabels={{
+          isometric: 'Isometric 3D',
+          chase: 'Third-Person 3D',
+          diorama: 'Top Arena 3D'
+        }}
+        extraControls={
+          <span className="hidden sm:inline-flex items-center gap-1 text-[11px] text-slate-400 px-2 whitespace-nowrap shrink-0">
+            <Shield className="w-3 h-3 text-purple-400" /> WASD / Panah: Bertahan & Kumpulkan Kristal XP
+          </span>
+        }
+      />
 
-      {subState === 'levelup' && (
-        <div className="absolute inset-0 bg-black/85 backdrop-blur-md flex flex-col items-center justify-center p-6 z-30 animate-in zoom-in-95 duration-200">
-          <div className="text-center mb-6">
-            <span className="text-xs font-mono text-cyan-400 tracking-wider uppercase font-bold">POWER SURGE DETECTED</span>
-            <h2 className="text-2xl font-black text-white font-display">PILIH MODIFIKASI LEVEL {level}</h2>
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 w-full max-w-2xl">
-            {levelUpOptions.map((opt) => (
-              <button key={opt.id} onClick={() => selectUpgrade(opt)} className="bg-zinc-900/90 hover:bg-zinc-800 border border-white/10 hover:border-cyan-500/60 p-4 rounded-2xl flex flex-col items-center text-center transition-all cursor-pointer group active:scale-95 shadow-lg shadow-black/50 pointer-events-auto">
-                <div className="w-14 h-14 rounded-2xl bg-white/[0.05] border border-white/10 flex items-center justify-center text-3xl mb-3 group-hover:scale-110 transition-transform">
-                  {opt.icon}
-                </div>
-                <h4 className="text-sm font-bold text-white mb-1 group-hover:text-cyan-400 transition-colors">{opt.name}</h4>
-                <span className="text-[10px] font-mono text-amber-400 font-bold mb-2">TIER {opt.tier}</span>
-                <p className="text-xs text-zinc-400 leading-relaxed font-sans">{opt.description}</p>
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {subState !== 'levelup' && (
-        <GameOverlay
-          gameState={gameState}
-          countdown={countdown}
-          score={score}
-          highScore={highScore}
-          onStart={startGame}
-          onResume={() => setGameState('playing')}
-          onRestart={startGame}
-          instructions="WASD / Panah untuk bermanuver. Senjata menembak otomatis. Kumpulkan orbs XP kosmik untuk naik level dan memilih upgrade senjata & sinergi roguellite!"
-        />
-      )}
+      <GameOverlay
+        gameState={gameState}
+        score={score}
+        highScore={highScore}
+        countdown={countdown}
+        onStart={handleStart}
+        onRestart={handleStart}
+        title="Void Survivor 3D"
+        description="Bertahan hidup di arena 3D melawan gelombang entitas Void dengan pedang orbit plasma dan meriam otomatis!"
+        themeColor="purple"
+      />
     </div>
   );
 }

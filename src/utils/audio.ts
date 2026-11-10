@@ -30,6 +30,39 @@ class RetroAudio {
         // Quietly ignore storage access restrictions
       }
     }
+    this.setupMobileAutoUnlock();
+  }
+
+  public unlockAudio() {
+    this.initContext();
+    if (this.ctx && this.ctx.state === 'suspended') {
+      this.ctx.resume().catch(() => {});
+      try {
+        // Play an instantaneous silent buffer to prime iOS WebKit audio engine
+        const buffer = this.ctx.createBuffer(1, 1, 22050);
+        const source = this.ctx.createBufferSource();
+        source.buffer = buffer;
+        source.connect(this.ctx.destination);
+        source.start(0);
+      } catch {}
+    }
+  }
+
+  public setupMobileAutoUnlock() {
+    if (typeof window === 'undefined') return;
+    const unlock = () => {
+      this.unlockAudio();
+      const events = ['touchstart', 'touchend', 'mousedown', 'pointerdown', 'keydown'];
+      events.forEach(evt => {
+        window.removeEventListener(evt, unlock, true);
+        document.removeEventListener(evt, unlock, true);
+      });
+    };
+    const events = ['touchstart', 'touchend', 'mousedown', 'pointerdown', 'keydown'];
+    events.forEach(evt => {
+      window.addEventListener(evt, unlock, { capture: true, passive: true });
+      document.addEventListener(evt, unlock, { capture: true, passive: true });
+    });
   }
 
   private initContext() {

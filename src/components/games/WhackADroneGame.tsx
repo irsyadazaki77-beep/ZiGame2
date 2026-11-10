@@ -1,30 +1,40 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
+import * as THREE from 'three';
+import { GameComponentProps } from '../../types';
 import { audio } from '../../utils/audio';
-import { GameContainer } from '../gameplay/GameContainer';
-import { GameHUD } from '../gameplay/GameHUD';
-import { GameOverlay } from '../gameplay/GameOverlay';
-import { motion, AnimatePresence } from 'motion/react';
-import { Target } from 'lucide-react';
-
-interface WhackADroneProps {
-  onGameOver: (score: number) => void;
-  onScoreUpdate: (score: number) => void;
-  highScore: number;
-}
-
-interface Hole {
-  id: number;
-  droneType: 'none' | 'normal' | 'fast' | 'bomb' | 'golden';
-  active: boolean;
-  hit: boolean;
-}
-
-const HOLE_COUNT = 9;
-const GAME_DURATION = 30; // 30 seconds
-
 import { useGameEngine } from '../../hooks/useGameEngine';
+import { GameOverlay } from '../gameplay/GameOverlay';
+import { ThreeDockOverlay } from '../gameplay/ThreeDockOverlay';
+import {
+  ThreeStageController,
+  CameraPreset3D,
+  QualityLevel3D
+} from '../../utils/threeStage';
+import { Hammer, Timer, Zap } from 'lucide-react';
 
-export default function WhackADroneGame({ onGameOver, onScoreUpdate, highScore }: WhackADroneProps) {
+interface DronePod3D {
+  index: number;
+  x: number;
+  z: number;
+  active: boolean;
+  isGolden: boolean;
+  timer: number;
+  yOffset: number;
+  droneGroup: THREE.Group;
+  rotorMesh: THREE.Mesh;
+  hitCollider: THREE.Mesh;
+}
+
+const POD_STEP = 2.6;
+
+export default function WhackADroneGame({
+  onGameOver,
+  onScoreUpdate,
+  highScore
+}: GameComponentProps) {
+  const mountRef = useRef<HTMLDivElement | null>(null);
+  const stageRef = useRef<ThreeStageController | null>(null);
+
   const {
     gameState,
     score,
@@ -32,250 +42,332 @@ export default function WhackADroneGame({ onGameOver, onScoreUpdate, highScore }
     startWithCountdown,
     countdown,
     triggerGameOver,
-    pauseGame,
-    resumeGame,
-    gameStateRef,
-    scoreRef,
+    scoreRef
   } = useGameEngine({
-    gameId: 'whackadrone',
+    gameId: 'whack-a-drone',
     onGameOver,
-    onScoreUpdate,
+    onScoreUpdate
   });
 
-  const [holes, setHoles] = useState<Hole[]>(Array(HOLE_COUNT).fill(null).map((_, i) => ({ id: i, droneType: 'none', active: false, hit: false })));
-  const [timeLeft, setTimeLeft] = useState(GAME_DURATION);
+  const [timeLeft, setTimeLeft] = useState(45);
+  const [combo, setCombo] = useState(0);
+  const [cameraPreset, setCameraPreset] = useState<CameraPreset3D>('isometric');
+  const [quality, setQuality] = useState<QualityLevel3D>('ultra');
 
-  const spawnTimerRef = useRef<number | null>(null);
-  const gameTimerRef = useRef<number | null>(null);
+  const gameStateRef = useRef(gameState);
+  useEffect(() => {
+    gameStateRef.current = gameState;
+  }, [gameState]);
 
-  const startGame = () => {
-    startWithCountdown(() => {
-      setTimeLeft(GAME_DURATION);
-      setHoles(Array(HOLE_COUNT).fill(null).map((_, i) => ({ id: i, droneType: 'none', active: false, hit: false })));
+  const stateRef = useRef({
+    timeLeft: 45,
+    combo: 0,
+    spawnTimer: 0.4
+  });
 
-      // Start game timer
-      if (gameTimerRef.current) clearInterval(gameTimerRef.current);
-      gameTimerRef.current = window.setInterval(() => {
-        setTimeLeft((prev) => {
-          if (prev <= 1) {
-            endGame();
-            return 0;
-          }
-          return prev - 1;
-        });
-      }, 1000);
+  const podsRef = useRef<DronePod3D[]>([]);
 
-      spawnDrones();
-    });
-  };
-
-  const spawnDrones = () => {
-    if (spawnTimerRef.current) clearTimeout(spawnTimerRef.current);
-
-    const timeRemainingRatio = timeLeft / GAME_DURATION;
-    // Faster spawning as time runs out
-    const spawnRate = 400 + (timeRemainingRatio * 800); 
-
-    setHoles(prevHoles => {
-      const activeHoles = prevHoles.filter(h => h.active).length;
-      if (activeHoles >= 4) return prevHoles; // Max 4 drones at a time
-
-      const availableHoles = prevHoles.filter(h => !h.active && !h.hit);
-      if (availableHoles.length === 0) return prevHoles;
-
-      const newHoles = [...prevHoles];
-      const randomHole = availableHoles[Math.floor(Math.random() * availableHoles.length)];
-      
-      // Determine drone type
-      const rand = Math.random();
-      let type: Hole['droneType'] = 'normal';
-      let duration = 1200;
-
-      if (rand > 0.95) {
-        type = 'golden';
-        duration = 800;
-      } else if (rand > 0.8) {
-        type = 'bomb';
-        duration = 1500;
-      } else if (rand > 0.6) {
-        type = 'fast';
-        duration = 700;
+  const whackPod = useCallback(
+    (pod: DronePod3D) => {
+      if (gameStateRef.current !== 'playing' || !pod.active) return;
+      pod.active = false;
+      pod.timer = 0;
+      stateRef.current.combo += 1;
+      setCombo(stateRef.current.combo);
+      const pts = (pod.isGolden ? 50 : 20) + Math.min(30, stateRef.current.combo * 2);
+      addScore(pts);
+      audio.playCoin?.();
+      const stage = stageRef.current;
+      if (stage) {
+        stage.particles.burst(
+          pod.x,
+          0.95,
+          pod.z,
+          pod.isGolden ? 28 : 18,
+          pod.isGolden ? 0xfacc15 : 0xd946ef,
+          7.5
+        );
+        stage.triggerTrauma(0.24);
       }
+    },
+    [addScore]
+  );
 
-      newHoles[randomHole.id] = { ...newHoles[randomHole.id], droneType: type, active: true, hit: false };
-
-      // Despawn timeout
-      setTimeout(() => {
-        setHoles(current => {
-          if (!current[randomHole.id].hit) {
-            const resetHoles = [...current];
-            resetHoles[randomHole.id] = { ...resetHoles[randomHole.id], droneType: 'none', active: false, hit: false };
-            return resetHoles;
-          }
-          return current;
-        });
-      }, duration);
-
-      return newHoles;
+  const handleStart = useCallback(() => {
+    podsRef.current.forEach((p) => {
+      p.active = false;
+      p.timer = 0;
+      p.yOffset = 0;
     });
-
-    spawnTimerRef.current = window.setTimeout(spawnDrones, spawnRate);
-  };
-
-  useEffect(() => {
-    if (gameState === 'playing') {
-      // Adjust spawn rate occasionally based on time left
-      spawnDrones();
-    }
-  }, [timeLeft, gameState]);
-
-  const endGame = () => {
-    if (gameTimerRef.current) clearInterval(gameTimerRef.current);
-    if (spawnTimerRef.current) clearTimeout(spawnTimerRef.current);
-    
-    // Clear all holes
-    setHoles(Array(HOLE_COUNT).fill(null).map((_, i) => ({ id: i, droneType: 'none', active: false, hit: false })));
-
-    audio.playLevelUp();
-    setTimeout(() => {
-      triggerGameOver(scoreRef.current);
-    }, 1500);
-  };
-
-  const hitDrone = (id: number, type: Hole['droneType']) => {
-    if (gameState !== 'playing' || type === 'none') return;
-
-    setHoles(prev => {
-      if (!prev[id].active || prev[id].hit) return prev;
-      const newHoles = [...prev];
-      newHoles[id] = { ...newHoles[id], hit: true, active: false };
-      return newHoles;
-    });
-
-    let points = 0;
-    switch (type) {
-      case 'normal':
-        points = 10;
-        audio.playHit();
-        break;
-      case 'fast':
-        points = 25;
-        audio.playLaser();
-        break;
-      case 'golden':
-        points = 100;
-        audio.playCoin();
-        break;
-      case 'bomb':
-        points = -50;
-        audio.playExplosion();
-        break;
-    }
-
-    addScore(points);
-
-    // Reset hole quickly after hit
-    setTimeout(() => {
-      setHoles(current => {
-        const resetHoles = [...current];
-        resetHoles[id] = { ...resetHoles[id], droneType: 'none', hit: false };
-        return resetHoles;
-      });
-    }, 200);
-  };
-
-  useEffect(() => {
-    return () => {
-      if (gameTimerRef.current) clearInterval(gameTimerRef.current);
-      if (spawnTimerRef.current) clearTimeout(spawnTimerRef.current);
+    stateRef.current = {
+      timeLeft: 45,
+      combo: 0,
+      spawnTimer: 0.4
     };
+    setTimeLeft(45);
+    setCombo(0);
+    startWithCountdown();
+  }, [startWithCountdown]);
+
+  const handleSelectPreset = useCallback((preset: CameraPreset3D) => {
+    setCameraPreset(preset);
+    stageRef.current?.setCameraPreset(preset);
   }, []);
 
-  const getDroneVisuals = (type: Hole['droneType'], isHit: boolean) => {
-    if (isHit) {
-      return (
-        <motion.div 
-          initial={{ scale: 1, opacity: 1 }}
-          animate={{ scale: 1.5, opacity: 0 }}
-          className="text-yellow-400 font-black text-2xl drop-shadow-[0_0_10px_rgba(250,204,21,0.8)]"
-        >
-          {type === 'bomb' ? 'BAM!' : 'HIT!'}
-        </motion.div>
-      );
+  const handleCycleQuality = useCallback(() => {
+    setQuality((prev) => {
+      const next: QualityLevel3D =
+        prev === 'ultra' ? 'balanced' : prev === 'balanced' ? 'performance' : 'ultra';
+      stageRef.current?.setQualityLevel(next);
+      return next;
+    });
+  }, []);
+
+  useEffect(() => {
+    const container = mountRef.current;
+    if (!container) return;
+
+    let stage: ThreeStageController;
+    try {
+      stage = new ThreeStageController({
+        container,
+        backgroundColor: 0x0b0514,
+        fogColor: 0x0b0514,
+        fogDensity: 0.016,
+        initialPreset: 'isometric',
+        gridPrimaryColor: '#d946ef',
+        gridSecondaryColor: '#130821',
+        cameraPresets: {
+          isometric: { position: [8.5, 11.5, 8.5], lookAt: [0, 0.3, 0], fov: 45 },
+          chase: { position: [0, 8.2, 10.8], lookAt: [0, 0.3, 0], fov: 50 },
+          diorama: { position: [0, 14.8, 1.5], lookAt: [0, 0, 0], fov: 46 }
+        }
+      });
+    } catch {
+      return;
     }
 
-    switch (type) {
-      case 'normal':
-        return <div className="w-12 h-12 bg-blue-500 rounded-full border-4 border-blue-300 shadow-[0_0_15px_rgba(59,130,246,0.6)] flex items-center justify-center text-white"><Target size={24} /></div>;
-      case 'fast':
-        return <div className="w-10 h-10 bg-pink-500 rounded-full border-2 border-pink-300 shadow-[0_0_20px_rgba(236,72,153,0.8)]  flex items-center justify-center text-white"><Target size={20} /></div>;
-      case 'golden':
-        return <div className="w-14 h-14 bg-yellow-400 rounded-xl border-4 border-yellow-200 shadow-[0_0_30px_rgba(250,204,21,0.9)] animate-bounce flex items-center justify-center text-black font-black text-xs">$$$</div>;
-      case 'bomb':
-        return <div className="w-12 h-12 bg-red-600 rounded-full border-4 border-red-900 shadow-[0_0_20px_rgba(220,38,38,0.8)] flex items-center justify-center text-white animate-[pulse_0.2s_infinite]">💣</div>;
-      default:
-        return null;
+    stageRef.current = stage;
+    setQuality(stage.getQualityLevel());
+
+    const siloMat = new THREE.MeshPhysicalMaterial({
+      color: 0x1e293b,
+      metalness: 0.82,
+      roughness: 0.25,
+      clearcoat: 0.8
+    });
+    const rimMat = new THREE.MeshStandardMaterial({
+      color: 0xd946ef,
+      emissive: 0xc026d3,
+      emissiveIntensity: 0.65
+    });
+
+    const createdPods: DronePod3D[] = [];
+    let idx = 0;
+    for (let rz = -1; rz <= 1; rz++) {
+      for (let rx = -1; rx <= 1; rx++) {
+        const px = rx * POD_STEP;
+        const pz = rz * POD_STEP;
+
+        // Silo Base Cylinder + Glowing Rim
+        const silo = new THREE.Mesh(new THREE.CylinderGeometry(0.85, 0.95, 0.45, 16), siloMat);
+        silo.position.set(px, 0.225, pz);
+        silo.receiveShadow = true;
+        const rim = new THREE.Mesh(new THREE.TorusGeometry(0.86, 0.06, 8, 24), rimMat);
+        rim.rotation.x = Math.PI / 2;
+        rim.position.set(px, 0.45, pz);
+        stage.scene.add(silo, rim);
+
+        // Multi-part 3D Hacker Drone inside Silo
+        const droneGroup = new THREE.Group();
+        const body = new THREE.Mesh(
+          new THREE.SphereGeometry(0.48, 14, 12),
+          new THREE.MeshStandardMaterial({
+            color: 0xd946ef,
+            emissive: 0xa21caf,
+            emissiveIntensity: 0.5,
+            roughness: 0.22,
+            metalness: 0.65
+          })
+        );
+        const eye = new THREE.Mesh(
+          new THREE.SphereGeometry(0.18, 10, 10),
+          new THREE.MeshStandardMaterial({
+            color: 0xfef08a,
+            emissive: 0xfacc15,
+            emissiveIntensity: 0.95
+          })
+        );
+        eye.position.set(0, 0.08, 0.42);
+        const rotorMesh = new THREE.Mesh(
+          new THREE.BoxGeometry(0.95, 0.05, 0.14),
+          new THREE.MeshBasicMaterial({ color: 0x38bdf8 })
+        );
+        rotorMesh.position.y = 0.52;
+        droneGroup.add(body, eye, rotorMesh);
+        droneGroup.position.set(px, -0.4, pz);
+        stage.scene.add(droneGroup);
+
+        // Invisible generous raycast hit box
+        const hitCollider = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.95, 0.95, 1.8, 12),
+          new THREE.MeshBasicMaterial({ visible: false })
+        );
+        hitCollider.position.set(px, 0.8, pz);
+        stage.scene.add(hitCollider);
+
+        const pod: DronePod3D = {
+          index: idx++,
+          x: px,
+          z: pz,
+          active: false,
+          isGolden: false,
+          timer: 0,
+          yOffset: -0.4,
+          droneGroup,
+          rotorMesh,
+          hitCollider
+        };
+        hitCollider.userData.pod = pod;
+        createdPods.push(pod);
+      }
     }
-  };
+    podsRef.current = createdPods;
+
+    const raycaster = new THREE.Raycaster();
+    const pointer = new THREE.Vector2();
+
+    const onPointerDown = (e: PointerEvent) => {
+      if (gameStateRef.current !== 'playing') return;
+      const rect = container.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) return;
+      pointer.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+      pointer.y = -(((e.clientY - rect.top) / rect.height) * 2 - 1);
+      raycaster.setFromCamera(pointer, stage.camera);
+      const hits = raycaster.intersectObjects(
+        createdPods.map((p) => p.hitCollider),
+        false
+      );
+      if (hits.length > 0) {
+        const hitPod = hits[0].object.userData.pod as DronePod3D | undefined;
+        if (hitPod && hitPod.active) {
+          whackPod(hitPod);
+        }
+      }
+    };
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (gameStateRef.current !== 'playing') return;
+      // Number keys 1-9 or Space whack active drone
+      const n = parseInt(e.key, 10);
+      if (n >= 1 && n <= 9) {
+        const pod = createdPods[n - 1];
+        if (pod && pod.active) whackPod(pod);
+      } else if (e.key === ' ') {
+        const activePod = createdPods.find((p) => p.active);
+        if (activePod) whackPod(activePod);
+      }
+    };
+
+    container.addEventListener('pointerdown', onPointerDown);
+    window.addEventListener('keydown', onKeyDown);
+
+    stage.startLoop((dt) => {
+      if (gameStateRef.current !== 'playing') return;
+
+      const st = stateRef.current;
+      st.timeLeft -= dt;
+      setTimeLeft(Math.max(0, Math.ceil(st.timeLeft)));
+      if (st.timeLeft <= 0) {
+        triggerGameOver(scoreRef.current);
+        return;
+      }
+
+      st.spawnTimer -= dt;
+      if (st.spawnTimer <= 0) {
+        st.spawnTimer = 0.42 + Math.random() * 0.35;
+        const inactive = createdPods.filter((p) => !p.active);
+        if (inactive.length > 0) {
+          const pick = inactive[Math.floor(Math.random() * inactive.length)];
+          pick.active = true;
+          pick.isGolden = Math.random() < 0.2;
+          pick.timer = 0.95 + Math.random() * 0.45;
+          const bodyMesh = pick.droneGroup.children[0] as THREE.Mesh;
+          const mat = bodyMesh.material as THREE.MeshStandardMaterial;
+          mat.color.setHex(pick.isGolden ? 0xfacc15 : 0xd946ef);
+          mat.emissive.setHex(pick.isGolden ? 0xeab308 : 0xa21caf);
+        }
+      }
+
+      for (const p of createdPods) {
+        p.rotorMesh.rotation.y += dt * 18;
+        if (p.active) {
+          p.timer -= dt;
+          if (p.timer <= 0) {
+            p.active = false;
+            st.combo = 0;
+            setCombo(0);
+          }
+        }
+        const targetY = p.active ? 0.92 : -0.45;
+        p.yOffset = THREE.MathUtils.damp(p.yOffset, targetY, 14, dt);
+        p.droneGroup.position.y = p.yOffset;
+      }
+    });
+
+    return () => {
+      container.removeEventListener('pointerdown', onPointerDown);
+      window.removeEventListener('keydown', onKeyDown);
+      stage.dispose();
+      stageRef.current = null;
+    };
+  }, [scoreRef, triggerGameOver, whackPod]);
 
   return (
-    <GameContainer aspect="square" maxWidth="sm">
-      {(gameState === 'playing' || gameState === 'paused') && (
-        <GameHUD 
-          stats={[
-            { id: 'score', label: 'SKOR', value: score, emphasized: true },
-            { id: 'time', label: 'WAKTU', value: `00:${timeLeft.toString().padStart(2, '0')}` }
-          ]} 
-        />
-      )}
+    <div className="relative w-full h-full min-h-[460px] bg-slate-950 overflow-hidden rounded-2xl border border-fuchsia-500/20">
+      <div ref={mountRef} className="absolute inset-0 w-full h-full cursor-pointer" />
+
+      <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex flex-wrap items-center justify-between gap-2 p-3.5">
+        <div className="flex items-center gap-3 rounded-xl border border-white/10 bg-slate-950/85 px-3.5 py-2 text-xs text-slate-200 tabular-nums">
+          <span className="flex items-center gap-1 font-semibold text-fuchsia-400">
+            <Hammer className="w-3.5 h-3.5" /> SKOR: {score}
+          </span>
+          {combo > 1 && (
+            <>
+              <span aria-hidden="true">·</span>
+              <span className="text-amber-400 font-semibold">{combo}x COMBO</span>
+            </>
+          )}
+        </div>
+
+        <div className="flex items-center gap-2 rounded-xl border border-white/10 bg-slate-950/85 px-3.5 py-2 text-xs text-cyan-400 font-semibold tabular-nums">
+          <Timer className="w-3.5 h-3.5" /> {timeLeft}s
+        </div>
+      </div>
+
+      <ThreeDockOverlay
+        cameraPreset={cameraPreset}
+        onSelectPreset={handleSelectPreset}
+        quality={quality}
+        onCycleQuality={handleCycleQuality}
+        extraControls={
+          <span className="hidden sm:inline-flex items-center gap-1 text-[11px] text-slate-400 px-2 whitespace-nowrap shrink-0">
+            <Zap className="w-3 h-3 text-fuchsia-400" /> Klik Drone 3D atau Tekan Angka 1–9 / Space
+          </span>
+        }
+      />
 
       <GameOverlay
         gameState={gameState}
         score={score}
         highScore={highScore}
-        onStart={startGame}
-        onRestart={startGame}
-        onResume={resumeGame}
         countdown={countdown}
-        instructions="Ketuk atau klik drone cyber yang muncul dari lubang! Hindari bom merah. Kumpulkan skor sebanyak mungkin dalam 30 detik."
+        onStart={handleStart}
+        onRestart={handleStart}
+        title="Whack-a-Drone 3D"
+        description="Hantam drone peretas 3D yang menyembul dari silo server sebelum mereka melarikan diri!"
+        themeColor="fuchsia"
       />
-
-      <div className="w-full aspect-square bg-zinc-950 p-6 rounded-2xl border-4 border-zinc-800 shadow-2xl relative">
-        <div className="grid grid-cols-3 gap-4 h-full">
-          {holes.map((hole) => (
-            <div 
-              key={hole.id} 
-              className="bg-zinc-900 rounded-full border-4 border-zinc-800 shadow-[inset_0_10px_20px_rgba(0,0,0,0.8)] overflow-hidden relative flex items-center justify-center cursor-crosshair touch-none"
-              onMouseDown={() => hole.active && !hole.hit ? hitDrone(hole.id, hole.droneType) : null}
-              onTouchStart={(e) => {
-                e.preventDefault();
-                if (hole.active && !hole.hit) hitDrone(hole.id, hole.droneType);
-              }}
-            >
-              <AnimatePresence>
-                {(hole.active || hole.hit) && (
-                  <motion.div
-                    initial={{ y: 50, opacity: 0 }}
-                    animate={{ y: 0, opacity: 1 }}
-                    exit={{ y: 50, opacity: 0 }}
-                    transition={{ type: "spring", stiffness: 400, damping: 25 }}
-                    className="absolute z-10 pointer-events-none"
-                  >
-                    {getDroneVisuals(hole.droneType, hole.hit)}
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      <div className="mt-6 flex flex-wrap justify-center gap-4 text-zinc-500 font-mono text-xs uppercase tracking-wider">
-        <div className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-blue-500"></div> Normal: +10</div>
-        <div className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-pink-500"></div> Fast: +25</div>
-        <div className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-yellow-400"></div> Golden: +100</div>
-        <div className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-red-600"></div> Bomb: -50</div>
-      </div>
-    </GameContainer>
+    </div>
   );
 }

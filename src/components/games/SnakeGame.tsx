@@ -1,668 +1,390 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
-import { useGameEngine } from '../../hooks/useGameEngine';
+import * as THREE from 'three';
+import { GameComponentProps } from '../../types';
 import { audio } from '../../utils/audio';
+import { useGameEngine } from '../../hooks/useGameEngine';
 import { inputManager } from '../../services/inputService';
 import { GameOverlay } from '../gameplay/GameOverlay';
+import { ThreeDockOverlay } from '../gameplay/ThreeDockOverlay';
+import {
+  ThreeStageController,
+  CameraPreset3D,
+  QualityLevel3D
+} from '../../utils/threeStage';
 import { Zap, Sparkles } from 'lucide-react';
 
-interface SnakeProps {
-  onGameOver: (score: number) => void;
-  onScoreUpdate: (score: number) => void;
-  highScore: number;
-}
+const GRID_HALF = 7; // -7 to +7 (15x15 3D arena)
 
-interface Point {
+interface GridCoord {
   x: number;
-  y: number;
+  z: number;
 }
 
-interface Particle {
-  x: number;
-  y: number;
-  vx: number;
-  vy: number;
-  life: number;
-  color: string;
-  size: number;
-}
+export default function SnakeGame({
+  onGameOver,
+  onScoreUpdate,
+  highScore
+}: GameComponentProps) {
+  const mountRef = useRef<HTMLDivElement | null>(null);
+  const stageRef = useRef<ThreeStageController | null>(null);
 
-interface FloatingText {
-  x: number;
-  y: number;
-  text: string;
-  color: string;
-  alpha: number;
-  vy: number;
-}
-
-const GRID_SIZE = 22;
-const BASE_SPEED = 130; // ms per step for comfortable onboarding
-const MIN_SPEED = 65;   // ms per step ceiling
-const INITIAL_SNAKE: Point[] = [
-  { x: 10, y: 11 },
-  { x: 9, y: 11 },
-  { x: 8, y: 11 },
-];
-const INITIAL_DIRECTION: Point = { x: 1, y: 0 };
-
-export default function SnakeGame({ onGameOver, onScoreUpdate, highScore }: SnakeProps) {
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const containerRef = useRef<HTMLDivElement | null>(null);
-
-  // Engine Hook
   const {
     gameState,
     score,
-    setGameState,
-    updateScore,
     addScore,
-    startLoop,
-    stopLoop,
-    triggerGameOver,
     startWithCountdown,
     countdown,
+    triggerGameOver,
+    scoreRef
   } = useGameEngine({
     gameId: 'snake',
     onGameOver,
-    onScoreUpdate,
+    onScoreUpdate
   });
 
-  // Mutable Game Loop State Refs
-  const snakeRef = useRef<Point[]>([...INITIAL_SNAKE]);
-  const directionRef = useRef<Point>({ ...INITIAL_DIRECTION });
-  const inputQueueRef = useRef<Point[]>([]);
-  const foodRef = useRef<Point>({ x: 16, y: 11 });
-  const isGoldenAppleRef = useRef<boolean>(false);
-  const goldenTimerRef = useRef<number>(0);
-  const appleCountRef = useRef<number>(0);
-  
-  // Polish State
-  const comboRef = useRef<number>(0);
-  const comboTimerRef = useRef<number>(0);
-  const isBoostingRef = useRef<boolean>(false);
-  const hitStopTimerRef = useRef<number>(0);
-  const shakeRef = useRef<number>(0);
-  const particlesRef = useRef<Particle[]>([]);
-  const floatingTextsRef = useRef<FloatingText[]>([]);
-  const moveTimerRef = useRef<number>(0);
-  const pulseAnimRef = useRef<number>(0);
-  const tongueTimerRef = useRef<number>(0);
+  const [snakeLen, setSnakeLen] = useState(3);
+  const [turboActive, setTurboActive] = useState(false);
+  const [cameraPreset, setCameraPreset] = useState<CameraPreset3D>('isometric');
+  const [quality, setQuality] = useState<QualityLevel3D>('ultra');
 
-  // React UI mirror states for HUD
-  const [combo, setCombo] = useState(0);
-  const [isBoosting, setIsBoosting] = useState(false);
-  const [snakeLength, setSnakeLength] = useState(3);
-
-  // Sound generator helper for food placement
-  const generateFood = useCallback((currentSnake: Point[]): { point: Point; isGolden: boolean } => {
-    let newFood: Point;
-    let isOccupied = true;
-    let attempts = 0;
-    
-    do {
-      newFood = {
-        x: Math.floor(Math.random() * GRID_SIZE),
-        y: Math.floor(Math.random() * GRID_SIZE),
-      };
-      isOccupied = currentSnake.some(segment => segment.x === newFood.x && segment.y === newFood.y);
-      attempts++;
-    } while (isOccupied && attempts < 200);
-
-    // 25% chance of golden apple or every 5th apple
-    appleCountRef.current++;
-    const isGolden = appleCountRef.current % 5 === 0 || Math.random() < 0.2;
-
-    return { point: newFood, isGolden };
-  }, []);
-
-  // Sharp DPR canvas setup
+  const gameStateRef = useRef(gameState);
   useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    canvas.width = 500 * dpr;
-    canvas.height = 500 * dpr;
-    const ctx = canvas.getContext('2d');
-    if (ctx) {
-      ctx.scale(dpr, dpr);
-    }
+    gameStateRef.current = gameState;
+  }, [gameState]);
+
+  const snakeStateRef = useRef({
+    segments: [
+      { x: 0, z: 0 },
+      { x: 0, z: 1 },
+      { x: 0, z: 2 }
+    ] as GridCoord[],
+    dir: { x: 0, z: -1 },
+    nextDir: { x: 0, z: -1 },
+    apple: { x: 3, z: -3 },
+    goldenOrb: null as GridCoord | null,
+    stepTimer: 0,
+    stepInterval: 0.145,
+    turboTimer: 0
+  });
+
+  const resetSnakeRef = useRef<() => void>(() => {});
+
+  const handleStart = useCallback(() => {
+    resetSnakeRef.current();
+    setSnakeLen(3);
+    setTurboActive(false);
+    startWithCountdown();
+  }, [startWithCountdown]);
+
+  const setDirection = useCallback((dx: number, dz: number) => {
+    const cur = snakeStateRef.current.dir;
+    if (cur.x === -dx && cur.z === -dz) return; // Prevent 180 self-reverse
+    snakeStateRef.current.nextDir = { x: dx, z: dz };
   }, []);
 
-  const spawnParticles = (x: number, y: number, colorScheme: string[], count = 10, speedMult = 1) => {
-    for (let i = 0; i < count; i++) {
-      const angle = (Math.PI * 2 * i) / count + (Math.random() - 0.5);
-      const speed = (1.5 + Math.random() * 2.5) * speedMult;
-      particlesRef.current.push({
-        x,
-        y,
-        vx: Math.cos(angle) * speed,
-        vy: Math.sin(angle) * speed,
-        life: 1.0,
-        color: colorScheme[i % colorScheme.length],
-        size: 2.5 + Math.random() * 2,
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      const k = e.key.toLowerCase();
+      if (k === 'arrowup' || k === 'w') setDirection(0, -1);
+      else if (k === 'arrowdown' || k === 's') setDirection(0, 1);
+      else if (k === 'arrowleft' || k === 'a') setDirection(-1, 0);
+      else if (k === 'arrowright' || k === 'd') setDirection(1, 0);
+    };
+    window.addEventListener('keydown', onKeyDown);
+
+    const unsub = inputManager.subscribe({
+      onActionDown: (action) => {
+        if (action === 'UP') setDirection(0, -1);
+        if (action === 'DOWN') setDirection(0, 1);
+        if (action === 'LEFT') setDirection(-1, 0);
+        if (action === 'RIGHT') setDirection(1, 0);
+      }
+    });
+
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      unsub();
+    };
+  }, [setDirection]);
+
+  const handleSelectPreset = useCallback((preset: CameraPreset3D) => {
+    setCameraPreset(preset);
+    stageRef.current?.setCameraPreset(preset);
+  }, []);
+
+  const handleCycleQuality = useCallback(() => {
+    setQuality((prev) => {
+      const next: QualityLevel3D =
+        prev === 'ultra' ? 'balanced' : prev === 'balanced' ? 'performance' : 'ultra';
+      stageRef.current?.setQualityLevel(next);
+      return next;
+    });
+  }, []);
+
+  useEffect(() => {
+    const container = mountRef.current;
+    if (!container) return;
+
+    let stage: ThreeStageController;
+    try {
+      stage = new ThreeStageController({
+        container,
+        backgroundColor: 0x050e0a,
+        fogColor: 0x050e0a,
+        fogDensity: 0.015,
+        initialPreset: 'isometric',
+        gridPrimaryColor: '#22c55e',
+        gridSecondaryColor: '#07150f',
+        cameraPresets: {
+          isometric: { position: [10.5, 13.8, 10.5], lookAt: [0, 0.3, 0], fov: 46 },
+          chase: { position: [0, 9.5, 13.5], lookAt: [0, 0.3, -1], fov: 52 },
+          diorama: { position: [0, 18.8, 1.5], lookAt: [0, 0, 0], fov: 46 }
+        }
       });
+    } catch {
+      return;
     }
-  };
 
-  const spawnFloatingText = (x: number, y: number, text: string, color = '#fbbf24') => {
-    floatingTextsRef.current.push({
-      x,
-      y,
-      text,
-      color,
-      alpha: 1.0,
-      vy: -1.2,
+    stageRef.current = stage;
+    setQuality(stage.getQualityLevel());
+
+    // Build 3D Perimeter Arena Fence (4 glowing walls)
+    const wallMat = new THREE.MeshStandardMaterial({
+      color: 0x22c55e,
+      emissive: 0x16a34a,
+      emissiveIntensity: 0.55,
+      roughness: 0.25,
+      metalness: 0.7
     });
-  };
+    const span = (GRID_HALF + 0.8) * 2;
+    const wallH = new THREE.Mesh(new THREE.BoxGeometry(span, 0.45, 0.22), wallMat);
+    wallH.position.set(0, 0.225, -(GRID_HALF + 0.8));
+    const wallS = wallH.clone();
+    wallS.position.z = GRID_HALF + 0.8;
+    const wallW = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.45, span), wallMat);
+    wallW.position.set(-(GRID_HALF + 0.8), 0.225, 0);
+    const wallE = wallW.clone();
+    wallE.position.x = GRID_HALF + 0.8;
+    stage.scene.add(wallH, wallS, wallW, wallE);
 
-  const draw = useCallback(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    ctx.save();
-
-    // Decaying Screen Shake
-    if (shakeRef.current > 0) {
-      const sx = (Math.random() - 0.5) * shakeRef.current;
-      const sy = (Math.random() - 0.5) * shakeRef.current;
-      ctx.translate(sx, sy);
-      shakeRef.current = Math.max(0, shakeRef.current - 0.4);
-    }
-
-    const logicalSize = 500;
-    ctx.clearRect(0, 0, logicalSize, logicalSize);
-    const cellSize = logicalSize / GRID_SIZE;
-
-    // Atmospheric Dark Matrix Floor
-    ctx.fillStyle = '#080a0f';
-    ctx.fillRect(0, 0, logicalSize, logicalSize);
-
-    // Subtle Neon Arena Border & Grid Dots
-    ctx.strokeStyle = 'rgba(16, 185, 129, 0.12)';
-    ctx.lineWidth = 2;
-    ctx.strokeRect(1, 1, logicalSize - 2, logicalSize - 2);
-
-    ctx.fillStyle = '#131824';
-    for (let x = 1; x < GRID_SIZE; x++) {
-      for (let y = 1; y < GRID_SIZE; y++) {
-        ctx.fillRect(x * cellSize - 0.75, y * cellSize - 0.75, 1.5, 1.5);
-      }
-    }
-
-    // Food Rendering with Breathing Halo
-    pulseAnimRef.current += 0.05;
-    const cx = foodRef.current.x * cellSize + cellSize / 2;
-    const cy = foodRef.current.y * cellSize + cellSize / 2;
-    const isGold = isGoldenAppleRef.current;
-    const pulseScale = 1 + Math.sin(pulseAnimRef.current) * 0.12;
-    const radius = (cellSize / 2.5) * pulseScale;
-
-    // Outer Radial Aura
-    const glowGrad = ctx.createRadialGradient(cx, cy, radius * 0.2, cx, cy, radius * 2.2);
-    if (isGold) {
-      glowGrad.addColorStop(0, 'rgba(251, 191, 36, 0.5)');
-      glowGrad.addColorStop(1, 'rgba(251, 191, 36, 0)');
-    } else {
-      glowGrad.addColorStop(0, 'rgba(244, 63, 94, 0.4)');
-      glowGrad.addColorStop(1, 'rgba(244, 63, 94, 0)');
-    }
-    ctx.fillStyle = glowGrad;
-    ctx.beginPath();
-    ctx.arc(cx, cy, radius * 2.2, 0, Math.PI * 2);
-    ctx.fill();
-
-    // Food Body
-    ctx.fillStyle = isGold ? '#fbbf24' : '#f43f5e';
-    ctx.beginPath();
-    ctx.arc(cx, cy, radius, 0, Math.PI * 2);
-    ctx.fill();
-
-    // Food Stem & Highlight
-    ctx.fillStyle = isGold ? '#fef08a' : '#ffe4e6';
-    ctx.beginPath();
-    ctx.arc(cx - radius * 0.28, cy - radius * 0.28, radius * 0.35, 0, Math.PI * 2);
-    ctx.fill();
-
-    // Golden Apple timer ring
-    if (isGold && goldenTimerRef.current > 0) {
-      const remainingPct = Math.max(0, goldenTimerRef.current / 8000);
-      ctx.strokeStyle = '#fef08a';
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.arc(cx, cy, radius * 1.5, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * remainingPct);
-      ctx.stroke();
-    }
-
-    // Particles
-    for (let i = particlesRef.current.length - 1; i >= 0; i--) {
-      const p = particlesRef.current[i];
-      p.x += p.vx;
-      p.y += p.vy;
-      p.life -= 0.035;
-      if (p.life <= 0) {
-        particlesRef.current.splice(i, 1);
-        continue;
-      }
-      ctx.globalAlpha = p.life;
-      ctx.fillStyle = p.color;
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, p.size * p.life, 0, Math.PI * 2);
-      ctx.fill();
-    }
-    ctx.globalAlpha = 1.0;
-
-    // Draw Snake
-    const snake = snakeRef.current;
-    const snakeLen = snake.length;
-
-    snake.forEach((segment, index) => {
-      const isHead = index === 0;
-      const x = segment.x * cellSize + 2;
-      const y = segment.y * cellSize + 2;
-      const w = cellSize - 4;
-      const h = cellSize - 4;
-
-      if (isHead) {
-        // Vibrant Head with Turbo Boost Glow
-        ctx.fillStyle = isBoostingRef.current ? '#38bdf8' : '#10b981';
-      } else {
-        // Gradient Emerald Tail
-        const factor = Math.max(0.3, 1 - (index / snakeLen) * 0.65);
-        if (isBoostingRef.current) {
-          ctx.fillStyle = `rgba(56, 189, 248, ${factor})`;
-        } else {
-          ctx.fillStyle = `rgba(16, 185, 129, ${factor})`;
-        }
-      }
-
-      ctx.beginPath();
-      ctx.roundRect(x, y, w, h, isHead ? 6 : 4);
-      ctx.fill();
-
-      // Head Eyes & Tongue Details
-      if (isHead) {
-        const dir = directionRef.current;
-        let eye1X = x + 4, eye1Y = y + 4, eye2X = x + w - 7, eye2Y = y + 4;
-        let tongueX = x + w / 2, tongueY = y + h / 2;
-
-        if (dir.x === 1) { // Right
-          eye1X = x + w - 5; eye1Y = y + 4;
-          eye2X = x + w - 5; eye2Y = y + h - 7;
-          tongueX = x + w + 2;
-        } else if (dir.x === -1) { // Left
-          eye1X = x + 3; eye1Y = y + 4;
-          eye2X = x + 3; eye2Y = y + h - 7;
-          tongueX = x - 4;
-        } else if (dir.y === -1) { // Up
-          eye1X = x + 4; eye1Y = y + 3;
-          eye2X = x + w - 7; eye2Y = y + 3;
-          tongueY = y - 4;
-        } else { // Down
-          eye1X = x + 4; eye1Y = y + h - 5;
-          eye2X = x + w - 7; eye2Y = y + h - 5;
-          tongueY = y + h + 2;
-        }
-
-        // Eyes
-        ctx.fillStyle = '#ffffff';
-        ctx.fillRect(eye1X, eye1Y, 3, 3);
-        ctx.fillRect(eye2X, eye2Y, 3, 3);
-
-        // Tongue Flick animation every ~2 seconds
-        tongueTimerRef.current += 0.05;
-        if (Math.sin(tongueTimerRef.current) > 0.85) {
-          ctx.strokeStyle = '#f43f5e';
-          ctx.lineWidth = 1.5;
-          ctx.beginPath();
-          ctx.moveTo(x + w / 2, y + h / 2);
-          ctx.lineTo(tongueX, tongueY);
-          ctx.stroke();
-        }
-      }
+    // Multi-part 3D Snake Head Group (Head + 2 Glowing Eyes + Crest)
+    const headGroup = new THREE.Group();
+    const headMat = new THREE.MeshPhysicalMaterial({
+      color: 0x22c55e,
+      metalness: 0.4,
+      roughness: 0.2,
+      clearcoat: 0.85
     });
+    const eyeMat = new THREE.MeshStandardMaterial({
+      color: 0xfef08a,
+      emissive: 0xfacc15,
+      emissiveIntensity: 0.95
+    });
+    const headBox = new THREE.Mesh(new THREE.BoxGeometry(0.84, 0.68, 0.88), headMat);
+    headBox.position.y = 0.34;
+    headBox.castShadow = true;
+    const eyeL = new THREE.Mesh(new THREE.SphereGeometry(0.12, 8, 8), eyeMat);
+    eyeL.position.set(-0.24, 0.52, -0.36);
+    const eyeR = eyeL.clone();
+    eyeR.position.x = 0.24;
+    headGroup.add(headBox, eyeL, eyeR);
+    stage.scene.add(headGroup);
 
-    // Floating Score Texts
-    for (let i = floatingTextsRef.current.length - 1; i >= 0; i--) {
-      const ft = floatingTextsRef.current[i];
-      ft.y += ft.vy;
-      ft.alpha -= 0.025;
-      if (ft.alpha <= 0) {
-        floatingTextsRef.current.splice(i, 1);
-        continue;
+    // Instanced Body Segments
+    const maxSegments = 225;
+    const segGeo = new THREE.BoxGeometry(0.76, 0.56, 0.76);
+    const segMat = new THREE.MeshStandardMaterial({
+      color: 0x4ade80,
+      emissive: 0x15803d,
+      emissiveIntensity: 0.35,
+      roughness: 0.28,
+      metalness: 0.5
+    });
+    const bodyInstanced = new THREE.InstancedMesh(segGeo, segMat, maxSegments);
+    bodyInstanced.frustumCulled = false;
+    stage.scene.add(bodyInstanced);
+
+    // 3D Neon Apple Group (Core + Stem + Leaf)
+    const appleGroup = new THREE.Group();
+    const appleCore = new THREE.Mesh(
+      new THREE.OctahedronGeometry(0.44, 1),
+      new THREE.MeshStandardMaterial({
+        color: 0xef4444,
+        emissive: 0xdc2626,
+        emissiveIntensity: 0.75,
+        roughness: 0.18
+      })
+    );
+    appleCore.position.y = 0.48;
+    const appleRing = new THREE.Mesh(
+      new THREE.TorusGeometry(0.55, 0.04, 8, 20),
+      new THREE.MeshBasicMaterial({ color: 0xfca5a5 })
+    );
+    appleRing.rotation.x = Math.PI / 2;
+    appleRing.position.y = 0.48;
+    appleGroup.add(appleCore, appleRing);
+    stage.scene.add(appleGroup);
+
+    const dummyMat = new THREE.Matrix4();
+
+    const pickFreeCoord = (segments: GridCoord[]): GridCoord => {
+      for (let tries = 0; tries < 80; tries++) {
+        const cx = Math.floor(Math.random() * (GRID_HALF * 2 + 1)) - GRID_HALF;
+        const cz = Math.floor(Math.random() * (GRID_HALF * 2 + 1)) - GRID_HALF;
+        if (!segments.some((s) => s.x === cx && s.z === cz)) {
+          return { x: cx, z: cz };
+        }
       }
-      ctx.save();
-      ctx.globalAlpha = ft.alpha;
-      ctx.font = 'bold 12px monospace';
-      ctx.fillStyle = ft.color;
-      ctx.textAlign = 'center';
-      ctx.fillText(ft.text, ft.x, ft.y);
-      ctx.restore();
-    }
-
-    ctx.restore();
-  }, []);
-
-  const updateGameLogic = useCallback(() => {
-    // Pop next direction from the input queue if available
-    if (inputQueueRef.current.length > 0) {
-      directionRef.current = inputQueueRef.current.shift()!;
-    }
-
-    const head = snakeRef.current[0];
-    const newHead: Point = {
-      x: head.x + directionRef.current.x,
-      y: head.y + directionRef.current.y,
+      return { x: 0, z: -4 };
     };
 
-    // Wall Collision
-    if (
-      newHead.x < 0 ||
-      newHead.x >= GRID_SIZE ||
-      newHead.y < 0 ||
-      newHead.y >= GRID_SIZE
-    ) {
-      shakeRef.current = 10;
-      hitStopTimerRef.current = 80;
-      audio.playExplosion();
-      inputManager.vibrateGamepad(180, 0.7);
-      const cellSize = 500 / GRID_SIZE;
-      spawnParticles(head.x * cellSize + cellSize / 2, head.y * cellSize + cellSize / 2, ['#ef4444', '#f87171', '#ffffff'], 20, 2);
-      triggerGameOver();
-      return;
-    }
+    const syncMeshes = () => {
+      const st = snakeStateRef.current;
+      const head = st.segments[0];
+      headGroup.position.set(head.x, 0, head.z);
+      headGroup.rotation.y = Math.atan2(-st.dir.x, -st.dir.z);
 
-    // Self Collision
-    if (snakeRef.current.some(segment => segment.x === newHead.x && segment.y === newHead.y)) {
-      shakeRef.current = 10;
-      hitStopTimerRef.current = 80;
-      audio.playExplosion();
-      inputManager.vibrateGamepad(180, 0.7);
-      const cellSize = 500 / GRID_SIZE;
-      spawnParticles(newHead.x * cellSize + cellSize / 2, newHead.y * cellSize + cellSize / 2, ['#ef4444', '#f87171', '#ffffff'], 20, 2);
-      triggerGameOver();
-      return;
-    }
+      for (let i = 0; i < maxSegments; i++) {
+        if (i > 0 && i < st.segments.length) {
+          const seg = st.segments[i];
+          const s = Math.max(0.55, 1 - i * 0.012);
+          dummyMat.makeScale(s, s, s);
+          dummyMat.setPosition(seg.x, 0.28 * s, seg.z);
+          bodyInstanced.setMatrixAt(i, dummyMat);
+        } else {
+          dummyMat.makeScale(0, 0, 0);
+          dummyMat.setPosition(0, -999, 0);
+          bodyInstanced.setMatrixAt(i, dummyMat);
+        }
+      }
+      bodyInstanced.instanceMatrix.needsUpdate = true;
 
-    const newSnake = [newHead, ...snakeRef.current];
-    const cellSize = 500 / GRID_SIZE;
+      appleGroup.position.set(st.apple.x, 0, st.apple.z);
+    };
 
-    // Food Collision
-    if (newHead.x === foodRef.current.x && newHead.y === foodRef.current.y) {
-      const isGold = isGoldenAppleRef.current;
-      const basePoints = isGold ? 35 : 10;
-      
-      // Calculate Combo
-      const newCombo = Math.min(5, comboRef.current + 1);
-      comboRef.current = newCombo;
-      comboTimerRef.current = 4500; // 4.5s window
-      setCombo(newCombo);
+    resetSnakeRef.current = () => {
+      snakeStateRef.current = {
+        segments: [
+          { x: 0, z: 0 },
+          { x: 0, z: 1 },
+          { x: 0, z: 2 }
+        ],
+        dir: { x: 0, z: -1 },
+        nextDir: { x: 0, z: -1 },
+        apple: { x: 3, z: -3 },
+        goldenOrb: null,
+        stepTimer: 0,
+        stepInterval: 0.145,
+        turboTimer: 0
+      };
+      syncMeshes();
+    };
+    resetSnakeRef.current();
 
-      const earned = basePoints * newCombo;
-      addScore(earned);
+    stage.startLoop((dt, elapsed) => {
+      appleGroup.rotation.y = elapsed * 3;
+      appleCore.position.y = 0.48 + Math.sin(elapsed * 5) * 0.1;
 
-      // Sound & Juice
-      if (isGold) {
-        audio.playPowerup();
-        spawnParticles(cx(foodRef.current), cy(foodRef.current), ['#fbbf24', '#fef08a', '#ffffff'], 22, 1.8);
-        spawnFloatingText(cx(foodRef.current), cy(foodRef.current), `+${earned} EMAS! (${newCombo}x)`, '#fbbf24');
-      } else {
-        audio.playCombo(newCombo);
-        spawnParticles(cx(foodRef.current), cy(foodRef.current), ['#10b981', '#34d399', '#ffffff'], 12, 1.2);
-        spawnFloatingText(cx(foodRef.current), cy(foodRef.current), `+${earned} ${newCombo > 1 ? `(${newCombo}x)` : ''}`, '#34d399');
+      if (gameStateRef.current !== 'playing') return;
+
+      const st = snakeStateRef.current;
+      if (st.turboTimer > 0) {
+        st.turboTimer -= dt;
+        if (st.turboTimer <= 0) setTurboActive(false);
       }
 
-      shakeRef.current = isGold ? 4 : 2;
-      inputManager.vibrateGamepad(80, isGold ? 0.6 : 0.35);
+      const interval = st.turboTimer > 0 ? st.stepInterval * 0.72 : st.stepInterval;
+      st.stepTimer += dt;
+      if (st.stepTimer < interval) return;
+      st.stepTimer -= interval;
 
-      // Generate New Food
-      const nextFoodData = generateFood(newSnake);
-      foodRef.current = nextFoodData.point;
-      isGoldenAppleRef.current = nextFoodData.isGolden;
-      goldenTimerRef.current = nextFoodData.isGolden ? 8000 : 0;
-    } else {
-      newSnake.pop();
-    }
+      st.dir = st.nextDir;
+      const newHead: GridCoord = {
+        x: st.segments[0].x + st.dir.x,
+        z: st.segments[0].z + st.dir.z
+      };
 
-    snakeRef.current = newSnake;
-    setSnakeLength(newSnake.length);
-
-    function cx(p: Point) { return p.x * cellSize + cellSize / 2; }
-    function cy(p: Point) { return p.y * cellSize + cellSize / 2; }
-  }, [generateFood, triggerGameOver, addScore]);
-
-  // Main Engine Step
-  const gameStep = useCallback((timestamp: number, deltaTime: number) => {
-    // Hit-stop microfreeze
-    if (hitStopTimerRef.current > 0) {
-      hitStopTimerRef.current -= deltaTime;
-      draw();
-      return;
-    }
-
-    // Decay Combo timer
-    if (comboTimerRef.current > 0) {
-      comboTimerRef.current -= deltaTime;
-      if (comboTimerRef.current <= 0) {
-        comboRef.current = 0;
-        setCombo(0);
-      }
-    }
-
-    // Decay Golden Apple timer
-    if (isGoldenAppleRef.current && goldenTimerRef.current > 0) {
-      goldenTimerRef.current -= deltaTime;
-      if (goldenTimerRef.current <= 0) {
-        isGoldenAppleRef.current = false;
-      }
-    }
-
-    moveTimerRef.current += deltaTime;
-
-    // Smooth Difficulty Progression based on snake length
-    const speedRatio = Math.min(1, (snakeRef.current.length - 3) / 40);
-    let currentSpeed = BASE_SPEED - speedRatio * (BASE_SPEED - MIN_SPEED);
-    
-    // Turbo Boost halves move timer
-    if (isBoostingRef.current) {
-      currentSpeed *= 0.55;
-    }
-
-    if (moveTimerRef.current >= currentSpeed) {
-      moveTimerRef.current = 0;
-      updateGameLogic();
-    }
-
-    draw();
-  }, [draw, updateGameLogic]);
-
-  const resetGame = useCallback(() => {
-    snakeRef.current = [...INITIAL_SNAKE];
-    directionRef.current = { ...INITIAL_DIRECTION };
-    inputQueueRef.current = [];
-    isBoostingRef.current = false;
-    setIsBoosting(false);
-    comboRef.current = 0;
-    setCombo(0);
-    comboTimerRef.current = 0;
-    particlesRef.current = [];
-    floatingTextsRef.current = [];
-    appleCountRef.current = 0;
-    setSnakeLength(INITIAL_SNAKE.length);
-
-    const initialFood = generateFood(snakeRef.current);
-    foodRef.current = initialFood.point;
-    isGoldenAppleRef.current = false;
-    goldenTimerRef.current = 0;
-
-    updateScore(0);
-    draw();
-  }, [draw, generateFood, updateScore]);
-
-  const startGame = useCallback(() => {
-    resetGame();
-    startWithCountdown(() => {
-      startLoop(gameStep);
-    });
-  }, [resetGame, startWithCountdown, startLoop, gameStep]);
-
-  // Queue Direction Input helper to prevent accidental 180 self-kill
-  const queueDirection = useCallback((dir: Point) => {
-    const lastDir = inputQueueRef.current.length > 0
-      ? inputQueueRef.current[inputQueueRef.current.length - 1]
-      : directionRef.current;
-
-    // Prevent direct reversal
-    if (dir.x !== 0 && dir.x === -lastDir.x) return;
-    if (dir.y !== 0 && dir.y === -lastDir.y) return;
-
-    // Allow queuing max 2 moves
-    if (inputQueueRef.current.length < 2) {
-      inputQueueRef.current.push(dir);
-    }
-  }, []);
-
-  // Keyboard controls with Turbo Boost (Space)
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (gameState !== 'playing') return;
-
-      if (e.code === 'Space') {
-        e.preventDefault();
-        isBoostingRef.current = true;
-        setIsBoosting(true);
+      // Wall or self collision check
+      const hitWall = Math.abs(newHead.x) > GRID_HALF || Math.abs(newHead.z) > GRID_HALF;
+      const hitSelf = st.segments.some((s) => s.x === newHead.x && s.z === newHead.z);
+      if (hitWall || hitSelf) {
+        stage.particles.burst(st.segments[0].x, 0.5, st.segments[0].z, 36, 0xef4444, 9);
+        stage.triggerTrauma(0.75);
+        audio.playExplosion?.();
+        triggerGameOver(scoreRef.current);
         return;
       }
 
-      switch (e.key) {
-        case 'ArrowUp':
-        case 'w':
-        case 'W':
-          e.preventDefault();
-          queueDirection({ x: 0, y: -1 });
-          break;
-        case 'ArrowDown':
-        case 's':
-        case 'S':
-          e.preventDefault();
-          queueDirection({ x: 0, y: 1 });
-          break;
-        case 'ArrowLeft':
-        case 'a':
-        case 'A':
-          e.preventDefault();
-          queueDirection({ x: -1, y: 0 });
-          break;
-        case 'ArrowRight':
-        case 'd':
-        case 'D':
-          e.preventDefault();
-          queueDirection({ x: 1, y: 0 });
-          break;
-        case 'Escape':
-          setGameState('paused');
-          break;
-      }
-    };
+      st.segments.unshift(newHead);
 
-    const handleKeyUp = (e: KeyboardEvent) => {
-      if (e.code === 'Space') {
-        isBoostingRef.current = false;
-        setIsBoosting(false);
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    window.addEventListener('keyup', handleKeyUp);
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-      window.removeEventListener('keyup', handleKeyUp);
-    };
-  }, [gameState, queueDirection, setGameState]);
-
-  // Touch Swipe on Canvas for native mobile feel
-  const touchStartPos = useRef<{ x: number; y: number } | null>(null);
-  const handleTouchStart = (e: React.TouchEvent) => {
-    if (e.touches.length === 1) {
-      touchStartPos.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
-    }
-  };
-  const handleTouchEnd = (e: React.TouchEvent) => {
-    if (!touchStartPos.current || gameState !== 'playing') return;
-    const touch = e.changedTouches[0];
-    const dx = touch.clientX - touchStartPos.current.x;
-    const dy = touch.clientY - touchStartPos.current.y;
-    const dist = Math.hypot(dx, dy);
-
-    if (dist > 20) {
-      if (Math.abs(dx) > Math.abs(dy)) {
-        queueDirection(dx > 0 ? { x: 1, y: 0 } : { x: -1, y: 0 });
+      if (newHead.x === st.apple.x && newHead.z === st.apple.z) {
+        addScore(st.turboTimer > 0 ? 30 : 15);
+        setSnakeLen(st.segments.length);
+        st.stepInterval = Math.max(0.085, st.stepInterval * 0.985);
+        stage.particles.burst(newHead.x, 0.6, newHead.z, 22, 0x22c55e, 7);
+        stage.triggerTrauma(0.2);
+        audio.playCoin?.();
+        if (st.segments.length % 5 === 0) {
+          st.turboTimer = 5.0;
+          setTurboActive(true);
+          stage.kickFov(4);
+        }
+        st.apple = pickFreeCoord(st.segments);
       } else {
-        queueDirection(dy > 0 ? { x: 0, y: 1 } : { x: 0, y: -1 });
+        st.segments.pop();
       }
-    }
-    touchStartPos.current = null;
-  };
 
-  useEffect(() => {
-    draw();
-  }, [draw]);
+      stage.setFollowTarget(newHead.x, 0, newHead.z, 0.25);
+      syncMeshes();
+    });
+
+    return () => {
+      stage.dispose();
+      stageRef.current = null;
+    };
+  }, [addScore, scoreRef, triggerGameOver]);
 
   return (
-    <div 
-      ref={containerRef}
-      className="relative flex flex-col h-full w-full min-h-0 items-center justify-center overflow-hidden p-2 bg-[#090b10]"
-    >
-      {/* Clean Dynamic HUD */}
-      <div className="w-full max-w-[500px] flex-none flex justify-between items-center mb-2 px-3 py-1 bg-[#121622]/80 border border-white/[0.06] rounded-xl text-xs font-mono">
-        <div className="flex items-center gap-2">
-          <span className="text-zinc-400">PANJANG:</span>
-          <span className="text-emerald-400 font-bold">{snakeLength}</span>
+    <div className="relative w-full h-full min-h-[460px] bg-slate-950 overflow-hidden rounded-2xl border border-emerald-500/20">
+      <div ref={mountRef} className="absolute inset-0 w-full h-full" />
+
+      <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex flex-wrap items-center justify-between gap-2 p-3.5">
+        <div className="flex items-center gap-3 rounded-xl border border-white/10 bg-slate-950/85 px-3.5 py-2 text-xs text-slate-200 tabular-nums">
+          <span className="font-semibold text-emerald-400">PANJANG: {snakeLen}</span>
+          <span aria-hidden="true">·</span>
+          <span>SKOR: <strong className="text-white">{score}</strong></span>
         </div>
 
-        {combo > 1 && (
-          <div className="flex items-center gap-1 text-amber-400 font-bold animate-pulse">
-            <Sparkles size={12} />
-            <span>COMBO {combo}x</span>
+        {turboActive && (
+          <div className="flex items-center gap-1 rounded-xl border border-amber-500/30 bg-slate-950/85 px-3 py-2 text-xs font-semibold text-amber-400">
+            <Sparkles className="w-3.5 h-3.5" /> TURBO 2X SKOR
           </div>
         )}
-
-        {isBoosting && (
-          <div className="flex items-center gap-1 text-sky-400 font-bold animate-pulse">
-            <Zap size={12} />
-            <span>TURBO!</span>
-          </div>
-        )}
-
-        <div className="flex items-center gap-2">
-          <span className="text-zinc-400">SKOR:</span>
-          <span className="text-white font-bold">{score}</span>
-        </div>
       </div>
 
-      {/* Canvas Stage */}
-      <div 
-        className="relative flex-1 min-h-0 w-full max-w-[500px] max-h-[500px] flex items-center justify-center bg-[#090b10] rounded-2xl border border-white/[0.08] shadow-2xl overflow-hidden"
-        onTouchStart={handleTouchStart}
-        onTouchEnd={handleTouchEnd}
-      >
-        <canvas
-          ref={canvasRef}
-          style={{ width: '100%', height: '100%' }}
-          className="object-contain block touch-none"
-        />
+      <ThreeDockOverlay
+        cameraPreset={cameraPreset}
+        onSelectPreset={handleSelectPreset}
+        quality={quality}
+        onCycleQuality={handleCycleQuality}
+        extraControls={
+          <span className="hidden sm:inline-flex items-center gap-1 text-[11px] text-slate-400 px-2 whitespace-nowrap shrink-0">
+            <Zap className="w-3 h-3 text-emerald-400" /> WASD / Panah: Kemudikan Ular Siber 3D
+          </span>
+        }
+      />
 
-        <GameOverlay
-          gameState={gameState}
-          score={score}
-          highScore={highScore}
-          countdown={countdown}
-          onStart={startGame}
-          onRestart={startGame}
-          instructions="Arahkan ular neon untuk mengonsumsi buah merah dan emas. Hindari dinding atau badan sendiri! Tahan SPASI untuk Turbo Boost."
-        />
-      </div>
+      <GameOverlay
+        gameState={gameState}
+        score={score}
+        highScore={highScore}
+        countdown={countdown}
+        onStart={handleStart}
+        onRestart={handleStart}
+        title="Pixel Snake 3D"
+        description="Arahkan ular mekanik 3D di atas papan sirkuit neon, santap apel energi 3D, dan aktifkan mode Turbo!"
+        themeColor="emerald"
+      />
     </div>
   );
 }

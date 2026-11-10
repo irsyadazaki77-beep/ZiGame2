@@ -2,6 +2,10 @@ import React, { useState } from 'react';
 import { PlayerProfile } from '../../types';
 import { Settings as SettingsIcon, Volume2, Monitor, Cpu, ShieldCheck, Trash2, Smile, Save, Sparkles } from 'lucide-react';
 import { audio } from '../../utils/audio';
+import { performanceService } from '../../services/performanceService';
+import { PerformanceSettingsSection } from '../settings/PerformanceSettingsSection';
+import { SecuritySettingsSection } from '../settings/SecuritySettingsSection';
+import { DataBackupSection } from '../settings/DataBackupSection';
 
 interface ProfileSettingsProps {
   profile: PlayerProfile;
@@ -70,12 +74,18 @@ export const ProfileSettings: React.FC<ProfileSettingsProps> = ({
     audio.playCoin();
     setGraphicsQuality(quality);
     localStorage.setItem('zigame-graphics', quality);
+    performanceService.setTier(quality, false);
   };
 
   const handleFpsChange = (limit: '30' | '60' | '120' | 'auto') => {
     audio.playCoin();
     setFpsLimit(limit);
     localStorage.setItem('zigame-fps', limit);
+    if (limit === 'auto') {
+      performanceService.updateCustomSetting({ autoDetect: true, targetFps: 60 });
+    } else {
+      performanceService.updateCustomSetting({ autoDetect: false, targetFps: Number(limit) });
+    }
   };
 
   const handleScreenSize = (size: 'standard' | 'wide' | 'theater') => {
@@ -198,6 +208,29 @@ export const ProfileSettings: React.FC<ProfileSettingsProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Performa & Grafik Adaptif */}
+      <PerformanceSettingsSection
+        graphicsQuality={graphicsQuality}
+        onGraphicsChange={handleGraphicsChange}
+        fpsLimit={fpsLimit}
+        onFpsChange={handleFpsChange}
+      />
+
+      {/* Keamanan Sesi, PIN & Auto-lock */}
+      <SecuritySettingsSection
+        autolockVal={autolockVal}
+        setAutolockVal={setAutolockVal}
+        setSuccessMsg={setSuccessMsg}
+      />
+
+      {/* Cadangan & Pemulihan Data Terenkripsi */}
+      <DataBackupSection
+        profile={profile}
+        loggedInUser={loggedInUser}
+        onUpdateProfile={onUpdateProfile}
+        setSuccessMsg={setSuccessMsg}
+      />
 
       {/* Dangerous Zone */}
       <div className="bg-surface-card border border-rose-500/20 rounded-2xl p-5 sm:p-6 shadow-sm space-y-4">

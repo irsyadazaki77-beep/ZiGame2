@@ -113,4 +113,47 @@ describe('Unit Tests — Pure Logic, Algorithms, Calculations & Edge Cases', () 
       expect(isValidBet(NaN, 100)).toBe(false);
     });
   });
+
+  describe('Season Fallback & Friend Challenge Anti-Tampering Guards', () => {
+    it('always creates a dynamically active fallback season in the future', async () => {
+      const { getDefaultFallbackSeason, isSeasonActive } = await import('../../server/persistence/seasons');
+      const now = Date.now();
+      const season = getDefaultFallbackSeason(now);
+      expect(season.startAt).toBeLessThanOrEqual(now);
+      expect(season.endAt).toBeGreaterThan(now);
+      expect(isSeasonActive(season, now)).toBe(true);
+    });
+
+    it('secures friend challenge URLs against bounty manipulation and invalid games', async () => {
+      const { friendChallengeService } = await import('../../services/friendChallengeService');
+      const challenge = friendChallengeService.createChallenge({
+        gameId: 'snake',
+        gameTitle: 'Snake Neo',
+        challengerName: 'Zaki',
+        targetScore: 250,
+        bountyCoins: 999999 // Attempted excessive bounty
+      });
+
+      expect(challenge.bountyCoins).toBe(500); // Hard-clamped to 500
+      const shareUrl = friendChallengeService.generateShareUrl(challenge);
+      const urlObj = new URL(shareUrl, 'http://localhost:3000');
+      const parsed = friendChallengeService.parseChallengeFromUrl(urlObj.searchParams);
+      expect(parsed).not.toBeNull();
+      expect(parsed?.bountyCoins).toBe(500);
+      expect(parsed?.targetScore).toBe(250);
+
+      // Tamper with sig parameter
+      urlObj.searchParams.set('sig', 'forged_sig_123');
+      expect(friendChallengeService.parseChallengeFromUrl(urlObj.searchParams)).toBeNull();
+
+      // Tamper with unsigned raw payload (excessive coins & invalid game)
+      const forgedUnsigned = btoa(JSON.stringify({ g: 'snake', n: 'Hacker', s: 10, c: 999999 }));
+      const decodedUnsigned = friendChallengeService.decodeChallenge(forgedUnsigned);
+      expect(decodedUnsigned?.bountyCoins).toBe(500);
+
+      const invalidGamePayload = btoa(JSON.stringify({ g: 'hacked-game-id', n: 'Hacker', s: 10, c: 100 }));
+      expect(friendChallengeService.decodeChallenge(invalidGamePayload)).toBeNull();
+    });
+  });
 });
+

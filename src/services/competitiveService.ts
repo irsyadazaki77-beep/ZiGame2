@@ -1,6 +1,8 @@
-import { CompetitiveRating, CompetitiveTier, CompetitiveProfile, RankedSubmissionResult } from '../types';
+import { CompetitiveRating, CompetitiveProfile, RankedSubmissionResult } from '../types';
 import { isFirebaseReady, auth } from './firebase';
 import { logger } from '../utils/logger';
+import { computePayloadProofClient } from '../utils/sessionCrypto';
+import { toCanonicalGameId } from '../config/canonicalGames';
 
 async function getAuthHeaders(): Promise<Record<string, string>> {
   const headers: Record<string, string> = {
@@ -15,6 +17,7 @@ async function getAuthHeaders(): Promise<Record<string, string>> {
 
 class CompetitiveService {
   private profile: CompetitiveProfile | null = null;
+  private rankedSessionMeta = new Map<string, { nonce: string; signature?: string; gameId: string }>();
 
   public async fetchProfile(): Promise<CompetitiveProfile | null> {
     try {
@@ -47,7 +50,7 @@ class CompetitiveService {
     };
   }
 
-  public async startRankedSession(gameId: string): Promise<{ sessionId?: string; nonce?: string; startTime?: number }> {
+  public async startRankedSession(gameId: string): Promise<{ sessionId?: string; nonce?: string; signature?: string; startTime?: number }> {
     try {
       const headers = await getAuthHeaders();
       const res = await fetch('/api/competitive/session/start', {
@@ -56,7 +59,15 @@ class CompetitiveService {
         body: JSON.stringify({ gameId })
       });
       if (res.ok) {
-        return await res.json();
+        const data = await res.json();
+        if (data.sessionId && data.nonce) {
+          this.rankedSessionMeta.set(data.sessionId, {
+            nonce: data.nonce,
+            signature: data.signature,
+            gameId: toCanonicalGameId(gameId)
+          });
+        }
+        return data;
       }
     } catch (e) {
       logger.error('Failed to start ranked session', e);
@@ -76,12 +87,34 @@ class CompetitiveService {
   }): Promise<RankedSubmissionResult | null> {
     try {
       const headers = await getAuthHeaders();
+      const meta = this.rankedSessionMeta.get(params.sessionId);
+      const canonicalGameId = meta?.gameId || toCanonicalGameId(params.gameId);
+      const cleanScore = Math.floor(params.score);
+      let clientProof: string | undefined;
+
+      if (meta?.nonce) {
+        clientProof = await computePayloadProofClient(params.sessionId, canonicalGameId, cleanScore, meta.nonce);
+      }
+      if (meta?.signature) {
+        headers['X-Session-Signature'] = meta.signature;
+      }
+      if (clientProof) {
+        headers['X-Client-Proof'] = clientProof;
+      }
+
       const res = await fetch('/api/competitive/submit', {
         method: 'POST',
         headers,
-        body: JSON.stringify(params)
+        body: JSON.stringify({
+          ...params,
+          score: cleanScore,
+          nonce: meta?.nonce,
+          signature: meta?.signature,
+          clientProof
+        })
       });
       if (res.ok) {
+        this.rankedSessionMeta.delete(params.sessionId);
         const data = await res.json();
         // Refresh profile after submission
         await this.fetchProfile();
@@ -108,3 +141,4 @@ class CompetitiveService {
 }
 
 export const competitiveService = new CompetitiveService();
+

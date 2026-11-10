@@ -14,6 +14,8 @@ export interface GameHUDProps {
   position?: 'top-left' | 'top-center' | 'top-right';
   compact?: boolean;
   className?: string;
+  onPause?: () => void;
+  isPaused?: boolean;
 }
 
 export const GameHUD: React.FC<GameHUDProps> = ({ stats, position = 'top-left', compact, className = '' }) => {

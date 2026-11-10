@@ -8,6 +8,7 @@ interface GachaMachineWidgetProps {
   unlockedAvatars: string[];
   unlockedThemes: string[];
   onSpinGacha: () => void;
+  onSkipGacha?: () => void;
   gachaState: 'idle' | 'spinning' | 'revealed';
   gachaReward: ShopItem | null;
   gachaPreviewItem: ShopItem | null;
@@ -17,6 +18,7 @@ interface GachaMachineWidgetProps {
 export const GachaMachineWidget: React.FC<GachaMachineWidgetProps> = ({
   coins,
   onSpinGacha,
+  onSkipGacha,
   gachaState,
   gachaReward,
   gachaPreviewItem,
@@ -44,7 +46,7 @@ export const GachaMachineWidget: React.FC<GachaMachineWidgetProps> = ({
           <div>
             <div className="flex items-center gap-2">
               <span className="px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-400 text-[10px] font-black uppercase tracking-wider border border-indigo-500/30">
-                GACHA LUKY SPIN
+                GACHA LUCKY SPIN
               </span>
               <span className="text-amber-400 text-xs font-mono font-bold flex items-center gap-1">
                 Biaya: 50🪙
@@ -60,7 +62,7 @@ export const GachaMachineWidget: React.FC<GachaMachineWidgetProps> = ({
         </div>
 
         {/* Spin Mechanism Lever */}
-        <div className="flex items-center gap-3">
+        <div className="flex flex-col sm:flex-row items-center gap-2.5">
           <button
             onClick={handlePullLever}
             disabled={gachaState !== 'idle' || coins < 50}
@@ -84,6 +86,18 @@ export const GachaMachineWidget: React.FC<GachaMachineWidgetProps> = ({
               </>
             )}
           </button>
+
+          {gachaState === 'spinning' && onSkipGacha && (
+            <button
+              onClick={onSkipGacha}
+              className="px-3.5 py-2 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 text-xs font-mono font-bold transition cursor-pointer flex items-center gap-1 shrink-0"
+              title="Lewati animasi putaran"
+              aria-label="Lewati animasi gacha"
+            >
+              <RefreshCw size={12} />
+              <span>Lewati (Skip)</span>
+            </button>
+          )}
         </div>
       </div>
 

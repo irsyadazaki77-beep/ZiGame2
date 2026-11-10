@@ -75,6 +75,7 @@ export interface IPerformanceController {
   getAdaptiveDPR(maxDpr?: number): number;
   getParticleMultiplier(): number;
   recordFramePerformance(fps: number): void;
+  recordFrameTime(durationMs: number): void;
   subscribe(listener: (settings: PerformanceSettings) => void): () => void;
 }
 
