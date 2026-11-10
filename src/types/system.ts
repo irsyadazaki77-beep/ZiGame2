@@ -37,7 +37,9 @@ export type InputAction =
   | 'LEFT'
   | 'RIGHT'
   | 'PRIMARY'
+  | 'ACTION_PRIMARY'
   | 'SECONDARY'
+  | 'ACTION_SECONDARY'
   | 'PAUSE'
   | 'RESTART';
 

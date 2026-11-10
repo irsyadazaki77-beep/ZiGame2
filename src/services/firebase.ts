@@ -52,6 +52,9 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
     path
   };
   logger.error('Firestore Error', { context: { details: JSON.stringify(errInfo) } });
+  if (errInfo.error.includes('Missing or insufficient permissions') && !import.meta.env.VITEST && import.meta.env.MODE !== 'test') {
+    throw new Error(JSON.stringify(errInfo));
+  }
   return errInfo;
 }
 

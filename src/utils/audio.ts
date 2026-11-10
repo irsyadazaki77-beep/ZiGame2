@@ -531,6 +531,10 @@ class RetroAudio {
     } catch (e) {}
   }
 
+  playPowerUp() {
+    this.playPowerup();
+  }
+
   playExplosion() {
     if (this.isMuted || this.sfxVolume <= 0) return;
     this.initContext();

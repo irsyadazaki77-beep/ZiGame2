@@ -204,7 +204,7 @@ const handleClaimReward = async (req: Request, res: Response) => {
     };
 
     const resolvedClaimId = (claimId || reason) as string;
-    const type = claimType || 'achievement';
+    const type = (claimType || 'achievement') as import('../../config/rewardCatalog').RewardClaimType;
     const result = await executeClaimReward(userId, resolvedClaimId, type, idempotencyKey, details);
 
     serverLogger.info('REWARD_CLAIMED', `User claimed ${result.amount} coins for ${resolvedClaimId}`, {

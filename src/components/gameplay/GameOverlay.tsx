@@ -6,6 +6,9 @@ export type GameState = 'initialize' | 'ready' | 'countdown' | 'playing' | 'paus
 export interface GameOverlayProps {
   gameState: GameState;
   gameTitle?: string;
+  title?: string;
+  description?: string;
+  themeColor?: string;
   countdown?: number;
   score?: number;
   highScore?: number;
@@ -30,7 +33,8 @@ export const GameOverlay: React.FC<GameOverlayProps> = ({
   onOpenLeaderboard,
   onOpenGameDrawer,
   onNavigateHome,
-  instructions = 'Gunakan kontrol untuk mengarahkan permainan.',
+  description,
+  instructions = description || 'Gunakan kontrol untuk mengarahkan permainan.',
   gameoverMessage = 'Permainan Selesai'
 }) => {
   // Support quick replay with Space or Enter key when on game over

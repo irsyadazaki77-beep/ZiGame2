@@ -275,7 +275,9 @@ class InputManager {
       LEFT: { key: 'ArrowLeft', code: 'ArrowLeft' },
       RIGHT: { key: 'ArrowRight', code: 'ArrowRight' },
       PRIMARY: { key: ' ', code: 'Space' },
+      ACTION_PRIMARY: { key: ' ', code: 'Space' },
       SECONDARY: { key: 'Shift', code: 'ShiftLeft' },
+      ACTION_SECONDARY: { key: 'Shift', code: 'ShiftLeft' },
       PAUSE: { key: 'Escape', code: 'Escape' },
       RESTART: { key: 'r', code: 'KeyR' }
     };
@@ -360,8 +362,10 @@ class InputManager {
         case 'DOWN': return mapping.down;
         case 'LEFT': return mapping.left;
         case 'RIGHT': return mapping.right;
-        case 'PRIMARY': return mapping.primary;
-        case 'SECONDARY': return mapping.secondary;
+        case 'PRIMARY':
+        case 'ACTION_PRIMARY': return mapping.primary;
+        case 'SECONDARY':
+        case 'ACTION_SECONDARY': return mapping.secondary;
         case 'PAUSE': return mapping.pause;
         case 'RESTART': return mapping.restart;
         default: return [];
@@ -382,8 +386,9 @@ class InputManager {
         9: 'PAUSE',
         8: 'RESTART'
       };
+      const normalizedAction = action === 'ACTION_PRIMARY' ? 'PRIMARY' : action === 'ACTION_SECONDARY' ? 'SECONDARY' : action;
       const isButtonActive = Object.entries(buttonActions).some(([btnIdx, act]) => {
-        return act === action && this.prevGamepadButtons[Number(btnIdx)];
+        return act === normalizedAction && this.prevGamepadButtons[Number(btnIdx)];
       });
       if (isButtonActive) return true;
 
@@ -408,8 +413,10 @@ class InputManager {
       case 'RIGHT':
         return { keyboard: '→ / D', gamepad: 'D-Pad → / Stick →', touch: 'Geser Kanan / Tombol →' };
       case 'PRIMARY':
+      case 'ACTION_PRIMARY':
         return { keyboard: 'SPASI / Enter', gamepad: 'Tombol (A) / (X)', touch: 'Ketuk Layar / Tombol Aksi' };
       case 'SECONDARY':
+      case 'ACTION_SECONDARY':
         return { keyboard: 'SHIFT / Z', gamepad: 'Tombol (B) / (O)', touch: 'Ketuk Ganda' };
       case 'PAUSE':
         return { keyboard: 'ESC / P', gamepad: 'Tombol START', touch: 'Ikon Pause' };

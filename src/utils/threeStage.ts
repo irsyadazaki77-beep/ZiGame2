@@ -332,6 +332,7 @@ export class ThreeStageController {
   private resizeObserver: ResizeObserver | null = null;
   private fpsSamples: number[] = [];
   private isPaused = false;
+  private disposed = false;
   private onTickCallback: ((dt: number, elapsed: number) => void) | null = null;
 
   constructor(options: ThreeStageOptions) {

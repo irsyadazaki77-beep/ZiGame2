@@ -13,11 +13,12 @@ service cloud.firestore {
     function existing() { return resource.data; }
     function isSignedIn() { return request.auth != null; }
     
-    // Unified Canonical Admin Authority: Custom Claims primary with emergency admins document lookup
+    // Unified Canonical Admin Authority: Custom Claims primary with emergency admins document lookup and bootstrapped admin email
     function isAdmin() { 
       return isSignedIn() && (
         request.auth.token.admin == true || 
         request.auth.token.role == 'admin' || 
+        (request.auth.token.email == 'zakiirsyad554@gmail.com' && request.auth.token.email_verified == true) ||
         exists(/databases/$(database)/documents/admins/$(request.auth.uid))
       ); 
     }
