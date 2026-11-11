@@ -210,6 +210,24 @@ export function validateBody(schema: EndpointSchema) {
   REGISTERED_SCHEMAS.set(schema.name, schema);
 
   return (req: Request, res: Response, next: NextFunction) => {
+    const rawHeaderKey = req.headers['x-idempotency-key'];
+    const headerIdempotencyKey = typeof rawHeaderKey === 'string' ? rawHeaderKey.trim() : undefined;
+
+    if (headerIdempotencyKey && req.body && typeof req.body === 'object' && !Array.isArray(req.body)) {
+      const bodyKey = (req.body as Record<string, unknown>).idempotencyKey;
+      if (typeof bodyKey === 'string' && bodyKey.trim().length > 0 && bodyKey.trim() !== headerIdempotencyKey) {
+        return sendApiError(
+          res,
+          409,
+          'IDEMPOTENCY_CONFLICT',
+          'Header X-Idempotency-Key tidak cocok dengan idempotencyKey pada body.'
+        );
+      }
+      if (bodyKey === undefined && 'idempotencyKey' in schema.fields) {
+        (req.body as Record<string, unknown>).idempotencyKey = headerIdempotencyKey;
+      }
+    }
+
     const result = validatePayloadAgainstSchema(req.body, schema);
     if (!result.valid) {
       return sendApiError(
@@ -247,6 +265,36 @@ export const sessionStartSchema: EndpointSchema = {
       customValidator: (val) => typeof val === 'string' && isValidGameId(val),
       errorCode: 'INVALID_GAME_ID',
       errorMessage: 'ID Game tidak valid atau tidak terdaftar.'
+    },
+    nonce: {
+      type: 'string',
+      required: false,
+      maxLength: 128,
+      customValidator: (val) => typeof val === 'string' && /^[a-zA-Z0-9_-]{4,128}$/.test(val),
+      errorCode: 'MALFORMED_PAYLOAD',
+      errorMessage: 'Format nonce sesi tidak valid.'
+    },
+    sessionNonce: {
+      type: 'string',
+      required: false,
+      maxLength: 128,
+      customValidator: (val) => typeof val === 'string' && /^[a-zA-Z0-9_-]{4,128}$/.test(val),
+      errorCode: 'MALFORMED_PAYLOAD',
+      errorMessage: 'Format sessionNonce tidak valid.'
+    },
+    timestamp: {
+      type: 'number',
+      required: false,
+      min: 0,
+      errorCode: 'MALFORMED_PAYLOAD',
+      errorMessage: 'Timestamp awal sesi tidak valid.'
+    },
+    clientTimestamp: {
+      type: 'number',
+      required: false,
+      min: 0,
+      errorCode: 'MALFORMED_PAYLOAD',
+      errorMessage: 'Client timestamp sesi tidak valid.'
     }
   }
 };

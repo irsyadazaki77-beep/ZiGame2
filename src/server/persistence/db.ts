@@ -72,6 +72,9 @@ export interface StoredEconomyTransaction {
   transactionId: string;
   userId: string;
   type: TransactionType;
+  entryType?: 'DEBIT' | 'CREDIT';
+  debitAccount?: string;
+  creditAccount?: string;
   amount: number;
   balanceBefore: number;
   balanceAfter: number;
@@ -215,7 +218,11 @@ export function getDb(): Firestore {
 
 export function assertPersistenceOperational() {
   if (process.env.NODE_ENV === 'production' && !isFirestoreAvailable()) {
-    serverLogger.security('FIREBASE_FAILURE', 'Database persistence unavailable in production');
+    if (process.env.ALLOW_IN_MEMORY_PROD === 'true') {
+      serverLogger.warn('PERSISTENCE_OVERRIDE', 'InMemoryStore fallback permitted in production via explicit ALLOW_IN_MEMORY_PROD=true flag.');
+      return;
+    }
+    serverLogger.security('FIREBASE_FAILURE', 'Database persistence unavailable in production: InMemoryStore prohibited without ALLOW_IN_MEMORY_PROD=true');
     throw ApiError.serviceUnavailable('Database persistence service unavailable.');
   }
 }
@@ -228,14 +235,27 @@ export function getPersistenceHealthStatus(): { status: 'ok' | 'degraded' | 'una
     return { status: 'ok', persistence: 'firestore' };
   }
   if (process.env.NODE_ENV === 'production') {
-    return { status: 'degraded', persistence: 'degraded' };
+    if (process.env.ALLOW_IN_MEMORY_PROD === 'true') {
+      return { status: 'ok', persistence: 'degraded' };
+    }
+    return { status: 'degraded', persistence: 'unavailable' };
   }
   return { status: 'ok', persistence: 'degraded' };
 }
 
 export function isPersistenceReady(): boolean {
   if (process.env.NODE_ENV === 'production') {
+    if (process.env.ALLOW_IN_MEMORY_PROD === 'true') {
+      return true;
+    }
     return isFirestoreAvailable();
   }
   return true;
+}
+
+// Explicit environment notification for persistence store
+if (process.env.NODE_ENV !== 'production' && !process.env.VITEST && process.env.NODE_ENV !== 'test') {
+  serverLogger.info('PERSISTENCE_DEV', 'Running in development mode: utilizing InMemoryStore adapter with stateful cache.');
+} else if (process.env.NODE_ENV === 'production' && process.env.ALLOW_IN_MEMORY_PROD === 'true') {
+  serverLogger.warn('PERSISTENCE_PROD_OVERRIDE', 'Production running with InMemoryStore override (ALLOW_IN_MEMORY_PROD=true).');
 }

@@ -10,9 +10,10 @@ import { PerformanceController } from '../sdk/performanceController';
 import { PersistenceController } from '../sdk/persistenceController';
 import { InputController } from '../sdk/inputController';
 import { ViewportController } from '../sdk/viewportController';
+import { BrickBreakerEngine } from '../sdk/BrickBreakerEngine';
+import { PhysicsWorkerController } from '../sdk/physicsWorkerController';
 import { createGameRuntimeContext } from '../sdk/runtimeContext';
 import { CANONICAL_GAME_IDS } from '../config/canonicalGames';
-import { CANONICAL_GAME_REGISTRY } from '../config/gameRegistry';
 
 describe('ZiGame 2.0 Unified Game SDK & Architecture Tests', () => {
   beforeEach(() => {
@@ -203,11 +204,13 @@ describe('ZiGame 2.0 Unified Game SDK & Architecture Tests', () => {
     });
   });
 
-  describe('ReplayController', () => {
-    it('should record ghost run data and persist personal best runs', () => {
-      const replay = new ReplayController('pixel-dino');
+  describe('ReplayController (Delta Encoding & Sampling Interval)', () => {
+    it('should record ghost run data, apply sampling interval throttling, and encode delta trajectories', () => {
+      const replay = new ReplayController('pixel-dino', { sampleIntervalMs: 50 });
+      expect(replay.getSampleInterval()).toBe(50);
 
       replay.start();
+      // Discrete actions bypass interval throttling
       replay.recordPoint(10, 20, 'jump', 10);
       replay.recordPoint(30, 20, 'duck', 25);
 
@@ -216,6 +219,16 @@ describe('ZiGame 2.0 Unified Game SDK & Architecture Tests', () => {
       expect(ghost?.gameId).toBe('pixel-dino');
       expect(ghost?.score).toBe(100);
       expect(ghost?.points.length).toBe(2);
+      expect(ghost?.encoding).toBe('delta');
+      expect(ghost?.deltaPoints?.length).toBe(2);
+      expect(ghost?.deltaPoints?.[0].dx).toBe(10);
+      expect(ghost?.deltaPoints?.[1].dx).toBe(20);
+
+      // Verify lossless delta round-trip decoding
+      const decoded = replay.decodeTrajectory(ghost!.deltaPoints!);
+      expect(decoded[0].x).toBe(10);
+      expect(decoded[1].x).toBe(30);
+      expect(decoded[1].a).toBe('duck');
 
       const savedGhost = replay.getGhostRun();
       expect(savedGhost).toBeDefined();
@@ -226,6 +239,174 @@ describe('ZiGame 2.0 Unified Game SDK & Architecture Tests', () => {
       replay.recordPoint(5, 5, 'run', 5);
       replay.discard();
       expect(replay.getGhostRun()?.score).toBe(100);
+    });
+
+    it('should downsample high-frequency frame-by-frame positions without actions', () => {
+      const replay = new ReplayController('neon-drift', { sampleIntervalMs: 60 });
+      replay.start();
+
+      // Frame 0 (t=0ms) -> recorded as first point
+      replay.recordPoint(0, 0);
+      // Frame 1 (t=16ms) -> throttled (< 60ms and no discrete action)
+      vi.advanceTimersByTime(16);
+      replay.recordPoint(1, 1);
+      // Frame 2 (t=32ms) -> throttled
+      vi.advanceTimersByTime(16);
+      replay.recordPoint(2, 2);
+      // Frame 3 (t=64ms) -> recorded (>= 60ms elapsed)
+      vi.advanceTimersByTime(32);
+      replay.recordPoint(5, 5);
+
+      const payload = replay.getCompressedPayload(250);
+      expect(payload).not.toBeNull();
+      expect(payload?.deltaPoints.length).toBe(2);
+      expect((payload as Record<string, unknown>).points).toBeUndefined();
+    });
+    it('should compute and verify checksum for ghost run data, detecting tampering', () => {
+      const replay = new ReplayController('neon-drift');
+      replay.start();
+      replay.recordPoint(0, 0, 'start', 0);
+      vi.advanceTimersByTime(120);
+      replay.recordPoint(10, 20, undefined, 50);
+      vi.advanceTimersByTime(120);
+      replay.recordPoint(25, 45, 'drift', 100);
+
+      const run = replay.saveGhostRun(100);
+      expect(run).not.toBeNull();
+      expect(run?.checksum).toBeDefined();
+
+      // Valid checksum passes
+      expect(replay.verifyChecksum(run!)).toBe(true);
+
+      // Tampered points fail verification
+      const tamperedRun = {
+        ...run!,
+        points: [...run!.points, { t: 9999, x: 999, y: 999, score: 9999 }]
+      };
+      expect(replay.verifyChecksum(tamperedRun)).toBe(false);
+    });
+  });
+
+  describe('InputController, PerformanceController, AudioController & TelemetryController', () => {
+    it('should dispatch and track input events in InputController', () => {
+      const input = new InputController('snake');
+      const listener = vi.fn();
+      const unsub = input.subscribe(listener);
+
+      input.dispatch({ type: 'move', direction: 'left', isDown: true, source: 'keyboard' });
+      expect(listener).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'move', direction: 'left', isDown: true })
+      );
+
+      unsub();
+    });
+
+    it('should expose adaptive DPR and particle multipliers in PerformanceController', () => {
+      const perf = new PerformanceController();
+      expect(perf.getAdaptiveDPR(2)).toBeGreaterThanOrEqual(1);
+      expect(perf.getParticleMultiplier()).toBeGreaterThan(0);
+      perf.recordFramePerformance(60);
+      perf.recordFrameTime(16.6);
+    });
+
+    it('should manage mute state, BGM scheduler and sound triggers in AudioController & TelemetryController', () => {
+      const audio = new AudioController();
+      expect(typeof audio.isMuted()).toBe('boolean');
+      audio.playCoin();
+      audio.playJump();
+      audio.playLaser();
+      audio.playScore();
+      audio.playHit();
+      audio.playPowerup();
+      audio.playExplosion();
+
+      audio.startBgm();
+      audio.stopBgm();
+      expect(audio.isBgmPlaying()).toBe(false);
+
+      audio.stopAll();
+
+      const telemetry = new TelemetryController('brick-breaker');
+      expect(() => {
+        telemetry.recordGameStart('keyboard');
+        telemetry.recordInput('LEFT');
+        telemetry.recordEvent('stage_clear', { stage: 2 });
+        telemetry.recordGameOver(400, 'ball_lost', 'keyboard');
+      }).not.toThrow();
+    });
+  });
+
+  describe('Decoupled BrickBreakerEngine & PhysicsWorkerController', () => {
+    it('should execute deterministic paddle, wall, and brick collision physics decoupled from React', () => {
+      const onScoreAdd = vi.fn();
+      const onScoreUpdate = vi.fn();
+      const onLivesChange = vi.fn();
+      const onLivesUpdate = vi.fn();
+      const onGameOver = vi.fn();
+
+      const engine = new BrickBreakerEngine({
+        onScoreAdd,
+        onScoreUpdate,
+        onLivesChange,
+        onLivesUpdate,
+        onGameOver,
+        isPlaying: () => true
+      });
+
+      expect(engine.getBricks().length).toBe(40);
+      expect(engine.getState().lives).toBe(3);
+
+      // Move paddle right via keyboard state
+      engine.setKey('arrowright', true);
+      engine.stepPhysics(0.1);
+      expect(engine.getState().paddleX).toBeGreaterThan(0);
+      engine.setKey('arrowright', false);
+
+      // Sub-stepping handles high speed without tunneling
+      engine.stepPhysics(0.05);
+
+      // Clamp normalized pointer coordinate
+      engine.setPaddleNormalizedX(5);
+      expect(engine.getState().paddleX).toBeCloseTo(7.2 - 1.25, 2);
+
+      // Clean disposal prevents leaks
+      engine.dispose();
+      expect(engine.isDisposed()).toBe(true);
+    });
+
+    it('should verify ghost replay trajectory and detect speed/velocity anomalies via PhysicsWorkerController', async () => {
+      const workerCtrl = new PhysicsWorkerController();
+
+      // Legitimate trajectory
+      const validResult = await workerCtrl.verifyGhostTrajectory({
+        deltaPoints: [
+          { dt: 50, dx: 2, dy: 0 },
+          { dt: 50, dx: 2.5, dy: 0.5 },
+          { dt: 50, dx: 1.5, dy: 0 }
+        ],
+        maxSpeedUnitsPerSec: 100,
+        declaredDurationMs: 5000,
+        declaredScore: 120,
+        maxScorePerSec: 150
+      });
+      expect(validResult.valid).toBe(true);
+      expect(validResult.anomalyCount).toBe(0);
+
+      // Cheated trajectory with impossible teleport speed
+      const cheatedResult = await workerCtrl.verifyGhostTrajectory({
+        deltaPoints: [
+          { dt: 10, dx: 500, dy: 500 } // ~70,710 units/sec > 100 maxSpeed
+        ],
+        maxSpeedUnitsPerSec: 100,
+        declaredDurationMs: 5000,
+        declaredScore: 120,
+        maxScorePerSec: 150
+      });
+      expect(cheatedResult.valid).toBe(false);
+      expect(cheatedResult.anomalyCount).toBeGreaterThan(0);
+      expect(cheatedResult.reason).toContain('TELEPORT_SPEED_ANOMALY');
+
+      workerCtrl.dispose();
     });
   });
 
@@ -290,3 +471,4 @@ describe('ZiGame 2.0 Unified Game SDK & Architecture Tests', () => {
     });
   });
 });
+

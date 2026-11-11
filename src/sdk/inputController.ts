@@ -7,7 +7,7 @@ export class InputController implements IInputController {
   private unsubscribeManager?: () => void;
   private isDestroyed: boolean = false;
 
-  constructor() {
+  constructor(_gameId?: string) {
     this.initGlobalBridge();
   }
 

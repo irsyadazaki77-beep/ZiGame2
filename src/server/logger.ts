@@ -3,7 +3,7 @@
  * ZiGame 2.0 Stabilization
  */
 
-export type ServerLogLevel = 'INFO' | 'WARN' | 'ERROR' | 'SECURITY';
+export type ServerLogLevel = 'INFO' | 'WARN' | 'ERROR' | 'FATAL' | 'SECURITY';
 
 export type SecurityEventCategory =
   | 'AUTH_FAILURE'
@@ -82,7 +82,7 @@ export const serverLogger = {
       (fullEntry.metadata ? ` | meta: ${JSON.stringify(fullEntry.metadata)}` : '') +
       (fullEntry.error ? ` | err: ${fullEntry.error}` : '');
 
-    if (fullEntry.level === 'ERROR' || fullEntry.level === 'SECURITY') {
+    if (fullEntry.level === 'ERROR' || fullEntry.level === 'FATAL' || fullEntry.level === 'SECURITY') {
       console.error(formatted);
     } else if (fullEntry.level === 'WARN') {
       console.warn(formatted);
@@ -102,6 +102,11 @@ export const serverLogger = {
   error(category: string, message: string, err?: unknown, metadata?: Record<string, any>, userId?: string, ip?: string, requestId?: string) {
     const errorMsg = err instanceof Error ? err.stack || err.message : String(err || '');
     this.log({ level: 'ERROR', category, message, error: errorMsg, metadata, userId, ip, requestId });
+  },
+
+  fatal(category: string, message: string, err?: unknown, metadata?: Record<string, any>, userId?: string, ip?: string, requestId?: string) {
+    const errorMsg = err instanceof Error ? err.stack || err.message : String(err || '');
+    this.log({ level: 'FATAL', category, message, error: errorMsg, metadata, userId, ip, requestId });
   },
 
   security(category: SecurityEventCategory, message: string, metadata?: Record<string, any>, userId?: string, ip?: string, requestId?: string) {

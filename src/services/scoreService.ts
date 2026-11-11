@@ -57,10 +57,16 @@ export const scoreService = {
         // Offline / unauthenticated guest plays locally without server session
         return {};
       }
+      const clientNonce = nonce || `cli_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`;
       const res = await fetch('/api/session/start', {
         method: 'POST',
         headers,
-        body: JSON.stringify({ gameId, nonce })
+        body: JSON.stringify({
+          gameId,
+          nonce: clientNonce,
+          sessionNonce: clientNonce,
+          clientTimestamp: Date.now()
+        })
       });
       if (res.ok) {
         const data = await res.json();
@@ -125,6 +131,7 @@ export const scoreService = {
 
       return await withRetry(async () => {
         const headers = await getAuthHeaders();
+        headers['X-Idempotency-Key'] = idempotencyKey;
         if (cryptoMeta?.signature) {
           headers['X-Session-Signature'] = cryptoMeta.signature;
         }

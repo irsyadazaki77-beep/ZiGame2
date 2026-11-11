@@ -24,9 +24,27 @@ sessionRoutes.post(
   async (req: Request, res: Response) => {
     try {
       const userId = req.user!.uid;
-      const { gameId } = req.body as { gameId: string };
+      const {
+        gameId,
+        nonce,
+        sessionNonce,
+        timestamp,
+        clientTimestamp
+      } = req.body as {
+        gameId: string;
+        nonce?: string;
+        sessionNonce?: string;
+        timestamp?: number;
+        clientTimestamp?: number;
+      };
 
-      const session = await createGameSession(userId, gameId);
+      const resolvedClientNonce = sessionNonce || nonce;
+      const resolvedClientTimestamp = clientTimestamp ?? timestamp;
+
+      const session = await createGameSession(userId, gameId, {
+        clientNonce: resolvedClientNonce,
+        clientTimestamp: resolvedClientTimestamp
+      });
 
       serverLogger.info('SESSION_STARTED', `Game session started for ${session.gameId}`, {
         gameId: session.gameId,
@@ -37,6 +55,7 @@ sessionRoutes.post(
         success: true,
         sessionId: session.sessionId,
         nonce: session.nonce,
+        sessionNonce: session.nonce,
         signature: session.signature,
         startTime: session.startTime,
         expiresAt: session.expiresAt
@@ -83,8 +102,12 @@ const handleSubmitScore = async (req: Request, res: Response) => {
     const headerProof = typeof req.headers['x-client-proof'] === 'string'
       ? req.headers['x-client-proof']
       : undefined;
+    const headerIdempotencyKey = typeof req.headers['x-idempotency-key'] === 'string'
+      ? req.headers['x-idempotency-key'].trim()
+      : undefined;
 
     const resolvedIdempotencyKey =
+      headerIdempotencyKey ||
       idempotencyKey ||
       `score_${sessionId}_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
 

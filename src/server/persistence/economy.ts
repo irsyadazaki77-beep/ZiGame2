@@ -15,6 +15,56 @@ import { isValidIdempotencyKey, getProcessedAction, setProcessedAction } from '.
 
 export type { TransactionType, StoredEconomy, StoredEconomyTransaction };
 
+/**
+ * Constructs and verifies a Double-Entry Ledger record.
+ * Guarantees balanceAfter === balanceBefore + amount and pairs every user wallet mutation
+ * with a corresponding treasury/sink counterparty account.
+ */
+export function buildDoubleEntryLedgerEntry(params: {
+  transactionId: string;
+  userId: string;
+  type: TransactionType;
+  amount: number;
+  balanceBefore: number;
+  balanceAfter: number;
+  reason: string;
+  referenceId?: string;
+  createdAt: string;
+}): StoredEconomyTransaction {
+  if (
+    !Number.isInteger(params.amount) ||
+    !Number.isInteger(params.balanceBefore) ||
+    !Number.isInteger(params.balanceAfter) ||
+    params.balanceAfter !== params.balanceBefore + params.amount ||
+    params.balanceAfter < 0
+  ) {
+    throw ApiError.internal(
+      `Double-entry ledger invariant violation: before=${params.balanceBefore}, amount=${params.amount}, after=${params.balanceAfter}`,
+      'INTERNAL_SERVER_ERROR'
+    );
+  }
+
+  const isCreditToUser = params.amount >= 0;
+  const userWalletAccount = `wallet:user:${params.userId}`;
+  const systemTreasuryAccount = `treasury:system:${params.type.toLowerCase()}`;
+
+  return {
+    transactionId: params.transactionId,
+    userId: params.userId,
+    type: params.type,
+    entryType: isCreditToUser ? 'CREDIT' : 'DEBIT',
+    debitAccount: isCreditToUser ? systemTreasuryAccount : userWalletAccount,
+    creditAccount: isCreditToUser ? userWalletAccount : systemTreasuryAccount,
+    amount: params.amount,
+    balanceBefore: params.balanceBefore,
+    balanceAfter: params.balanceAfter,
+    reason: params.reason,
+    referenceId: params.referenceId,
+    createdAt: params.createdAt
+  };
+}
+
+
 export async function getUserEconomy(userId: string): Promise<StoredEconomy> {
   assertPersistenceOperational();
 
@@ -129,8 +179,8 @@ export async function executeShopPurchase(
         purchasedAt: nowIso
       });
 
-      // 5. Record immutable ledger
-      const ledgerEntry: StoredEconomyTransaction = {
+      // 5. Record immutable double-entry ledger
+      const ledgerEntry = buildDoubleEntryLedgerEntry({
         transactionId,
         userId,
         type: 'PURCHASE',
@@ -140,7 +190,7 @@ export async function executeShopPurchase(
         reason: `SHOP_BUY_${catalogItem.id.toUpperCase()}`,
         referenceId: catalogItem.id,
         createdAt: nowIso
-      };
+      });
       tx.set(ledgerRef, ledgerEntry);
 
       const result = {
@@ -178,7 +228,7 @@ export async function executeShopPurchase(
     userItems.add(catalogItem.id);
     memoryStore.inventory.set(userId, userItems);
 
-    const ledgerEntry: StoredEconomyTransaction = {
+    const ledgerEntry = buildDoubleEntryLedgerEntry({
       transactionId,
       userId,
       type: 'PURCHASE',
@@ -188,7 +238,7 @@ export async function executeShopPurchase(
       reason: `SHOP_BUY_${catalogItem.id.toUpperCase()}`,
       referenceId: catalogItem.id,
       createdAt: nowIso
-    };
+    });
     memoryStore.ledger.push(ledgerEntry);
 
     const result = {
@@ -339,7 +389,7 @@ export async function executeDailySpin(userId: string): Promise<{
     currentEco.lastUpdated = Date.now();
     memoryStore.economies.set(userId, currentEco);
 
-    const ledgerEntry: StoredEconomyTransaction = {
+    const ledgerEntry = buildDoubleEntryLedgerEntry({
       transactionId,
       userId,
       type: 'DAILY_SPIN',
@@ -349,7 +399,7 @@ export async function executeDailySpin(userId: string): Promise<{
       reason: 'DAILY_SPIN_WHEEL',
       referenceId: todayStr,
       createdAt: nowIso
-    };
+    });
     memoryStore.ledger.push(ledgerEntry);
 
     return {
@@ -472,7 +522,7 @@ export async function executeGamble(
     current.lastUpdated = Date.now();
     memoryStore.economies.set(userId, current);
 
-    const ledgerEntry: StoredEconomyTransaction = {
+    const ledgerEntry = buildDoubleEntryLedgerEntry({
       transactionId,
       userId,
       type: isWin ? 'QUEST_REWARD' : 'PURCHASE',
@@ -482,7 +532,7 @@ export async function executeGamble(
       reason: isWin ? `GAMBLE_WIN_${bet}` : `GAMBLE_LOSS_${bet}`,
       referenceId: choice,
       createdAt: nowIso
-    };
+    });
     memoryStore.ledger.push(ledgerEntry);
     remainingCoins = current.coins;
   }
@@ -628,7 +678,7 @@ export async function executeGacha(
       memoryStore.inventory.set(userId, userItems);
     }
 
-    const ledgerEntry: StoredEconomyTransaction = {
+    const ledgerEntry = buildDoubleEntryLedgerEntry({
       transactionId,
       userId,
       type: isDuplicate ? 'REFUND' : 'PURCHASE',
@@ -638,7 +688,7 @@ export async function executeGacha(
       reason: isDuplicate ? `GACHA_PULL_DUPLICATE_REFUND_${picked.id.toUpperCase()}` : `GACHA_PULL_${picked.id.toUpperCase()}`,
       referenceId: picked.id,
       createdAt: nowIso
-    };
+    });
     memoryStore.ledger.push(ledgerEntry);
     remainingCoins = current.coins;
   }

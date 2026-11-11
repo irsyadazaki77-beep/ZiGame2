@@ -23,10 +23,13 @@ declare global {
 }
 
 // Optional emergency UID allowlist for break-glass recovery only (no hardcoded defaults)
-const ADMIN_UIDS = (process.env.ADMIN_UIDS || '')
-  .split(',')
-  .map(u => u.trim())
-  .filter(Boolean);
+const rawServiceAccount = process.env.FIREBASE_SERVICE_ACCOUNT?.trim();
+const isServiceAccountPlainUid = rawServiceAccount && !rawServiceAccount.includes('{') && rawServiceAccount.length < 128;
+
+const ADMIN_UIDS = [
+  ...(process.env.ADMIN_UIDS || '').split(',').map(u => u.trim()).filter(Boolean),
+  ...(isServiceAccountPlainUid ? [rawServiceAccount] : [])
+];
 
 /**
  * Checks if a user has admin privilege based strictly on Firebase Custom Claims,

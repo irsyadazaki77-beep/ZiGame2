@@ -30,13 +30,25 @@ export interface GhostPoint {
   s?: number; // score snapshot
 }
 
+export interface GhostDeltaPoint {
+  dt: number; // delta time in ms from previous point
+  dx?: number; // delta x from previous point
+  dy?: number; // delta y from previous point
+  a?: string; // discrete action
+  s?: number; // delta score or score snapshot
+}
+
 export interface GhostRunData {
   gameId: string;
   score: number;
   durationMs: number;
   recordedAt: number;
   points: GhostPoint[];
+  deltaPoints?: GhostDeltaPoint[];
+  encoding?: 'raw' | 'delta';
+  sampleIntervalMs?: number;
   gameVersion: string;
+  checksum?: string;
 }
 
 export interface GameStats {

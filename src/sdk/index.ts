@@ -12,3 +12,5 @@ export * from './lifecycleCoordinator';
 export * from './runtimeContext';
 export * from './useGameSDK';
 export * from './LegacyGameAdapter';
+export * from './BrickBreakerEngine';
+export * from './physicsWorkerController';

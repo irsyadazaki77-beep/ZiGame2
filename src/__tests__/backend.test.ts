@@ -1917,7 +1917,89 @@ describe('ZiGame 2.0 Backend Authority & Security Tests', () => {
       expect(archRes.body.architecture.domainRouters).toContain('adminRoutes');
       expect(archRes.body.architecture.registeredSchemasCount).toBeGreaterThanOrEqual(12);
     });
+
+    it('Fail-Fast Startup: Throws FatalError when NODE_ENV=production without Firebase Admin credentials', async () => {
+      const { validateEnvironment, FatalError } = await import('../../server');
+
+      expect(() =>
+        validateEnvironment({
+          NODE_ENV: 'production'
+        })
+      ).toThrow(FatalError);
+
+      // Valid service account JSON passes fail-fast validation
+      expect(() =>
+        validateEnvironment({
+          NODE_ENV: 'production',
+          FIREBASE_SERVICE_ACCOUNT: JSON.stringify({ project_id: 'zigame-prod' })
+        })
+      ).not.toThrow();
+    });
+
+    it('Idempotency Header & Double-Entry Ledger: Accepts X-Idempotency-Key header, rejects header/body mismatch, and records DEBIT/CREDIT accounts', async () => {
+      const uid = `double-entry-user-${Date.now()}`;
+      const headerKey = `hdr_idem_${Date.now()}`;
+
+      // 1. Purchase using X-Idempotency-Key header without body idempotencyKey
+      const buyRes = await request(app)
+        .post('/api/buy-item')
+        .set('x-test-uid', uid)
+        .set('X-Idempotency-Key', headerKey)
+        .send({ itemId: 'av_dino' });
+
+      expect(buyRes.status).toBe(200);
+      expect(buyRes.body.success).toBe(true);
+
+      // Verify double-entry ledger record
+      const tx = memoryStore.ledger.find((entry) => entry.transactionId === buyRes.body.transactionId);
+      expect(tx).toBeDefined();
+      expect(tx?.entryType).toBe('DEBIT');
+      expect(tx?.debitAccount).toBe(`wallet:user:${uid}`);
+      expect(tx?.creditAccount).toBe('treasury:system:purchase');
+      expect(tx?.balanceAfter).toBe((tx?.balanceBefore ?? 0) + (tx?.amount ?? 0));
+
+      // 2. Mismatched X-Idempotency-Key header vs body must return 409 IDEMPOTENCY_CONFLICT
+      const conflictRes = await request(app)
+        .post('/api/buy-item')
+        .set('x-test-uid', uid)
+        .set('X-Idempotency-Key', `header_key_${Date.now()}`)
+        .send({ itemId: 'av_dino', idempotencyKey: `body_key_${Date.now()}` });
+
+      expect(conflictRes.status).toBe(409);
+      expect(conflictRes.body.code).toBe('IDEMPOTENCY_CONFLICT');
+    });
+
+    it('Session Handshake: Validates sessionNonce and rejects extreme clientTimestamp clock skew', async () => {
+      const uid = `handshake-user-${Date.now()}`;
+
+      // Valid handshake with sessionNonce and current timestamp
+      const validStart = await request(app)
+        .post('/api/session/start')
+        .set('x-test-uid', uid)
+        .send({
+          gameId: 'brick-breaker',
+          sessionNonce: 'client_nonce_12345',
+          clientTimestamp: Date.now()
+        });
+
+      expect(validStart.status).toBe(200);
+      expect(validStart.body.sessionNonce).toBeDefined();
+
+      // Skewed timestamp (1 hour in the past) must be rejected with 422 INVALID_SESSION
+      const skewedStart = await request(app)
+        .post('/api/session/start')
+        .set('x-test-uid', uid)
+        .send({
+          gameId: 'brick-breaker',
+          sessionNonce: 'client_nonce_12345',
+          clientTimestamp: Date.now() - 3600 * 1000
+        });
+
+      expect(skewedStart.status).toBe(422);
+      expect(skewedStart.body.code).toBe('INVALID_SESSION');
+    });
   });
 });
+
 
 

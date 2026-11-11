@@ -129,3 +129,18 @@ export class ApiError extends Error {
 export function isApiError(err: unknown): err is ApiError {
   return err instanceof ApiError;
 }
+
+export class FatalError extends Error {
+  public readonly code = 'FATAL_STARTUP_ERROR';
+
+  constructor(message: string) {
+    super(message);
+    this.name = 'FatalError';
+    Object.setPrototypeOf(this, FatalError.prototype);
+  }
+}
+
+export function isFatalError(err: unknown): err is FatalError {
+  return err instanceof FatalError;
+}
+

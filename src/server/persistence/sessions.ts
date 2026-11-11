@@ -1,18 +1,54 @@
 import crypto from 'crypto';
+import { ApiError } from '../errors';
 import { requireCanonicalGameId } from '../../config/canonicalGames';
 import { isFirestoreAvailable, getDb, memoryStore, assertPersistenceOperational, StoredGameSession } from './db';
 import { computeSessionSignature } from './security';
 
 export const SESSION_MAX_LIFETIME_MS = 60 * 60 * 1000; // 1 hour max session lifetime
+export const MAX_CLOCK_SKEW_MS = 5 * 60 * 1000; // 5 minutes max clock skew on handshake
 
-export async function createGameSession(userId: string, gameId: string): Promise<StoredGameSession> {
+export interface CreateGameSessionOptions {
+  clientNonce?: string;
+  clientTimestamp?: number;
+}
+
+export async function createGameSession(
+  userId: string,
+  gameId: string,
+  options: CreateGameSessionOptions = {}
+): Promise<StoredGameSession> {
   assertPersistenceOperational();
   const canonicalId = requireCanonicalGameId(gameId);
-
-  const sessionId = `ses_${Date.now()}_${crypto.randomBytes(16).toString('hex')}`;
-  const nonce = crypto.randomBytes(16).toString('hex');
-  const signature = computeSessionSignature(sessionId, userId, canonicalId, nonce);
   const now = Date.now();
+
+  if (options.clientNonce !== undefined) {
+    if (
+      typeof options.clientNonce !== 'string' ||
+      !/^[a-zA-Z0-9_-]{4,128}$/.test(options.clientNonce)
+    ) {
+      throw ApiError.badRequest('Format sessionNonce tidak valid.', 'MALFORMED_PAYLOAD');
+    }
+  }
+
+  if (options.clientTimestamp !== undefined) {
+    if (
+      typeof options.clientTimestamp !== 'number' ||
+      !Number.isFinite(options.clientTimestamp) ||
+      Math.abs(now - options.clientTimestamp) > MAX_CLOCK_SKEW_MS
+    ) {
+      throw ApiError.unprocessable(
+        'Timestamp awal sesi berada di luar batas toleransi sinkronisasi waktu server.',
+        'INVALID_SESSION'
+      );
+    }
+  }
+
+  const sessionId = `ses_${now}_${crypto.randomBytes(16).toString('hex')}`;
+  const serverEntropy = crypto.randomBytes(16).toString('hex');
+  const nonce = options.clientNonce
+    ? crypto.createHash('sha256').update(`${options.clientNonce}:${serverEntropy}`).digest('hex').slice(0, 32)
+    : serverEntropy;
+  const signature = computeSessionSignature(sessionId, userId, canonicalId, nonce);
 
   const session: StoredGameSession = {
     sessionId,

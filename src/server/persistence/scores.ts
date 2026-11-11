@@ -16,7 +16,7 @@ import {
   AnomalySeverity
 } from './db';
 import { calculateLevelFromXp } from './progression';
-import { getUserEconomy } from './economy';
+import { getUserEconomy, buildDoubleEntryLedgerEntry } from './economy';
 import { getLeaderboardEntries } from './leaderboard';
 import { recordSuspiciousScore } from './suspiciousScores';
 import { invalidateSession } from './sessions';
@@ -208,7 +208,7 @@ export async function executeScoreSubmission({
           };
           throw ApiError.unprocessable('Durasi permainan terlalu singkat.', 'INSUFFICIENT_DURATION');
         }
-        if (score > 50 && (serverVelocity > config.maxScorePerSec || (clientVelocity !== undefined && clientVelocity > config.maxScorePerSec))) {
+        if (score > 0 && (serverVelocity > config.maxScorePerSec || (clientVelocity !== undefined && clientVelocity > config.maxScorePerSec))) {
           const excessiveVel = Math.max(serverVelocity, clientVelocity || 0);
           antiCheatError = {
             reason: `Velocity ${excessiveVel.toFixed(1)}/s exceeded limit ${config.maxScorePerSec}/s`,
@@ -298,7 +298,7 @@ export async function executeScoreSubmission({
           };
           newCoinBalance = updatedEco.coins;
           tx.set(ecoRef, updatedEco);
-          tx.set(ledgerRef, {
+          tx.set(ledgerRef, buildDoubleEntryLedgerEntry({
             transactionId,
             userId,
             type: 'GAME_REWARD',
@@ -308,7 +308,7 @@ export async function executeScoreSubmission({
             reason: `GAME_REWARD_${canonicalId.toUpperCase()}`,
             referenceId: sessionId,
             createdAt: nowIso
-          });
+          }));
         }
 
         // 9. Progression
@@ -445,7 +445,7 @@ export async function executeScoreSubmission({
       });
       throw ApiError.unprocessable('Durasi permainan terlalu singkat.', 'INSUFFICIENT_DURATION');
     }
-    if (score > 50 && (serverVelocity > config.maxScorePerSec || (clientVelocity !== undefined && clientVelocity > config.maxScorePerSec))) {
+    if (score > 0 && (serverVelocity > config.maxScorePerSec || (clientVelocity !== undefined && clientVelocity > config.maxScorePerSec))) {
       session.consumed = true;
       session.consumedAt = nowMs;
       await recordSuspiciousScore({
@@ -549,7 +549,7 @@ export async function executeScoreSubmission({
     memoryStore.economies.set(userId, eco);
 
     if (coinsEarned > 0) {
-      memoryStore.ledger.push({
+      memoryStore.ledger.push(buildDoubleEntryLedgerEntry({
         transactionId,
         userId,
         type: 'GAME_REWARD',
@@ -559,7 +559,7 @@ export async function executeScoreSubmission({
         reason: `GAME_REWARD_${canonicalId.toUpperCase()}`,
         referenceId: sessionId,
         createdAt: nowIso
-      });
+      }));
     }
 
     if (xpEarned > 0) {

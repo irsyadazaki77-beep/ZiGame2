@@ -92,6 +92,9 @@ export interface IReplayController {
   finish(finalScore: number, gameVersion?: string): GhostRunData | null;
   discard(): void;
   getGhostRun(): GhostRunData | null;
+  setSampleInterval?(intervalMs: number): void;
+  getSampleInterval?(): number;
+  getCompressedPayload?(finalScore: number, gameVersion?: string): Omit<GhostRunData, 'points'> & { deltaPoints: import('./index').GhostDeltaPoint[] } | null;
 }
 
 export interface IViewportController {

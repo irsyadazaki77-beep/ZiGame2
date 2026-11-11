@@ -132,7 +132,10 @@ export const economyService = {
 
       const res = await fetch('/api/buy-item', {
         method: 'POST',
-        headers,
+        headers: {
+          ...headers,
+          'X-Idempotency-Key': idempotencyKey
+        },
         body: JSON.stringify({ itemId, idempotencyKey })
       });
       const data = await res.json();
@@ -173,9 +176,13 @@ export const economyService = {
         };
       }
 
+      const spinIdempotencyKey = generateIdempotencyKey('spin');
       const res = await fetch('/api/spin', {
         method: 'POST',
-        headers
+        headers: {
+          ...headers,
+          'X-Idempotency-Key': spinIdempotencyKey
+        }
       });
       const data = await res.json();
       if (!res.ok) {
@@ -269,7 +276,10 @@ export const economyService = {
       const idempotencyKey = generateIdempotencyKey(`claim_${claimId}`);
       const res = await fetch('/api/economy/claim', {
         method: 'POST',
-        headers,
+        headers: {
+          ...headers,
+          'X-Idempotency-Key': idempotencyKey
+        },
         body: JSON.stringify({
           claimId,
           claimType,
@@ -320,7 +330,10 @@ export const economyService = {
 
       const res = await fetch('/api/economy/gacha', {
         method: 'POST',
-        headers,
+        headers: {
+          ...headers,
+          'X-Idempotency-Key': idempotencyKey
+        },
         body: JSON.stringify({ idempotencyKey })
       });
       const data = await res.json();
@@ -371,7 +384,10 @@ export const economyService = {
 
       const res = await fetch('/api/economy/gamble', {
         method: 'POST',
-        headers,
+        headers: {
+          ...headers,
+          'X-Idempotency-Key': idempotencyKey
+        },
         body: JSON.stringify({ bet, choice, idempotencyKey })
       });
       const data = await res.json();
