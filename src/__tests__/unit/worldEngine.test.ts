@@ -5,7 +5,10 @@ import {
   swapAndPop
 } from '../../components/games/world-box/spatialGrid';
 import { WorldBoxEngine } from '../../components/games/world-box/worldEngine';
-import { WorldBoxRenderer } from '../../components/games/world-box/worldRenderer';
+import {
+  WorldBoxRenderer,
+  screenToWorld
+} from '../../components/games/world-box/worldRenderer';
 
 describe('WorldBox 2.0 — SpatialHashGrid, Swap-and-Pop & Engine Unit Tests', () => {
   describe('swapAndPop (In-Place Zero-GC Removal)', () => {
@@ -101,11 +104,29 @@ describe('WorldBox 2.0 — SpatialHashGrid, Swap-and-Pop & Engine Unit Tests', (
       expect(restoredEngine.state.biomes).toEqual(engine.state.biomes);
     });
 
-    it('computes frustum tile bounds accurately in WorldBoxRenderer', () => {
+    it('computes frustum tile bounds, screenToWorld DPR mapping, and resetWorld terrainDirty in WorldBoxRenderer', () => {
+      const engine = new WorldBoxEngine({}, 108, 66);
+      engine.state.terrainDirty = false;
+      engine.resetWorld('volcanic', 99);
+      expect(engine.state.terrainDirty).toBe(true);
+
       const renderer = new WorldBoxRenderer();
-      const bounds = renderer.getVisibleTileBounds(108, 66, { zoom: 2, panX: 0, panY: 0 });
+      const bounds = renderer.getVisibleTileBounds(108, 66, { zoom: 2, panX: 0, panY: 0 }, 1728, 1056);
       expect(bounds.minTileX).toBeGreaterThan(20);
       expect(bounds.maxTileX).toBeLessThan(88);
+
+      const mockCanvas = {
+        width: 1728,
+        height: 1056,
+        getBoundingClientRect: () => ({ left: 0, top: 0, width: 864, height: 528 })
+      } as unknown as HTMLCanvasElement;
+
+      const centerPoint = screenToWorld(432, 264, mockCanvas, 108, 66, { zoom: 1, panX: 0, panY: 0 });
+      expect(centerPoint.tx).toBe(54);
+      expect(centerPoint.ty).toBe(33);
+
+      renderer.dispose();
+      engine.destroy();
     });
   });
 });

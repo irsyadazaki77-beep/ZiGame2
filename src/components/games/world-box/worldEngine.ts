@@ -134,6 +134,11 @@ export class WorldBoxEngine {
     }
   }
 
+  public resetWorld(template: WorldTemplate = 'archipelago', seed?: number): void {
+    this.state.terrainDirty = true;
+    this.generateWorld(template, seed);
+  }
+
   public generateWorld(template: WorldTemplate = 'archipelago', seed?: number): void {
     const s = this.state;
     s.territory.fill(-1);

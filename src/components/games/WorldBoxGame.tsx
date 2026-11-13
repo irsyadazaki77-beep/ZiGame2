@@ -7,8 +7,7 @@ import { screenShake } from '../../utils/screenShake';
 import {
   DIVINE_ERA_CHALLENGES,
   GOD_POWERS_CATALOG,
-  RACE_CONFIG,
-  TILE_SIZE
+  RACE_CONFIG
 } from './world-box/constants';
 import {
   CameraState,
@@ -20,7 +19,7 @@ import {
   WorldTemplate
 } from './world-box/types';
 import { WorldBoxEngine } from './world-box/worldEngine';
-import { WorldBoxRenderer } from './world-box/worldRenderer';
+import { WorldBoxRenderer, screenToWorld } from './world-box/worldRenderer';
 import {
   Globe,
   Users,
@@ -45,6 +44,7 @@ import {
 
 export default function WorldBoxGame({ onGameOver, onScoreUpdate, highScore }: GameComponentProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const canvasWrapperRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
   const {
@@ -107,7 +107,17 @@ export default function WorldBoxGame({ onGameOver, onScoreUpdate, highScore }: G
   useEffect(() => { selectedToolRef.current = selectedTool; }, [selectedTool]);
   useEffect(() => { brushRadiusRef.current = brushRadius; }, [brushRadius]);
   useEffect(() => { selectedUnitIdRef.current = selectedUnitId; }, [selectedUnitId]);
-  useEffect(() => { cameraRef.current = camera; }, [camera]);
+  useEffect(() => {
+    cameraRef.current = camera;
+    if (canvasRef.current && engineRef.current && rendererRef.current) {
+      rendererRef.current.render(
+        canvasRef.current,
+        engineRef.current,
+        camera,
+        selectedUnitIdRef.current
+      );
+    }
+  }, [camera]);
 
   const engineRef = useRef<WorldBoxEngine | null>(null);
   const rendererRef = useRef<WorldBoxRenderer | null>(null);
@@ -149,7 +159,7 @@ export default function WorldBoxGame({ onGameOver, onScoreUpdate, highScore }: G
       if (!engine) return;
       setSelectedUnitId(null);
       selectedUnitIdRef.current = null;
-      engine.generateWorld(tpl);
+      engine.resetWorld(tpl);
       syncHudSnapshot(null);
       if (canvasRef.current && rendererRef.current) {
         rendererRef.current.render(canvasRef.current, engine, cameraRef.current, null);
@@ -158,38 +168,62 @@ export default function WorldBoxGame({ onGameOver, onScoreUpdate, highScore }: G
     [syncHudSnapshot]
   );
 
-  // Initialize world + ResizeObserver + strict unmount cleanup
+  // Initialize world + ResizeObserver DPR canvas sizing + strict unmount cleanup
   useEffect(() => {
     const engine = engineRef.current;
     const renderer = rendererRef.current;
     if (engine) {
-      engine.generateWorld('archipelago');
+      engine.resetWorld('archipelago');
       syncHudSnapshot(null);
     }
+
+    const syncCanvasDimensionsAndRender = () => {
+      const wrapper = canvasWrapperRef.current;
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+
+      if (wrapper) {
+        const width = wrapper.clientWidth;
+        const height = wrapper.clientHeight;
+        if (width > 0 && height > 0) {
+          const dpr = Math.min(typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1, 2);
+          const targetW = Math.floor(width * dpr);
+          const targetH = Math.floor(height * dpr);
+          if (canvas.width !== targetW || canvas.height !== targetH) {
+            canvas.width = targetW;
+            canvas.height = targetH;
+          }
+        }
+      }
+
+      if (engineRef.current && rendererRef.current) {
+        rendererRef.current.render(
+          canvas,
+          engineRef.current,
+          cameraRef.current,
+          selectedUnitIdRef.current
+        );
+      }
+    };
+
+    syncCanvasDimensionsAndRender();
 
     const observer =
       typeof ResizeObserver !== 'undefined'
         ? new ResizeObserver(() => {
-            if (canvasRef.current && engineRef.current && rendererRef.current) {
-              rendererRef.current.render(
-                canvasRef.current,
-                engineRef.current,
-                cameraRef.current,
-                selectedUnitIdRef.current
-              );
-            }
+            syncCanvasDimensionsAndRender();
           })
         : null;
 
-    if (observer && containerRef.current) {
-      observer.observe(containerRef.current);
+    if (observer && canvasWrapperRef.current) {
+      observer.observe(canvasWrapperRef.current);
     }
 
     return () => {
       stopLoop();
       observer?.disconnect();
       engine?.destroy();
-      renderer?.destroy();
+      renderer?.dispose();
     };
   }, [stopLoop, syncHudSnapshot]);
 
@@ -226,14 +260,17 @@ export default function WorldBoxGame({ onGameOver, onScoreUpdate, highScore }: G
 
   const getTileFromPointer = useCallback((clientX: number, clientY: number) => {
     const canvas = canvasRef.current;
-    if (!canvas) return null;
-    const rect = canvas.getBoundingClientRect();
-    const rawX = (clientX - rect.left) * (canvas.width / rect.width);
-    const rawY = (clientY - rect.top) * (canvas.height / rect.height);
-    const { zoom, panX, panY } = cameraRef.current;
-    const worldPx = (rawX - canvas.width / 2 - panX) / zoom + canvas.width / 2;
-    const worldPy = (rawY - canvas.height / 2 - panY) / zoom + canvas.height / 2;
-    return { tx: Math.floor(worldPx / TILE_SIZE), ty: Math.floor(worldPy / TILE_SIZE) };
+    const engine = engineRef.current;
+    if (!canvas || !engine) return null;
+    const pt = screenToWorld(
+      clientX,
+      clientY,
+      canvas,
+      engine.state.gridW,
+      engine.state.gridH,
+      cameraRef.current
+    );
+    return { tx: pt.tx, ty: pt.ty };
   }, []);
 
   const handlePointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
@@ -461,7 +498,10 @@ export default function WorldBoxGame({ onGameOver, onScoreUpdate, highScore }: G
 
       {/* MAIN WORKSPACE */}
       <div className="relative flex-1 flex flex-col lg:flex-row min-h-0 overflow-hidden">
-        <div className="relative flex-1 bg-[#071324] flex items-center justify-center overflow-hidden min-h-[320px]">
+        <div
+          ref={canvasWrapperRef}
+          className="relative flex-1 bg-[#071324] flex items-center justify-center overflow-hidden min-h-[320px]"
+        >
           <canvas
             ref={canvasRef}
             onPointerDown={handlePointerDown}
@@ -469,7 +509,7 @@ export default function WorldBoxGame({ onGameOver, onScoreUpdate, highScore }: G
             onPointerUp={handlePointerUp}
             onPointerLeave={handlePointerUp}
             onContextMenu={(e) => e.preventDefault()}
-            className="w-full h-full object-contain cursor-crosshair touch-none"
+            className="w-full h-full block cursor-crosshair touch-none"
             style={{ imageRendering: 'pixelated' }}
           />
           <div className="absolute top-3 left-3 flex items-center gap-1 bg-slate-900/90 border border-slate-800 rounded-lg p-1 z-10">

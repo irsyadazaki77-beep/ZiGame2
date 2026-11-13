@@ -13,12 +13,62 @@ export interface FrustumBounds {
   maxTileY: number;
 }
 
+export interface WorldCoordinatePoint {
+  worldPx: number;
+  worldPy: number;
+  tx: number;
+  ty: number;
+}
+
+/**
+ * Converts a pointer event's client coordinates (`clientX`, `clientY`) into
+ * exact world pixel and tile coordinates (`tx`, `ty`), accounting for responsive
+ * container size, DPR canvas buffer scaling, base fit-to-screen scale, and camera zoom/pan.
+ */
+export function screenToWorld(
+  clientX: number,
+  clientY: number,
+  canvas: HTMLCanvasElement,
+  gridW: number,
+  gridH: number,
+  camera: CameraState
+): WorldCoordinatePoint {
+  const rect = canvas.getBoundingClientRect();
+  const cssW = Math.max(1, rect.width);
+  const cssH = Math.max(1, rect.height);
+  const fullW = gridW * TILE_SIZE;
+  const fullH = gridH * TILE_SIZE;
+  const canvasW = canvas.width > 0 ? canvas.width : fullW;
+  const canvasH = canvas.height > 0 ? canvas.height : fullH;
+
+  const dpr = canvasW / cssW;
+  const cx = (clientX - rect.left) * dpr;
+  const cy = (clientY - rect.top) * dpr;
+
+  const baseScale = Math.min(canvasW / fullW, canvasH / fullH) || 1;
+  const effectiveScale = baseScale * camera.zoom;
+
+  const worldPx = (cx - canvasW / 2 - camera.panX * dpr) / effectiveScale + fullW / 2;
+  const worldPy = (cy - canvasH / 2 - camera.panY * dpr) / effectiveScale + fullH / 2;
+
+  return {
+    worldPx,
+    worldPy,
+    tx: Math.floor(worldPx / TILE_SIZE),
+    ty: Math.floor(worldPy / TILE_SIZE)
+  };
+}
+
 export class WorldBoxRenderer {
   private terrainCacheCanvas: HTMLCanvasElement | null = null;
   private terrainCacheCtx: CanvasRenderingContext2D | null = null;
 
   constructor() {
-    if (typeof document !== 'undefined') {
+    this.ensureTerrainCacheCanvas();
+  }
+
+  private ensureTerrainCacheCanvas(): void {
+    if (!this.terrainCacheCanvas && typeof document !== 'undefined') {
       this.terrainCacheCanvas = document.createElement('canvas');
       this.terrainCacheCtx = this.terrainCacheCanvas.getContext('2d');
     }
@@ -30,16 +80,21 @@ export class WorldBoxRenderer {
   public getVisibleTileBounds(
     gridW: number,
     gridH: number,
-    camera: CameraState
+    camera: CameraState,
+    canvasW?: number,
+    canvasH?: number
   ): FrustumBounds {
     const fullW = gridW * TILE_SIZE;
     const fullH = gridH * TILE_SIZE;
-    const { zoom, panX, panY } = camera;
+    const viewW = canvasW && canvasW > 0 ? canvasW : fullW;
+    const viewH = canvasH && canvasH > 0 ? canvasH : fullH;
+    const baseScale = Math.min(viewW / fullW, viewH / fullH) || 1;
+    const effectiveScale = baseScale * camera.zoom;
 
-    const worldLeft = (0 - fullW / 2 - panX) / zoom + fullW / 2;
-    const worldRight = (fullW - fullW / 2 - panX) / zoom + fullW / 2;
-    const worldTop = (0 - fullH / 2 - panY) / zoom + fullH / 2;
-    const worldBottom = (fullH - fullH / 2 - panY) / zoom + fullH / 2;
+    const worldLeft = (0 - viewW / 2 - camera.panX) / effectiveScale + fullW / 2;
+    const worldRight = (viewW - viewW / 2 - camera.panX) / effectiveScale + fullW / 2;
+    const worldTop = (0 - viewH / 2 - camera.panY) / effectiveScale + fullH / 2;
+    const worldBottom = (viewH - viewH / 2 - camera.panY) / effectiveScale + fullH / 2;
 
     const margin = 2;
     const minTileX = Math.max(0, Math.floor(worldLeft / TILE_SIZE) - margin);
@@ -51,22 +106,26 @@ export class WorldBoxRenderer {
   }
 
   /**
-   * Re-renders the offscreen static terrain canvas ONLY when `state.terrainDirty === true`.
+   * Re-renders the offscreen static terrain canvas ONLY when `state.terrainDirty === true`
+   * or when the offscreen canvas is first created/resized (`forceRedraw === true`).
    */
-  private updateTerrainCacheIfNeeded(engine: WorldBoxEngine): void {
+  public updateTerrainCacheIfNeeded(engine: WorldBoxEngine): void {
     const s = engine.state;
+    this.ensureTerrainCacheCanvas();
     if (!this.terrainCacheCanvas || !this.terrainCacheCtx) return;
 
     const fullW = s.gridW * TILE_SIZE;
     const fullH = s.gridH * TILE_SIZE;
+    let forceRedraw = false;
 
     if (this.terrainCacheCanvas.width !== fullW || this.terrainCacheCanvas.height !== fullH) {
       this.terrainCacheCanvas.width = fullW;
       this.terrainCacheCanvas.height = fullH;
+      forceRedraw = true;
       s.terrainDirty = true;
     }
 
-    if (!s.terrainDirty) return;
+    if (!s.terrainDirty && !forceRedraw) return;
 
     const tCtx = this.terrainCacheCtx;
     tCtx.imageSmoothingEnabled = false;
@@ -76,8 +135,8 @@ export class WorldBoxRenderer {
       const py = y * TILE_SIZE;
       for (let x = 0; x < s.gridW; x++) {
         const biome = s.biomes[rowOffset + x];
-        const colors = BIOME_COLORS[biome];
-        tCtx.fillStyle = colors[(x + y) % 2];
+        const palette = BIOME_COLORS[biome] ?? ['#0f172a', '#1e293b'];
+        tCtx.fillStyle = palette[(x + y) % 2];
         tCtx.fillRect(x * TILE_SIZE, py, TILE_SIZE, TILE_SIZE);
       }
     }
@@ -99,30 +158,39 @@ export class WorldBoxRenderer {
     const fullW = s.gridW * TILE_SIZE;
     const fullH = s.gridH * TILE_SIZE;
 
-    if (canvas.width !== fullW || canvas.height !== fullH) {
+    // Only fallback to fullW x fullH if ResizeObserver hasn't initialized canvas dimensions yet
+    if (canvas.width === 0 || canvas.height === 0) {
       canvas.width = fullW;
       canvas.height = fullH;
     }
+
+    const canvasW = canvas.width;
+    const canvasH = canvas.height;
+    const cssW = canvas.clientWidth > 0 ? canvas.clientWidth : canvasW;
+    const dpr = canvasW / Math.max(1, cssW);
 
     this.updateTerrainCacheIfNeeded(engine);
 
     ctx.save();
     ctx.imageSmoothingEnabled = false;
     ctx.fillStyle = '#071324';
-    ctx.fillRect(0, 0, fullW, fullH);
+    ctx.fillRect(0, 0, canvasW, canvasH);
 
-    // Apply camera transform
-    ctx.translate(fullW / 2 + camera.panX, fullH / 2 + camera.panY);
-    ctx.scale(camera.zoom, camera.zoom);
+    // Compute proportional fit-to-screen base scale + camera zoom/pan
+    const baseScale = Math.min(canvasW / fullW, canvasH / fullH) || 1;
+    const effectiveScale = baseScale * camera.zoom;
+
+    ctx.translate(canvasW / 2 + camera.panX * dpr, canvasH / 2 + camera.panY * dpr);
+    ctx.scale(effectiveScale, effectiveScale);
     ctx.translate(-fullW / 2, -fullH / 2);
 
     // 1. Blit cached static terrain in a single drawImage call
     if (this.terrainCacheCanvas) {
-      ctx.drawImage(this.terrainCacheCanvas, 0, 0);
+      ctx.drawImage(this.terrainCacheCanvas, 0, 0, fullW, fullH);
     }
 
-    // Compute visible frustum bounds
-    const bounds = this.getVisibleTileBounds(s.gridW, s.gridH, camera);
+    // Compute visible frustum bounds in world tiles
+    const bounds = this.getVisibleTileBounds(s.gridW, s.gridH, camera, canvasW, canvasH);
 
     const kingdomColorLookup = new Map<number, string>();
     for (let i = 0; i < s.kingdoms.length; i++) {
@@ -227,7 +295,7 @@ export class WorldBoxRenderer {
       }
     }
 
-    // 4. Render visible Units (Frustum Culled)
+    // 4. Render visible Units (Frustum Culled) + Selected Unit Highlight Ring
     for (let i = 0; i < s.units.length; i++) {
       const u = s.units[i];
       if (
@@ -291,9 +359,15 @@ export class WorldBoxRenderer {
         }
       }
 
-      if (selectedUnitId === u.id) {
-        ctx.strokeStyle = '#38bdf8';
+      if (selectedUnitId !== null && selectedUnitId === u.id) {
+        ctx.strokeStyle = '#fde047';
         ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.arc(ux, uy - 1, 8, 0, Math.PI * 2);
+        ctx.stroke();
+
+        ctx.strokeStyle = '#38bdf8';
+        ctx.lineWidth = 1;
         ctx.strokeRect(ux - 6, uy - 8, 12, 14);
       }
     }
@@ -353,8 +427,12 @@ export class WorldBoxRenderer {
     ctx.restore();
   }
 
-  public destroy(): void {
+  public dispose(): void {
     this.terrainCacheCanvas = null;
     this.terrainCacheCtx = null;
+  }
+
+  public destroy(): void {
+    this.dispose();
   }
 }
