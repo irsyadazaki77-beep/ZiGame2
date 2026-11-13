@@ -217,6 +217,10 @@ class RetroAudio {
     this.playCoin();
   }
 
+  playEat() {
+    this.playCoin();
+  }
+
   playCoin() {
     if (this.isMuted || this.sfxVolume <= 0) return;
     this.initContext();
