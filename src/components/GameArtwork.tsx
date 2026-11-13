@@ -55,12 +55,12 @@ const GAME_THUMBNAILS: Record<string, string> = {
   'gravity-shift': 'https://images.unsplash.com/photo-1454789548928-9efd52dc4031?auto=format&fit=crop&w=600&q=80',
   hex: 'https://images.unsplash.com/photo-1518770660439-4636190af475?auto=format&fit=crop&w=600&q=80',
   'hex-dominion': 'https://images.unsplash.com/photo-1518770660439-4636190af475?auto=format&fit=crop&w=600&q=80',
-  'wizard-chess': '/src/assets/images/thumb_wizard_chess_3d_1793880932928.jpg',
-  chess: '/src/assets/images/thumb_wizard_chess_3d_1793880932928.jpg',
-  'desk-racer': '/src/assets/images/thumb_desk_racer_3d_1793880933767.jpg',
-  deskracer: '/src/assets/images/thumb_desk_racer_3d_1793880933767.jpg',
-  'world-box': '/src/assets/images/thumb_world_box_1794533027215.jpg',
-  worldbox: '/src/assets/images/thumb_world_box_1794533027215.jpg',
+  'wizard-chess': '/images/thumb_wizard_chess_3d_1793880932928.jpg',
+  chess: '/images/thumb_wizard_chess_3d_1793880932928.jpg',
+  'desk-racer': '/images/thumb_desk_racer_3d_1793880933767.jpg',
+  deskracer: '/images/thumb_desk_racer_3d_1793880933767.jpg',
+  'world-box': '/images/thumb_world_box_1794533027215.jpg',
+  worldbox: '/images/thumb_world_box_1794533027215.jpg',
 };
 
 export const GameArtwork: React.FC<GameArtworkProps> = ({ game, className = '' }) => {

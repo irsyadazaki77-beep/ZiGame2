@@ -37,16 +37,18 @@ export function useGameSession(
     }
   });
 
+  const activeGameId = activeGame?.id;
+
   // Track game start and session creation
   useEffect(() => {
-    if (activeGame) {
-      telemetryService.recordGameStart(activeGame.id, inputManager.getActiveSource());
+    if (activeGameId) {
+      telemetryService.recordGameStart(activeGameId, inputManager.getActiveSource());
       let isMounted = true;
       setIsStartingSession(true);
       setSessionError(null);
       
       if (isRankedMode) {
-        competitiveService.startRankedSession(activeGame.id).then((res) => {
+        competitiveService.startRankedSession(activeGameId).then((res) => {
           if (!isMounted) return;
           if (res && res.sessionId) {
             currentSessionIdRef.current = res.sessionId;
@@ -64,14 +66,14 @@ export function useGameSession(
           setIsStartingSession(false);
         });
       } else {
-        scoreService.startSession(activeGame.id).then((res) => {
+        scoreService.startSession(activeGameId).then((res) => {
           if (!isMounted) return;
           if (res && res.sessionId) {
              currentSessionIdRef.current = res.sessionId;
              sessionStartTimeRef.current = res.startTime || Date.now();
           }
           setIsStartingSession(false);
-        }).catch(err => {
+        }).catch(() => {
           if (!isMounted) return;
           setSessionError('Gagal memulai sesi.');
           setIsStartingSession(false);
@@ -79,7 +81,7 @@ export function useGameSession(
       }
       return () => { isMounted = false; };
     }
-  }, [activeGame, key, profile.name, isRankedMode]);
+  }, [activeGameId, key, isRankedMode]);
 
   // Check save-state and tutorial status on gameId change
   useEffect(() => {

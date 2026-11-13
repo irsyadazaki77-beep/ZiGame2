@@ -160,9 +160,10 @@ export async function getDailySessionHistory(userId: string, dateStr: string): P
     const db = getDb();
     const snap = await db.collection('userGameHistory')
       .where('userId', '==', userId)
-      .where('dateStr', '==', dateStr)
       .get();
-    return snap.docs.map(doc => doc.data() as StoredGameHistoryEntry);
+    return snap.docs
+      .map(doc => doc.data() as StoredGameHistoryEntry)
+      .filter(h => h.dateStr === dateStr);
   } else {
     return memoryStore.gameHistory.filter(h => h.userId === userId && h.dateStr === dateStr);
   }
@@ -174,9 +175,10 @@ export async function getWeeklySessionHistory(userId: string, weekStr: string): 
     const db = getDb();
     const snap = await db.collection('userGameHistory')
       .where('userId', '==', userId)
-      .where('weekStr', '==', weekStr)
       .get();
-    return snap.docs.map(doc => doc.data() as StoredGameHistoryEntry);
+    return snap.docs
+      .map(doc => doc.data() as StoredGameHistoryEntry)
+      .filter(h => h.weekStr === weekStr);
   } else {
     return memoryStore.gameHistory.filter(h => h.userId === userId && h.weekStr === weekStr);
   }

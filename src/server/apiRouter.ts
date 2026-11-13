@@ -8,6 +8,7 @@
 
 import { Router } from 'express';
 import { authenticateToken } from './authMiddleware';
+import { sendApiError } from './requestContext';
 import { systemRoutes } from './routes/systemRoutes';
 import { sessionRoutes } from './routes/sessionRoutes';
 import { economyRoutes } from './routes/economyRoutes';
@@ -25,3 +26,8 @@ apiRouter.use(sessionRoutes);
 apiRouter.use(economyRoutes);
 apiRouter.use(competitiveRoutes);
 apiRouter.use(adminRoutes);
+
+// Catch-all JSON 404 for unmatched /api/* routes so SPA fallback never serves HTML
+apiRouter.use((_req, res) => {
+  return sendApiError(res, 404, 'NOT_FOUND', 'Endpoint API tidak ditemukan.');
+});

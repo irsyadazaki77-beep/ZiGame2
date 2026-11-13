@@ -135,10 +135,11 @@ export async function getUserSecurityProfile(userId: string): Promise<StoredUser
       // Check if temporary ban has expired
       if (data.isBanned && data.banExpiresAt && Date.now() > data.banExpiresAt) {
         const unbanned: StoredUserSecurity = {
-          ...data,
+          userId: data.userId,
+          strikeCount: data.strikeCount,
           isBanned: false,
-          banReason: undefined,
-          banExpiresAt: null
+          banExpiresAt: null,
+          ...(data.lastViolationAt ? { lastViolationAt: data.lastViolationAt } : {})
         };
         await db.collection('userSecurity').doc(userId).set(unbanned);
         return unbanned;
@@ -209,13 +210,15 @@ export async function recordSecurityStrike(
     userId,
     strikeCount: newStrikeCount,
     isBanned: shouldBan,
-    banReason: shouldBan
-      ? (current.banReason || `Dibekukan otomatis oleh sistem pertahanan: ${reason} (${newStrikeCount} pelanggaran)`)
-      : undefined,
-    bannedAt: shouldBan ? (current.bannedAt || nowIso) : undefined,
     banExpiresAt: shouldBan ? (current.banExpiresAt ?? (nowMs + DEFAULT_AUTO_BAN_DURATION_MS)) : null,
-    bannedBy: shouldBan ? (current.bannedBy || 'SYSTEM_AUTO_CHEAT') : undefined,
-    lastViolationAt: nowIso
+    lastViolationAt: nowIso,
+    ...(shouldBan
+      ? {
+          banReason: current.banReason || `Dibekukan otomatis oleh sistem pertahanan: ${reason} (${newStrikeCount} pelanggaran)`,
+          bannedAt: current.bannedAt || nowIso,
+          bannedBy: current.bannedBy || 'SYSTEM_AUTO_CHEAT'
+        }
+      : {})
   };
 
   if (isFirestoreAvailable()) {
@@ -301,10 +304,7 @@ export async function unbanUserAccount(userId: string, adminUid: string): Promis
     userId,
     strikeCount: 0,
     isBanned: false,
-    banReason: undefined,
-    bannedAt: undefined,
-    banExpiresAt: null,
-    bannedBy: undefined
+    banExpiresAt: null
   };
 
   if (isFirestoreAvailable()) {
@@ -352,9 +352,14 @@ export async function recordSecurityEvent(
   event: Omit<StoredSecurityEvent, 'id' | 'timestamp'>
 ): Promise<StoredSecurityEvent> {
   const fullEvent: StoredSecurityEvent = {
-    ...event,
     id: `sec_${Date.now()}_${crypto.randomBytes(6).toString('hex')}`,
-    timestamp: new Date().toISOString()
+    eventType: event.eventType,
+    severity: event.severity,
+    reason: event.reason,
+    timestamp: new Date().toISOString(),
+    ...(event.userId !== undefined ? { userId: event.userId } : {}),
+    ...(event.clientIp !== undefined ? { clientIp: event.clientIp } : {}),
+    ...(event.path !== undefined ? { path: event.path } : {})
   };
 
   if (isFirestoreAvailable()) {

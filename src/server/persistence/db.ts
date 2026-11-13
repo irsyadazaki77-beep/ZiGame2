@@ -195,25 +195,103 @@ export class InMemoryStore {
 
 export const memoryStore = new InMemoryStore();
 
+import fs from 'fs';
 import firebaseAppletConfig from '../../../firebase-applet-config.json';
+
+let firestoreDevDisabled = false;
+const configuredDbs = new WeakSet<Firestore>();
+
+function hasValidServiceAccountJson(raw: string | undefined): boolean {
+  if (!raw || typeof raw !== 'string') return false;
+  const trimmed = raw.trim();
+  if (!trimmed) return false;
+  try {
+    const parsed = JSON.parse(trimmed);
+    if (parsed && typeof parsed === 'object' && parsed.project_id) return true;
+  } catch {}
+  try {
+    const decoded = Buffer.from(trimmed, 'base64').toString('utf-8');
+    const parsed = JSON.parse(decoded);
+    if (parsed && typeof parsed === 'object' && parsed.project_id) return true;
+  } catch {}
+  return false;
+}
+
+function hasValidAdcFile(rawPath: string | undefined): boolean {
+  if (!rawPath || typeof rawPath !== 'string') return false;
+  const trimmed = rawPath.trim();
+  if (!trimmed) return false;
+  try {
+    return fs.existsSync(trimmed);
+  } catch {
+    return false;
+  }
+}
 
 export function isFirestoreAvailable(): boolean {
   if (process.env.NODE_ENV === 'test' || process.env.VITEST) return false;
-  if (!process.env.FIREBASE_SERVICE_ACCOUNT && !process.env.GOOGLE_APPLICATION_CREDENTIALS) {
-    if (process.env.NODE_ENV !== 'production') {
+  if (getApps().length === 0) return false;
+
+  if (process.env.NODE_ENV !== 'production') {
+    if (firestoreDevDisabled) return false;
+    const hasSa = hasValidServiceAccountJson(process.env.FIREBASE_SERVICE_ACCOUNT);
+    const hasGac = hasValidAdcFile(process.env.GOOGLE_APPLICATION_CREDENTIALS);
+    if (!hasSa && !hasGac) {
       return false;
     }
+  } else {
+    if (!process.env.FIREBASE_SERVICE_ACCOUNT && !process.env.GOOGLE_APPLICATION_CREDENTIALS) {
+      // Production can still use Cloud Run implicit ADC when app is initialized
+      return getApps().length > 0;
+    }
   }
-  if (getApps().length === 0) return false;
   return true;
 }
 
 export function getDb(): Firestore {
   const dbId = process.env.VITE_FIRESTORE_DATABASE_ID || firebaseAppletConfig.firestoreDatabaseId;
-  if (dbId && dbId !== '(default)') {
-    return getFirestore(getApps()[0], dbId);
+  const db = dbId && dbId !== '(default)'
+    ? getFirestore(getApps()[0], dbId)
+    : getFirestore();
+
+  if (!configuredDbs.has(db)) {
+    configuredDbs.add(db);
+    try {
+      db.settings({ ignoreUndefinedProperties: true });
+    } catch {
+      // Settings already applied on this Firestore instance
+    }
   }
-  return getFirestore();
+
+  return db;
+}
+
+export async function probeFirestoreAvailability(timeoutMs: number = 3000): Promise<boolean> {
+  if (process.env.NODE_ENV === 'production' || process.env.NODE_ENV === 'test' || process.env.VITEST) {
+    return isFirestoreAvailable();
+  }
+  if (!isFirestoreAvailable()) {
+    return false;
+  }
+
+  try {
+    const db = getDb();
+    await Promise.race([
+      db.collection('seasons').limit(1).get(),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('FIRESTORE_PROBE_TIMEOUT')), timeoutMs)
+      )
+    ]);
+    return true;
+  } catch (err) {
+    firestoreDevDisabled = true;
+    serverLogger.warn(
+      'PERSISTENCE_DEV_FALLBACK',
+      'Firestore unreachable or lacks permissions in dev; falling back to InMemoryStore.',
+      { error: err instanceof Error ? err.message : String(err) }
+    );
+    return false;
+  }
 }
 
 export function assertPersistenceOperational() {

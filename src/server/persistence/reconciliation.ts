@@ -39,9 +39,10 @@ export async function reconcileUserEconomy(userId: string, autoFix: boolean = fa
     }
     const txSnap = await db.collection('economyTransactions')
       .where('userId', '==', userId)
-      .orderBy('createdAt', 'asc')
       .get();
-    userTransactions = txSnap.docs.map(d => d.data() as StoredEconomyTransaction);
+    userTransactions = txSnap.docs
+      .map(d => d.data() as StoredEconomyTransaction)
+      .sort((a, b) => String(a.createdAt || '').localeCompare(String(b.createdAt || '')));
   } else {
     const econ = await getUserEconomy(userId);
     currentBalance = econ.coins;

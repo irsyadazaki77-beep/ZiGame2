@@ -63,20 +63,24 @@ export async function getSuspiciousScores(filter?: SuspiciousScoreFilter): Promi
 
   if (isFirestoreAvailable()) {
     const db = getDb();
-    let query: FirebaseFirestore.Query = db.collection('suspiciousScores');
+    const hasFilter = Boolean(filter?.gameId || filter?.userId || filter?.severity);
+    const fetchLimit = hasFilter ? 250 : limit;
+    const snapshot = await db.collection('suspiciousScores')
+      .orderBy('timestamp', 'desc')
+      .limit(fetchLimit)
+      .get();
 
+    let list = snapshot.docs.map(d => d.data() as StoredSuspiciousScore);
     if (filter?.gameId) {
-      query = query.where('gameId', '==', filter.gameId);
+      list = list.filter(s => s.gameId === filter.gameId);
     }
     if (filter?.userId) {
-      query = query.where('userId', '==', filter.userId);
+      list = list.filter(s => s.userId === filter.userId);
     }
     if (filter?.severity) {
-      query = query.where('severity', '==', filter.severity);
+      list = list.filter(s => s.severity === filter.severity);
     }
-
-    const snapshot = await query.orderBy('timestamp', 'desc').limit(limit).get();
-    return snapshot.docs.map(d => d.data() as StoredSuspiciousScore);
+    return list.slice(0, limit);
   } else {
     let list = [...memoryStore.suspiciousScores];
     if (filter?.gameId) {

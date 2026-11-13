@@ -26,8 +26,14 @@ export class GameErrorBoundary extends Component<Props, State> {
   public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     logger.error('Game Module Exception caught by GameErrorBoundary', {
       error,
-      context: { errorInfo: errorInfo as any }
+      context: { errorInfo: errorInfo as unknown as Record<string, unknown> }
     });
+  }
+
+  public componentDidUpdate(prevProps: Props) {
+    if (this.state.hasError && prevProps.gameTitle !== this.props.gameTitle) {
+      this.setState({ hasError: false, error: null });
+    }
   }
 
   private handleReset = () => {

@@ -70,7 +70,7 @@ describe('Frontend Utilities & Configuration Tests', () => {
         expect(registryItem.id).toBe(id);
         expect(registryItem.title).toBeTruthy();
         expect(registryItem.component).toBeDefined();
-        expect(typeof registryItem.component).toBe('object');
+        expect(['object', 'function']).toContain(typeof registryItem.component);
 
         // Lookup helper check
         const retrieved = getGameRegistryItem(id);

@@ -7,9 +7,11 @@
  *   npx tsx scripts/seed-catalog.ts --force-prod (for production initialization)
  */
 
+import fs from 'fs';
 import { initializeApp, cert, getApps } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
 import { SERVER_SHOP_CATALOG } from '../src/config/shopCatalog';
+import firebaseAppletConfig from '../firebase-applet-config.json';
 
 async function main() {
   console.log('🚀 ZiGame 2.0 Catalog Seeder starting...');
@@ -22,9 +24,17 @@ async function main() {
 
   // Initialize Firebase Admin if credentials are present
   if (getApps().length === 0) {
+    const gacPath = process.env.GOOGLE_APPLICATION_CREDENTIALS?.trim();
+    const hasValidGac = Boolean(gacPath && fs.existsSync(gacPath));
     if (process.env.FIREBASE_SERVICE_ACCOUNT) {
+      const sa = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
       initializeApp({
-        credential: cert(JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT))
+        credential: cert(sa),
+        projectId: sa.project_id || firebaseAppletConfig.projectId
+      });
+    } else if (hasValidGac) {
+      initializeApp({
+        projectId: process.env.FIREBASE_PROJECT_ID || firebaseAppletConfig.projectId
       });
     } else {
       console.log('ℹ️ No Firebase credentials detected. Operating in dry-run verification mode.');
@@ -36,7 +46,10 @@ async function main() {
     }
   }
 
-  const db = getFirestore();
+  const dbId = process.env.VITE_FIRESTORE_DATABASE_ID || firebaseAppletConfig.firestoreDatabaseId;
+  const db = dbId && dbId !== '(default)'
+    ? getFirestore(getApps()[0], dbId)
+    : getFirestore();
   const batch = db.batch();
   let count = 0;
 

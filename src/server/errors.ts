@@ -56,7 +56,8 @@ export type ApiErrorCode =
   | 'INVALID_USER_ID'
   | 'ACCOUNT_SUSPENDED'
   | 'INVALID_SESSION_SIGNATURE'
-  | 'SECURITY_VIOLATION';
+  | 'SECURITY_VIOLATION'
+  | 'NOT_FOUND';
 
 export interface ApiErrorResponse {
   success: false;

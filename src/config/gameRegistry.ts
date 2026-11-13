@@ -1,6 +1,7 @@
-import { lazy, type ComponentType } from 'react';
+import { type ComponentType } from 'react';
 import { GameComponentProps, TouchControlsType, InputSource } from '../types';
 import { CanonicalGameId, GAME_ID_ALIAS_MAP, toCanonicalGameId } from './canonicalGames';
+import { lazyWithRetry as lazy } from '../utils/lazyWithRetry';
 
 export type GameLayoutType = 'square' | 'portrait' | 'landscape';
 export type GameControlType = TouchControlsType;
@@ -627,7 +628,7 @@ export const CANONICAL_GAME_REGISTRY: Record<CanonicalGameId, GameRegistryItem> 
     description: 'Catur sihir katedral Gotik 3D interaktif dengan pahatan bidak batu, serangan jarak dekat sinematik, fisika kehancuran batu, dan AI pemain tunggal maupun 2 pemain lokal.',
     genre: '3D Strategy / Chess',
     difficulty: 'Medium',
-    thumbnail: '/src/assets/images/thumb_wizard_chess_3d_1793880932928.jpg',
+    thumbnail: '/images/thumb_wizard_chess_3d_1793880932928.jpg',
     layout: 'landscape',
     component: lazy(() => import('../components/games/WizardChess3DGame')),
     themeColor: '#f59e0b',
@@ -644,7 +645,7 @@ export const CANONICAL_GAME_REGISTRY: Record<CanonicalGameId, GameRegistryItem> 
     description: 'Game balap time-trial mobil formula miniatur 3D di atas sirkuit coaster meja kerja dengan rintangan keyboard mekanik RGB dan sistem Ghost Replay.',
     genre: '3D Racing / Time-Trial',
     difficulty: 'Medium',
-    thumbnail: '/src/assets/images/thumb_desk_racer_3d_1793880933767.jpg',
+    thumbnail: '/images/thumb_desk_racer_3d_1793880933767.jpg',
     layout: 'landscape',
     component: lazy(() => import('../components/games/DeskRacerGame')),
     themeColor: '#ef4444',
@@ -661,7 +662,7 @@ export const CANONICAL_GAME_REGISTRY: Record<CanonicalGameId, GameRegistryItem> 
     description: 'Simulasi dewa 2D Pixel Art! Lukis benua & bioma, turunkan 4 bangsa fantasi otonom (Manusia, Elf, Orc, Kurcaci) & Naga, saksikan kerajaan bangkit atau berperang, serta lepaskan mukjizat dan bencana dahsyat.',
     genre: 'Strategy / God Sandbox',
     difficulty: 'Medium',
-    thumbnail: '/src/assets/images/thumb_world_box_1794533027215.jpg',
+    thumbnail: '/images/thumb_world_box_1794533027215.jpg',
     layout: 'landscape',
     component: lazy(() => import('../components/games/WorldBoxGame')),
     themeColor: '#f59e0b',

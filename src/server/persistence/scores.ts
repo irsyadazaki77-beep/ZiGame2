@@ -58,12 +58,11 @@ export async function getUserDailyGameRewardsEarned(userId: string, dateStr: str
     const db = getDb();
     const snap = await db.collection('economyTransactions')
       .where('userId', '==', userId)
-      .where('type', '==', 'GAME_REWARD')
       .get();
     let total = 0;
     for (const doc of snap.docs) {
       const data = doc.data();
-      if (data.createdAt && data.createdAt.startsWith(dateStr)) {
+      if (data.type === 'GAME_REWARD' && data.createdAt && data.createdAt.startsWith(dateStr)) {
         total += data.amount || 0;
       }
     }

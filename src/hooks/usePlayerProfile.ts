@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { PlayerProfile } from '../types';
 import { storageService } from '../services/storageService';
 
@@ -33,13 +33,16 @@ export const usePlayerProfile = () => {
     }
   }, []);
 
-  const handleUpdateProfile = (updates: Partial<PlayerProfile> | ((prev: PlayerProfile) => PlayerProfile)) => {
-    setProfile(prev => {
-      const next = typeof updates === 'function' ? updates(prev) : { ...prev, ...updates };
-      storageService.saveProfile(next);
-      return next;
-    });
-  };
+  const handleUpdateProfile = useCallback(
+    (updates: Partial<PlayerProfile> | ((prev: PlayerProfile) => PlayerProfile)) => {
+      setProfile(prev => {
+        const next = typeof updates === 'function' ? updates(prev) : { ...prev, ...updates };
+        storageService.saveProfile(next);
+        return next;
+      });
+    },
+    []
+  );
 
   return {
     profile,

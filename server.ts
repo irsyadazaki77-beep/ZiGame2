@@ -1,11 +1,13 @@
 import express, { Request, Response, NextFunction } from "express";
 import { createServer as createViteServer } from "vite";
 import path from "path";
+import fs from "fs";
 import { initializeApp, cert, getApps } from "firebase-admin/app";
 import { apiRouter } from "./src/server/apiRouter";
 import { serverLogger } from "./src/server/logger";
 import { requestCorrelationMiddleware, handleServerException } from "./src/server/requestContext";
 import { securityHeadersMiddleware, sanitizePayloadMiddleware } from "./src/server/securityMiddleware";
+import { probeFirestoreAvailability } from "./src/server/persistence/db";
 import { APP_VERSION } from "./src/config/version";
 import { FatalError } from "./src/server/errors";
 import firebaseAppletConfig from "./firebase-applet-config.json";
@@ -94,6 +96,13 @@ validateEnvironment(process.env, {
 try {
   if (getApps().length === 0) {
     const serviceAccount = parseServiceAccountCredentials(process.env.FIREBASE_SERVICE_ACCOUNT);
+    const gacPath = process.env.GOOGLE_APPLICATION_CREDENTIALS?.trim();
+    const hasValidGacFile = Boolean(gacPath && fs.existsSync(gacPath));
+
+    if (gacPath && !hasValidGacFile && process.env.NODE_ENV !== 'production') {
+      serverLogger.warn('FIREBASE_CONFIG_WARN', 'GOOGLE_APPLICATION_CREDENTIALS path does not exist on disk; ignoring invalid path in development.');
+      delete process.env.GOOGLE_APPLICATION_CREDENTIALS;
+    }
 
     if (serviceAccount) {
       initializeApp({
@@ -101,7 +110,7 @@ try {
         projectId: serviceAccount.project_id || activeProjectId
       });
       serverLogger.info('FIREBASE_INIT', 'Firebase Admin initialized with service account.');
-    } else if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
+    } else if (hasValidGacFile) {
       initializeApp({
         projectId: activeProjectId || 'demo-project'
       });
@@ -167,6 +176,11 @@ async function startServer() {
   validateEnvironment(process.env, {
     exitOnFatal: !process.env.VITEST && process.env.NODE_ENV !== 'test'
   });
+
+  // Probe Firestore connectivity in dev so unprivileged/unreachable ADC degrades cleanly to InMemoryStore
+  if (process.env.NODE_ENV !== 'production') {
+    await probeFirestoreAvailability();
+  }
 
   const app = await createExpressApp();
   const PORT = 3000;

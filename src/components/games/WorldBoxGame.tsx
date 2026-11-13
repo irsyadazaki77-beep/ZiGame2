@@ -746,7 +746,6 @@ export default function WorldBoxGame({ onGameOver, onScoreUpdate, highScore }: G
         countdown={countdown}
         title="WorldBox: God Simulator"
         description="Bentuk benua 2D Pixel Art, turunkan 4 bangsa fantasi otonom & Naga, saksikan kerajaan bangkit atau berperang, dan selesaikan Tantangan Era Ilahi!"
-        icon="🌍"
         themeColor="#f59e0b"
         onStart={() => { setScore(0); regenerateWorld(worldTemplate); startWithCountdown(); }}
         onRestart={() => { setScore(0); regenerateWorld(worldTemplate); startWithCountdown(); }}

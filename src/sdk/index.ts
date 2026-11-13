@@ -14,3 +14,6 @@ export * from './useGameSDK';
 export * from './LegacyGameAdapter';
 export * from './BrickBreakerEngine';
 export * from './physicsWorkerController';
+export * from './canvas2dStageController';
+export * from './objectPool';
+export * from './VirtualControls';

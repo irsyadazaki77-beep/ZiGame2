@@ -172,6 +172,22 @@ export default defineConfig(() => {
         '@': path.resolve(__dirname, '.'),
       },
     },
+    optimizeDeps: {
+      entries: ['index.html', 'src/**/*.{ts,tsx}'],
+      include: [
+        'react',
+        'react-dom',
+        'react-dom/client',
+        'react-router-dom',
+        'three',
+        'three/addons/environments/RoomEnvironment.js',
+        'motion/react',
+        'lucide-react',
+        'firebase/app',
+        'firebase/auth',
+        'firebase/firestore',
+      ],
+    },
     server: {
       hmr: false,
       watch: process.env.DISABLE_HMR === 'true' ? null : {},

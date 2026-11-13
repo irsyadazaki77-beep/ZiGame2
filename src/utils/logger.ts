@@ -16,7 +16,10 @@ export interface StructuredLog {
 }
 
 const BUILD_VERSION = 'v2.4.0-prod';
-const ENVIRONMENT = process.env.NODE_ENV === 'production' ? 'production' : 'development';
+const ENVIRONMENT =
+  typeof process !== 'undefined' && process.env?.NODE_ENV === 'production'
+    ? 'production'
+    : 'development';
 
 // Ring buffer for keeping the last 100 structured telemetry events locally
 const MAX_LOG_BUFFER = 100;

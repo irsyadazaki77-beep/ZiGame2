@@ -4,10 +4,9 @@
  */
 
 import { Request, Response, NextFunction } from 'express';
-import { getApps } from 'firebase-admin/app';
-import { getFirestore } from 'firebase-admin/firestore';
 import { serverLogger } from './logger';
 import { sendApiError } from './requestContext';
+import { isFirestoreAvailable, getDb } from './persistence/db';
 
 export interface RateLimitResult {
   allowed: boolean;
@@ -105,12 +104,12 @@ export class FirestoreRateLimiter implements RateLimiter {
   private fallback = new MemoryRateLimiter();
 
   async check(key: string, maxRequests: number, windowMs: number): Promise<RateLimitResult> {
-    if (getApps().length === 0 || process.env.NODE_ENV === 'test') {
+    if (!isFirestoreAvailable()) {
       return this.fallback.check(key, maxRequests, windowMs);
     }
 
     try {
-      const db = getFirestore();
+      const db = getDb();
       const sanitizedKey = key.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 128);
       const docRef = db.collection('rateLimits').doc(sanitizedKey);
 
