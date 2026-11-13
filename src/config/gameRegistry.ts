@@ -654,6 +654,23 @@ export const CANONICAL_GAME_REGISTRY: Record<CanonicalGameId, GameRegistryItem> 
     controlType: 'dpad',
     supportedInputs: ['keyboard', 'touch', 'gamepad'],
     avgDuration: '2-5 mins'
+  },
+  'world-box': {
+    id: 'world-box',
+    title: 'WorldBox: God Simulator',
+    description: 'Simulasi dewa 2D Pixel Art! Lukis benua & bioma, turunkan 4 bangsa fantasi otonom (Manusia, Elf, Orc, Kurcaci) & Naga, saksikan kerajaan bangkit atau berperang, serta lepaskan mukjizat dan bencana dahsyat.',
+    genre: 'Strategy / God Sandbox',
+    difficulty: 'Medium',
+    thumbnail: '/src/assets/images/thumb_world_box_1794533027215.jpg',
+    layout: 'landscape',
+    component: lazy(() => import('../components/games/WorldBoxGame')),
+    themeColor: '#f59e0b',
+    accentShadow: 'shadow-[0_0_15px_rgba(245,158,11,0.2)]',
+    icon: '🌍',
+    controls: 'Mouse Click & Drag / Touch',
+    controlType: 'actiononly',
+    supportedInputs: ['mouse', 'touch', 'keyboard'],
+    avgDuration: '5-20 mins'
   }
 };
 

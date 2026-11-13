@@ -33,7 +33,8 @@ export const RANKED_GAME_ALLOWLIST: CanonicalGameId[] = [
   'void-survivor',
   'orbital-defense',
   'wizard-chess',
-  'desk-racer'
+  'desk-racer',
+  'world-box'
 ];
 
 export interface GameCompetitiveConfig {
@@ -52,7 +53,8 @@ export const GAME_COMPETITIVE_CONFIGS: Partial<Record<CanonicalGameId, GameCompe
   'void-survivor': { baseScore: 1200, volatility: 40 },
   'orbital-defense': { baseScore: 1500, volatility: 40 },
   'wizard-chess': { baseScore: 1800, volatility: 40 },
-  'desk-racer': { baseScore: 2500, volatility: 40 }
+  'desk-racer': { baseScore: 2500, volatility: 40 },
+  'world-box': { baseScore: 3000, volatility: 40 }
 };
 
 export const INITIAL_RATING = 1000;

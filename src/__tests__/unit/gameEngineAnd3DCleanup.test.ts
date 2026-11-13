@@ -186,11 +186,12 @@ describe('Game Engine Hardening & 3D Cleanup (Fase 2)', () => {
     });
   });
 
-  describe('39 Canonical Games Catalog Consistency', () => {
-    it('has exactly 39 canonical games in CANONICAL_GAME_IDS', () => {
-      expect(CANONICAL_GAME_IDS.length).toBe(39);
+  describe('40 Canonical Games Catalog Consistency', () => {
+    it('has exactly 40 canonical games in CANONICAL_GAME_IDS', () => {
+      expect(CANONICAL_GAME_IDS.length).toBe(40);
       expect(CANONICAL_GAME_IDS).toContain('wizard-chess');
       expect(CANONICAL_GAME_IDS).toContain('desk-racer');
+      expect(CANONICAL_GAME_IDS).toContain('world-box');
     });
 
     it('every canonical game ID is registered in GAME_REGISTRY', () => {

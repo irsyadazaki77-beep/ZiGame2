@@ -59,6 +59,8 @@ const GAME_THUMBNAILS: Record<string, string> = {
   chess: '/src/assets/images/thumb_wizard_chess_3d_1793880932928.jpg',
   'desk-racer': '/src/assets/images/thumb_desk_racer_3d_1793880933767.jpg',
   deskracer: '/src/assets/images/thumb_desk_racer_3d_1793880933767.jpg',
+  'world-box': '/src/assets/images/thumb_world_box_1794533027215.jpg',
+  worldbox: '/src/assets/images/thumb_world_box_1794533027215.jpg',
 };
 
 export const GameArtwork: React.FC<GameArtworkProps> = ({ game, className = '' }) => {

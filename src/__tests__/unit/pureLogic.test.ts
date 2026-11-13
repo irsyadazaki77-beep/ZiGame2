@@ -16,8 +16,8 @@ describe('Unit Tests — Pure Logic, Algorithms, Calculations & Edge Cases', () 
       expect(toCanonicalGameId('unknown_fallback')).toBe('snake'); // safe UI fallback
     });
 
-    it('ensures all 39 canonical games have positive balance multipliers and valid ceilings', () => {
-      expect(CANONICAL_GAME_IDS.length).toBe(39);
+    it('ensures all 40 canonical games have positive balance multipliers and valid ceilings', () => {
+      expect(CANONICAL_GAME_IDS.length).toBe(40);
       for (const id of CANONICAL_GAME_IDS) {
         const config = getGameBalanceConfig(id);
         expect(config.baseCoinMultiplier).toBeGreaterThan(0);

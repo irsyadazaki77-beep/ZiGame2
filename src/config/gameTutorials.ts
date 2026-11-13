@@ -358,6 +358,27 @@ export const GAME_TUTORIALS: Record<string, GameTutorialConfig> = {
       'Gunakan tombol C untuk beralih antara Chase Cam, Cockpit Hood Cam, dan Retro Arcade Cam',
       'Perhatikan lampu rem mobil di depan sebelum melakukan manuver salip agresif'
     ]
+  },
+  'world-box': {
+    gameId: 'world-box',
+    title: 'WorldBox: God Simulator',
+    icon: '🌍',
+    objective: 'Ciptakan dunia 2D Pixel Art dari nol, turunkan 4 ras peradaban fantasi (Manusia, Elf, Orc, Kurcaci) & Naga, bentuk ekosistem atau lepaskan bencana, dan selesaikan Tantangan Era Ilahi.',
+    scoring: [
+      '+250 Poin setiap Kerajaan baru berdiri beserta progres bangunan',
+      '+1500 hingga +10000 Poin bonus penyelesaian Tantangan Era Ilahi',
+      'Skor kemakmuran tahunan dari jumlah populasi, dinasti, dan mukjizat'
+    ],
+    controls: {
+      keyboard: ['Klik Kiri & Geser (Lukis Bioma / Spawn Unit / Bencana)', 'Shift + Drag atau Klik Kanan (Geser Kamera)'],
+      touch: ['Ketuk & Geser Peta untuk menggunakan Kuas Dewa', 'Pilih Kategori Kekuatan di Dock Bawah']
+    },
+    firstPlayHint: 'Letakkan minimal 3 unit dari ras yang sama (misalnya Manusia atau Elf) di daratan rumput/hutan disertai pohon dan batu agar mereka otomatis mendirikan Kerajaan.',
+    advancedMechanic: 'Gunakan alat Inspeksi atau Berkah Ilahi untuk memberikan trait Immortal dan Blessed kepada Raja favorit Anda sebelum melepaskan Naga atau Meteorit!',
+    proTips: [
+      'Gunakan kecepatan waktu 3x atau 5x untuk mempercepat perkembangan peradaban dan pembangunan kota',
+      'Klik tombol Klaim Skor kapan saja untuk mengabadikan Divine Score Anda ke Leaderboard ZiGame'
+    ]
   }
 };
 

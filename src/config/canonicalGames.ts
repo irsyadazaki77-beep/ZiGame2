@@ -42,7 +42,8 @@ export const CANONICAL_GAME_IDS = [
   'gravity-shift',
   'hex-dominion',
   'wizard-chess',
-  'desk-racer'
+  'desk-racer',
+  'world-box'
 ] as const;
 
 export type CanonicalGameId = typeof CANONICAL_GAME_IDS[number];
@@ -91,6 +92,7 @@ export const GAME_ID_ALIAS_MAP: Record<string, CanonicalGameId> = {
   'hex-dominion': 'hex-dominion',
   'wizard-chess': 'wizard-chess',
   'desk-racer': 'desk-racer',
+  'world-box': 'world-box',
 
   // Legacy shorthand & slug aliases
   'brick': 'brick-breaker',
@@ -144,7 +146,10 @@ export const GAME_ID_ALIAS_MAP: Record<string, CanonicalGameId> = {
   'chess': 'wizard-chess',
   'desk-racer-3d': 'desk-racer',
   'deskracer': 'desk-racer',
-  'microracer': 'desk-racer'
+  'microracer': 'desk-racer',
+  'worldbox': 'world-box',
+  'god-simulator': 'world-box',
+  'godsim': 'world-box'
 };
 
 /**

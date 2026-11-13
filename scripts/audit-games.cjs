@@ -73,12 +73,12 @@ console.log(
 
 console.log(
   `\n=== Status Registrasi di gameRegistry.ts (${result.unregisteredFiles.length}) ===\n` +
-    (result.unregisteredFiles.join('\n') || '(Semua 39 game canonical terdaftar)')
+    (result.unregisteredFiles.join('\n') || '(Semua 40 game canonical terdaftar)')
 );
 
 if (result.legacy.length > 0 || result.unregisteredFiles.length > 0) {
   console.error('\n[AUDIT FAILED]: Terdapat game legacy atau file yang belum terdaftar di gameRegistry.ts!');
   process.exit(1);
 } else {
-  console.log('\n[AUDIT PASSED]: Semua 39 game tervalidasi menggunakan Game Engine terpusat.');
+  console.log('\n[AUDIT PASSED]: Semua 40 game tervalidasi menggunakan Game Engine terpusat.');
 }

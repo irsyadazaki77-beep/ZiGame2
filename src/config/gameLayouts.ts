@@ -54,7 +54,8 @@ export const CANONICAL_GAME_LAYOUTS: Record<CanonicalGameId, GameLayoutConfig> =
   'gravity-shift': { type: 'landscape', aspectRatio: '16 / 9', maxWidth: 1100 },
   'hex-dominion': { type: 'landscape', aspectRatio: '16 / 9', maxWidth: 1100 },
   'wizard-chess': { type: 'landscape', aspectRatio: '16 / 9', maxWidth: 1100 },
-  'desk-racer': { type: 'landscape', aspectRatio: '16 / 9', maxWidth: 1100 }
+  'desk-racer': { type: 'landscape', aspectRatio: '16 / 9', maxWidth: 1100 },
+  'world-box': { type: 'landscape', aspectRatio: '16 / 9', maxWidth: 1150 }
 };
 
 export const GAME_LAYOUTS: Record<string, GameLayoutConfig> = {

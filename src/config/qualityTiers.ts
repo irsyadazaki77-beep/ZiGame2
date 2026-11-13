@@ -444,6 +444,17 @@ export const GAME_QUALITY_MAP: Record<string, GameQualityInfo> = {
     ghostModeSupported: true,
     competitiveSupported: true,
     estimatedDuration: 'standard'
+  },
+  'world-box': {
+    gameId: 'world-box',
+    tier: 'flagship',
+    targetFps: 60,
+    mobileOptimized: true,
+    gamepadOptimized: false,
+    saveStateSupported: true,
+    ghostModeSupported: false,
+    competitiveSupported: true,
+    estimatedDuration: 'deep'
   }
 };
 
