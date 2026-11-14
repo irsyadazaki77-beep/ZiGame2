@@ -1,16 +1,24 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GameComponentProps } from '../../types';
 import { useGameEngine } from '../../hooks/useGameEngine';
 import { GameOverlay } from '../gameplay/GameOverlay';
+import { ThreeDockOverlay } from '../gameplay/ThreeDockOverlay';
 import { audioController } from '../../sdk/audioController';
 import { screenShake } from '../../utils/screenShake';
+import { haptics } from '../../utils/haptics';
+import {
+  CameraPreset3D,
+  QualityLevel3D,
+  ThreeStageController
+} from '../../utils/threeStage';
 import {
   DIVINE_ERA_CHALLENGES,
   GOD_POWERS_CATALOG,
   RACE_CONFIG
 } from './world-box/constants';
 import {
-  CameraState,
   HudSnapshot,
   SimSpeed,
   ToolCategory,
@@ -19,7 +27,7 @@ import {
   WorldTemplate
 } from './world-box/types';
 import { WorldBoxEngine } from './world-box/worldEngine';
-import { WorldBoxRenderer, screenToWorld } from './world-box/worldRenderer';
+import { WorldBoxRenderer3D, tileToWorld3D, world3DToTile } from './world-box/worldRenderer3D';
 import {
   Globe,
   Users,
@@ -39,13 +47,29 @@ import {
   Save,
   Download,
   Skull,
-  Crosshair
+  Crosshair,
+  Paintbrush,
+  Orbit
 } from 'lucide-react';
+
+// Reusable scratch objects for zero-GC raycasting & camera transitions
+const _raycaster = new THREE.Raycaster();
+const _ndc = new THREE.Vector2();
+const _hitPoint = new THREE.Vector3();
+const _worldPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -0.9);
+const _camTargetPos = new THREE.Vector3(0, 38, 42);
+const _camTargetLook = new THREE.Vector3(0, 0, 2);
+const _zoomVec = new THREE.Vector3();
+
+const CAMERA_PRESETS: Record<CameraPreset3D, { pos: [number, number, number]; look: [number, number, number] }> = {
+  isometric: { pos: [0, 38, 42], look: [0, 0, 2] },
+  chase: { pos: [0, 17, 29], look: [0, 0.5, -2] },
+  diorama: { pos: [0, 62, 0.01], look: [0, 0, 0] }
+};
 
 export default function WorldBoxGame({ onGameOver, onScoreUpdate, highScore }: GameComponentProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const canvasWrapperRef = useRef<HTMLDivElement | null>(null);
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
   const {
     gameState,
@@ -55,8 +79,7 @@ export default function WorldBoxGame({ onGameOver, onScoreUpdate, highScore }: G
     startWithCountdown,
     countdown,
     triggerGameOver,
-    startLoop,
-    stopLoop,
+    gameStateRef,
     scoreRef
   } = useGameEngine({
     gameId: 'world-box',
@@ -70,7 +93,9 @@ export default function WorldBoxGame({ onGameOver, onScoreUpdate, highScore }: G
   const [simSpeed, setSimSpeed] = useState<SimSpeed>(1);
   const [worldTemplate, setWorldTemplate] = useState<WorldTemplate>('archipelago');
   const [selectedUnitId, setSelectedUnitId] = useState<number | null>(null);
-  const [camera, setCamera] = useState<CameraState>({ zoom: 1, panX: 0, panY: 0 });
+  const [cameraPreset, setCameraPreset] = useState<CameraPreset3D>('isometric');
+  const [quality, setQuality] = useState<QualityLevel3D>('ultra');
+  const [interactionMode, setInteractionMode] = useState<'paint' | 'orbit'>('paint');
   const [worldLaws, setWorldLaws] = useState<WorldLaws>({
     diplomacyAndWars: true,
     naturalDisasters: false,
@@ -97,30 +122,56 @@ export default function WorldBoxGame({ onGameOver, onScoreUpdate, highScore }: G
   const selectedToolRef = useRef<ToolId>(selectedTool);
   const brushRadiusRef = useRef<number>(brushRadius);
   const selectedUnitIdRef = useRef<number | null>(selectedUnitId);
-  const cameraRef = useRef<CameraState>(camera);
-  const isPointerDownRef = useRef(false);
-  const isPanningRef = useRef(false);
-  const lastPanPointRef = useRef({ x: 0, y: 0 });
-  const frameCounterRef = useRef(0);
+  const interactionModeRef = useRef<'paint' | 'orbit'>(interactionMode);
+  const cameraPresetRef = useRef<CameraPreset3D>(cameraPreset);
+  const activeCamTransitionRef = useRef<boolean>(false);
+  const isPaintingRef = useRef<boolean>(false);
+  const frameCounterRef = useRef<number>(0);
+
+  const stageRef = useRef<ThreeStageController | null>(null);
+  const controlsRef = useRef<OrbitControls | null>(null);
+  const renderer3DRef = useRef<WorldBoxRenderer3D | null>(null);
+  const engineRef = useRef<WorldBoxEngine | null>(null);
 
   useEffect(() => { simSpeedRef.current = simSpeed; }, [simSpeed]);
   useEffect(() => { selectedToolRef.current = selectedTool; }, [selectedTool]);
   useEffect(() => { brushRadiusRef.current = brushRadius; }, [brushRadius]);
   useEffect(() => { selectedUnitIdRef.current = selectedUnitId; }, [selectedUnitId]);
   useEffect(() => {
-    cameraRef.current = camera;
-    if (canvasRef.current && engineRef.current && rendererRef.current) {
-      rendererRef.current.render(
-        canvasRef.current,
-        engineRef.current,
-        camera,
-        selectedUnitIdRef.current
-      );
+    interactionModeRef.current = interactionMode;
+    const controls = controlsRef.current;
+    if (controls) {
+      if (interactionMode === 'paint') {
+        controls.mouseButtons = {
+          LEFT: null as unknown as THREE.MOUSE,
+          MIDDLE: THREE.MOUSE.DOLLY,
+          RIGHT: THREE.MOUSE.ROTATE
+        };
+        controls.touches = {
+          ONE: null as unknown as THREE.TOUCH,
+          TWO: THREE.TOUCH.DOLLY_PAN
+        };
+      } else {
+        controls.mouseButtons = {
+          LEFT: THREE.MOUSE.ROTATE,
+          MIDDLE: THREE.MOUSE.DOLLY,
+          RIGHT: THREE.MOUSE.PAN
+        };
+        controls.touches = {
+          ONE: THREE.TOUCH.ROTATE,
+          TWO: THREE.TOUCH.DOLLY_PAN
+        };
+      }
     }
-  }, [camera]);
+  }, [interactionMode]);
 
-  const engineRef = useRef<WorldBoxEngine | null>(null);
-  const rendererRef = useRef<WorldBoxRenderer | null>(null);
+  useEffect(() => {
+    cameraPresetRef.current = cameraPreset;
+    const cfg = CAMERA_PRESETS[cameraPreset];
+    _camTargetPos.set(...cfg.pos);
+    _camTargetLook.set(...cfg.look);
+    activeCamTransitionRef.current = true;
+  }, [cameraPreset]);
 
   if (!engineRef.current) {
     engineRef.current = new WorldBoxEngine({
@@ -129,15 +180,26 @@ export default function WorldBoxGame({ onGameOver, onScoreUpdate, highScore }: G
         if (type === 'click') audioController.playClick();
         else if (type === 'coin') audioController.playCoin();
         else if (type === 'powerup') audioController.playPowerup();
-        else if (type === 'explosion') audioController.playExplosion();
-        else if (type === 'hit') audioController.playHit();
-        else if (type === 'levelup') audioController.playLevelUp();
+        else if (type === 'explosion') {
+          audioController.playExplosion();
+          haptics.trigger('medium');
+        } else if (type === 'hit') audioController.playHit();
+        else if (type === 'levelup') {
+          audioController.playLevelUp();
+          haptics.trigger('success');
+        }
       },
-      onShake: (intensity) => screenShake.trigger(intensity)
+      onShake: (intensity) => {
+        screenShake.trigger(intensity);
+        if (intensity === 'heavy') {
+          stageRef.current?.cameraRig.addTrauma(0.65);
+          haptics.trigger('heavy');
+        } else if (intensity === 'medium') {
+          stageRef.current?.cameraRig.addTrauma(0.35);
+          haptics.trigger('medium');
+        }
+      }
     });
-  }
-  if (!rendererRef.current) {
-    rendererRef.current = new WorldBoxRenderer();
   }
 
   useEffect(() => {
@@ -161,129 +223,146 @@ export default function WorldBoxGame({ onGameOver, onScoreUpdate, highScore }: G
       selectedUnitIdRef.current = null;
       engine.resetWorld(tpl);
       syncHudSnapshot(null);
-      if (canvasRef.current && rendererRef.current) {
-        rendererRef.current.render(canvasRef.current, engine, cameraRef.current, null);
-      }
     },
     [syncHudSnapshot]
   );
 
-  // Initialize world + ResizeObserver DPR canvas sizing + strict unmount cleanup
-  useEffect(() => {
-    const engine = engineRef.current;
-    const renderer = rendererRef.current;
-    if (engine) {
-      engine.resetWorld('archipelago');
-      syncHudSnapshot(null);
-    }
-
-    const syncCanvasDimensionsAndRender = () => {
-      const wrapper = canvasWrapperRef.current;
-      const canvas = canvasRef.current;
-      if (!canvas) return;
-
-      if (wrapper) {
-        const width = wrapper.clientWidth;
-        const height = wrapper.clientHeight;
-        if (width > 0 && height > 0) {
-          const dpr = Math.min(typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1, 2);
-          const targetW = Math.floor(width * dpr);
-          const targetH = Math.floor(height * dpr);
-          if (canvas.width !== targetW || canvas.height !== targetH) {
-            canvas.width = targetW;
-            canvas.height = targetH;
-          }
-        }
-      }
-
-      if (engineRef.current && rendererRef.current) {
-        rendererRef.current.render(
-          canvas,
-          engineRef.current,
-          cameraRef.current,
-          selectedUnitIdRef.current
-        );
-      }
-    };
-
-    syncCanvasDimensionsAndRender();
-
-    const observer =
-      typeof ResizeObserver !== 'undefined'
-        ? new ResizeObserver(() => {
-            syncCanvasDimensionsAndRender();
-          })
-        : null;
-
-    if (observer && canvasWrapperRef.current) {
-      observer.observe(canvasWrapperRef.current);
-    }
-
-    return () => {
-      stopLoop();
-      observer?.disconnect();
-      engine?.destroy();
-      renderer?.dispose();
-    };
-  }, [stopLoop, syncHudSnapshot]);
-
-  // 60 FPS Fixed-Timestep Loop
-  useEffect(() => {
-    const engine = engineRef.current;
-    const renderer = rendererRef.current;
-    if (!engine || !renderer) return;
-
-    if (gameState !== 'playing') {
-      stopLoop();
-      if (canvasRef.current) {
-        renderer.render(canvasRef.current, engine, cameraRef.current, selectedUnitIdRef.current);
-      }
-      return;
-    }
-
-    startLoop((_timestamp, deltaTimeMs) => {
-      const dtSec = deltaTimeMs > 0 ? deltaTimeMs / 1000 : 1 / 60;
-      engine.updateFrame(dtSec, simSpeedRef.current);
-      if (canvasRef.current) {
-        renderer.render(canvasRef.current, engine, cameraRef.current, selectedUnitIdRef.current);
-      }
-      frameCounterRef.current++;
-      if (frameCounterRef.current % 12 === 0) {
-        syncHudSnapshot();
-      }
+  const cycleQuality = useCallback(() => {
+    setQuality((prev) => {
+      const next: QualityLevel3D = prev === 'ultra' ? 'balanced' : prev === 'balanced' ? 'performance' : 'ultra';
+      stageRef.current?.setQualityLevel(next);
+      return next;
     });
-
-    return () => {
-      stopLoop();
-    };
-  }, [gameState, startLoop, stopLoop, syncHudSnapshot]);
-
-  const getTileFromPointer = useCallback((clientX: number, clientY: number) => {
-    const canvas = canvasRef.current;
-    const engine = engineRef.current;
-    if (!canvas || !engine) return null;
-    const pt = screenToWorld(
-      clientX,
-      clientY,
-      canvas,
-      engine.state.gridW,
-      engine.state.gridH,
-      cameraRef.current
-    );
-    return { tx: pt.tx, ty: pt.ty };
   }, []);
 
-  const handlePointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
-    if (gameState !== 'playing' || !engineRef.current) return;
-    if (e.button === 1 || e.button === 2 || e.shiftKey) {
-      isPanningRef.current = true;
-      lastPanPointRef.current = { x: e.clientX, y: e.clientY };
+  const adjustZoom = useCallback((factor: number) => {
+    const stage = stageRef.current;
+    const controls = controlsRef.current;
+    if (!stage || !controls) return;
+    activeCamTransitionRef.current = false;
+    _zoomVec.subVectors(stage.camera.position, controls.target);
+    const len = _zoomVec.length();
+    const nextLen = Math.max(12, Math.min(95, len * factor));
+    _zoomVec.setLength(nextLen);
+    stage.camera.position.copy(controls.target).add(_zoomVec);
+    controls.update();
+  }, []);
+
+  const resetCamera = useCallback(() => {
+    setCameraPreset('isometric');
+    const cfg = CAMERA_PRESETS.isometric;
+    _camTargetPos.set(...cfg.pos);
+    _camTargetLook.set(...cfg.look);
+    activeCamTransitionRef.current = true;
+    audioController.playClick();
+  }, []);
+
+  const focusOnUnit = useCallback((ux: number, uy: number) => {
+    const engine = engineRef.current;
+    if (!engine) return;
+    const { x, z } = tileToWorld3D(ux, uy, engine.state.gridW, engine.state.gridH);
+    _camTargetLook.set(x, 1.0, z);
+    _camTargetPos.set(x, 11.5, z + 11.5);
+    activeCamTransitionRef.current = true;
+    audioController.playClick();
+  }, []);
+
+  // Initialize ThreeStageController + 3D Voxel Diorama Scene + OrbitControls + Game Loop
+  useEffect(() => {
+    const wrapper = canvasWrapperRef.current;
+    const engine = engineRef.current;
+    if (!wrapper || !engine) return;
+
+    engine.resetWorld('archipelago');
+    syncHudSnapshot(null);
+
+    let stage: ThreeStageController;
+    try {
+      stage = new ThreeStageController({
+        container: wrapper,
+        backgroundColor: 0x040b18,
+        fogColor: 0x040b18,
+        fogDensity: 0.0065,
+        fov: 46,
+        near: 0.5,
+        far: 320,
+        manualCamera: true,
+        enableGridFloor: false,
+        shadowBounds: 42,
+        toneMappingExposure: 1.15,
+        bloom: {
+          enabled: true,
+          strength: 0.42,
+          radius: 0.35,
+          threshold: 0.85
+        }
+      });
+    } catch {
       return;
     }
-    isPointerDownRef.current = true;
-    const coords = getTileFromPointer(e.clientX, e.clientY);
-    if (coords) {
-      engineRef.current.applyToolAtTile(
+
+    stageRef.current = stage;
+    setQuality(stage.getQualityLevel());
+
+    // Position isometric 3D diorama camera
+    const initCfg = CAMERA_PRESETS.isometric;
+    stage.camera.position.set(...initCfg.pos);
+    stage.camera.lookAt(...initCfg.look);
+
+    // Rich sunlit tabletop atmosphere
+    stage.keyLight.position.set(28, 48, 26);
+    stage.keyLight.intensity = 2.0;
+    stage.hemiLight.intensity = 0.9;
+
+    const controls = new OrbitControls(stage.camera, stage.renderer.domElement);
+    controls.target.set(...initCfg.look);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.08;
+    controls.minDistance = 12;
+    controls.maxDistance = 95;
+    controls.maxPolarAngle = Math.PI * 0.46;
+    controls.mouseButtons = {
+      LEFT: null as unknown as THREE.MOUSE,
+      MIDDLE: THREE.MOUSE.DOLLY,
+      RIGHT: THREE.MOUSE.ROTATE
+    };
+    controls.touches = {
+      ONE: null as unknown as THREE.TOUCH,
+      TWO: THREE.TOUCH.DOLLY_PAN
+    };
+    controls.update();
+    controlsRef.current = controls;
+
+    const onControlsStart = () => {
+      activeCamTransitionRef.current = false;
+    };
+    controls.addEventListener('start', onControlsStart);
+
+    const renderer3D = new WorldBoxRenderer3D(stage.scene);
+    renderer3DRef.current = renderer3D;
+
+    const raycastTile = (clientX: number, clientY: number) => {
+      const rect = stage.renderer.domElement.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) return null;
+      _ndc.x = ((clientX - rect.left) / rect.width) * 2 - 1;
+      _ndc.y = -((clientY - rect.top) / rect.height) * 2 + 1;
+      _raycaster.setFromCamera(_ndc, stage.camera);
+      const voxelHit = renderer3D.raycastTerrain(_raycaster, engine.state.gridW, engine.state.gridH);
+      if (voxelHit) return voxelHit;
+      if (!_raycaster.ray.intersectPlane(_worldPlane, _hitPoint)) return null;
+      return world3DToTile(_hitPoint.x, _hitPoint.z, engine.state.gridW, engine.state.gridH);
+    };
+
+    const onPointerDown = (e: PointerEvent) => {
+      if (gameStateRef.current !== 'playing') return;
+      if (interactionModeRef.current === 'orbit') return;
+      if (e.button !== 0 || e.shiftKey || e.altKey) return;
+
+      const coords = raycastTile(e.clientX, e.clientY);
+      if (!coords) return;
+      isPaintingRef.current = true;
+      haptics.trigger('light');
+      engine.applyToolAtTile(
         selectedToolRef.current,
         coords.tx,
         coords.ty,
@@ -296,38 +375,125 @@ export default function WorldBoxGame({ onGameOver, onScoreUpdate, highScore }: G
         }
       );
       syncHudSnapshot();
-    }
-  };
+    };
 
-  const handlePointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
-    if (isPanningRef.current) {
-      const dx = e.clientX - lastPanPointRef.current.x;
-      const dy = e.clientY - lastPanPointRef.current.y;
-      lastPanPointRef.current = { x: e.clientX, y: e.clientY };
-      setCamera((prev) => ({
-        ...prev,
-        panX: Math.max(-320, Math.min(320, prev.panX + dx)),
-        panY: Math.max(-220, Math.min(220, prev.panY + dy))
-      }));
-      return;
-    }
-    if (!isPointerDownRef.current || gameState !== 'playing' || !engineRef.current) return;
-    const coords = getTileFromPointer(e.clientX, e.clientY);
-    if (coords) {
-      engineRef.current.applyToolAtTile(
+    const onPointerMove = (e: PointerEvent) => {
+      const coords = raycastTile(e.clientX, e.clientY);
+      const toolInfo = GOD_POWERS_CATALOG.find((t) => t.id === selectedToolRef.current);
+      const biome = coords
+        ? engine.state.biomes[coords.ty * engine.state.gridW + coords.tx]
+        : undefined;
+      renderer3D.setBrushCursor(
+        interactionModeRef.current === 'paint' ? coords : null,
+        engine.state.gridW,
+        engine.state.gridH,
+        brushRadiusRef.current,
+        toolInfo?.accent || '#38bdf8',
+        biome
+      );
+
+      if (!isPaintingRef.current || gameStateRef.current !== 'playing' || !coords) return;
+      engine.applyToolAtTile(
         selectedToolRef.current,
         coords.tx,
         coords.ty,
         brushRadiusRef.current,
         true
       );
-    }
-  };
+    };
 
-  const handlePointerUp = () => {
-    isPointerDownRef.current = false;
-    isPanningRef.current = false;
-  };
+    const onPointerUp = () => {
+      isPaintingRef.current = false;
+    };
+
+    const onPointerLeave = () => {
+      isPaintingRef.current = false;
+      renderer3D.setBrushCursor(null, engine.state.gridW, engine.state.gridH, 1, '#38bdf8');
+    };
+
+    const keysDown = new Set<string>();
+    const onKeyDown = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement | null)?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+      keysDown.add(e.code);
+    };
+    const onKeyUp = (e: KeyboardEvent) => {
+      keysDown.delete(e.code);
+    };
+
+    const domEl = stage.renderer.domElement;
+    domEl.addEventListener('pointerdown', onPointerDown);
+    domEl.addEventListener('pointermove', onPointerMove);
+    domEl.addEventListener('pointerup', onPointerUp);
+    domEl.addEventListener('pointerleave', onPointerLeave);
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('keyup', onKeyUp);
+
+    stage.startLoop((dt, elapsed) => {
+      if (gameStateRef.current === 'playing') {
+        engine.updateFrame(dt, simSpeedRef.current);
+        frameCounterRef.current++;
+        if (frameCounterRef.current % 12 === 0) {
+          syncHudSnapshot();
+        }
+      }
+
+      // Keyboard WASD / Arrow camera pan across the 3D diorama
+      let panX = 0;
+      let panZ = 0;
+      if (keysDown.has('KeyA') || keysDown.has('ArrowLeft')) panX -= 1;
+      if (keysDown.has('KeyD') || keysDown.has('ArrowRight')) panX += 1;
+      if (keysDown.has('KeyW') || keysDown.has('ArrowUp')) panZ -= 1;
+      if (keysDown.has('KeyS') || keysDown.has('ArrowDown')) panZ += 1;
+      if (panX !== 0 || panZ !== 0) {
+        activeCamTransitionRef.current = false;
+        const speed = 26 * dt;
+        const nextTx = Math.max(-34, Math.min(34, controls.target.x + panX * speed));
+        const nextTz = Math.max(-22, Math.min(22, controls.target.z + panZ * speed));
+        const dx = nextTx - controls.target.x;
+        const dz = nextTz - controls.target.z;
+        controls.target.x = nextTx;
+        controls.target.z = nextTz;
+        stage.camera.position.x += dx;
+        stage.camera.position.z += dz;
+      }
+
+      renderer3D.sync(engine, selectedUnitIdRef.current, elapsed);
+
+      if (activeCamTransitionRef.current) {
+        stage.camera.position.x = THREE.MathUtils.damp(stage.camera.position.x, _camTargetPos.x, 6, dt);
+        stage.camera.position.y = THREE.MathUtils.damp(stage.camera.position.y, _camTargetPos.y, 6, dt);
+        stage.camera.position.z = THREE.MathUtils.damp(stage.camera.position.z, _camTargetPos.z, 6, dt);
+        controls.target.x = THREE.MathUtils.damp(controls.target.x, _camTargetLook.x, 6, dt);
+        controls.target.y = THREE.MathUtils.damp(controls.target.y, _camTargetLook.y, 6, dt);
+        controls.target.z = THREE.MathUtils.damp(controls.target.z, _camTargetLook.z, 6, dt);
+
+        if (stage.camera.position.distanceTo(_camTargetPos) < 0.2) {
+          activeCamTransitionRef.current = false;
+        }
+      }
+
+      controls.update();
+      stage.cameraRig.applyAdditiveShake(stage.camera, dt, 0.45);
+    });
+
+    return () => {
+      controls.removeEventListener('start', onControlsStart);
+      domEl.removeEventListener('pointerdown', onPointerDown);
+      domEl.removeEventListener('pointermove', onPointerMove);
+      domEl.removeEventListener('pointerup', onPointerUp);
+      domEl.removeEventListener('pointerleave', onPointerLeave);
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('keyup', onKeyUp);
+      controls.dispose();
+      controlsRef.current = null;
+      renderer3D.dispose();
+      renderer3DRef.current = null;
+      engine.destroy();
+      stage.dispose();
+      stageRef.current = null;
+    };
+  }, [gameStateRef, syncHudSnapshot]);
 
   const activeTools = GOD_POWERS_CATALOG.filter((t) => t.category === activeCategory);
   const currentToolInfo = GOD_POWERS_CATALOG.find((t) => t.id === selectedTool) || GOD_POWERS_CATALOG[0];
@@ -335,7 +501,7 @@ export default function WorldBoxGame({ onGameOver, onScoreUpdate, highScore }: G
   return (
     <div
       ref={containerRef}
-      className="relative w-full h-full min-h-[420px] sm:min-h-[520px] lg:min-h-[560px] bg-slate-950 text-slate-100 flex flex-col select-none overflow-hidden rounded-xl border border-slate-800"
+      className="relative w-full h-full min-h-[420px] sm:min-h-[520px] lg:min-h-[580px] bg-slate-950 text-slate-100 flex flex-col select-none overflow-hidden rounded-xl border border-slate-800"
     >
       {/* TOP CHRONICLE & SIMULATION HUD BAR */}
       <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-2.5 bg-slate-900/95 border-b border-slate-800 z-20">
@@ -362,7 +528,7 @@ export default function WorldBoxGame({ onGameOver, onScoreUpdate, highScore }: G
         </div>
 
         {/* Time Controls & Save/Load */}
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-1.5 flex-wrap">
           <div className="flex items-center bg-slate-950 border border-slate-800 rounded-lg p-0.5">
             <button
               type="button"
@@ -406,7 +572,7 @@ export default function WorldBoxGame({ onGameOver, onScoreUpdate, highScore }: G
           <button
             type="button"
             onClick={() => regenerateWorld(worldTemplate)}
-            className="px-2 py-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg flex items-center gap-1"
+            className="px-2 py-1.5 min-h-[36px] text-xs bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg flex items-center gap-1"
             title="Buat Dunia Baru"
           >
             <RotateCcw className="w-3.5 h-3.5" />
@@ -496,45 +662,88 @@ export default function WorldBoxGame({ onGameOver, onScoreUpdate, highScore }: G
         </div>
       </div>
 
-      {/* MAIN WORKSPACE */}
+      {/* MAIN 3D WORKSPACE */}
       <div className="relative flex-1 flex flex-col lg:flex-row min-h-0 overflow-hidden">
         <div
-          ref={canvasWrapperRef}
-          className="relative flex-1 bg-[#071324] flex items-center justify-center overflow-hidden min-h-[240px] sm:min-h-[320px]"
+          className="relative flex-1 bg-[#040b18] overflow-hidden min-h-[260px] sm:min-h-[340px]"
+          onContextMenu={(e) => e.preventDefault()}
         >
-          <canvas
-            ref={canvasRef}
-            onPointerDown={handlePointerDown}
-            onPointerMove={handlePointerMove}
-            onPointerUp={handlePointerUp}
-            onPointerLeave={handlePointerUp}
-            onContextMenu={(e) => e.preventDefault()}
-            className="w-full h-full block cursor-crosshair touch-none"
-            style={{ imageRendering: 'pixelated' }}
+          {/* Three.js WebGL Mount */}
+          <div
+            ref={canvasWrapperRef}
+            className={`absolute inset-0 w-full h-full ${
+              interactionMode === 'paint' ? 'cursor-crosshair' : 'cursor-grab active:cursor-grabbing'
+            }`}
           />
-          <div className="absolute top-3 left-3 flex items-center gap-1 bg-slate-900/90 border border-slate-800 rounded-lg p-1 z-10">
-            <button
-              type="button"
-              onClick={() => setCamera((c) => ({ ...c, zoom: Math.min(2.5, Number((c.zoom + 0.25).toFixed(2))) }))}
-              className="min-w-[36px] min-h-[36px] sm:min-w-0 sm:min-h-0 p-1.5 flex items-center justify-center text-slate-300 hover:text-white hover:bg-slate-800 rounded"
-            >
-              <ZoomIn className="w-4 h-4" />
-            </button>
-            <button
-              type="button"
-              onClick={() => setCamera((c) => ({ ...c, zoom: Math.max(1, Number((c.zoom - 0.25).toFixed(2))) }))}
-              className="min-w-[36px] min-h-[36px] sm:min-w-0 sm:min-h-0 p-1.5 flex items-center justify-center text-slate-300 hover:text-white hover:bg-slate-800 rounded"
-            >
-              <ZoomOut className="w-4 h-4" />
-            </button>
-            <button
-              type="button"
-              onClick={() => setCamera({ zoom: 1, panX: 0, panY: 0 })}
-              className="px-2 py-1 text-[11px] font-mono tabular-nums text-slate-300 hover:text-white"
-            >
-              {Math.round(camera.zoom * 100)}%
-            </button>
+
+          {/* Compact Top-Left Hint Pill */}
+          <div className="pointer-events-none absolute top-3 left-3 z-10 hidden sm:flex items-center gap-2 rounded-lg bg-slate-950/80 border border-white/10 px-2.5 py-1 text-[11px] text-slate-300">
+            <span>Klik kiri: Kuas · Drag kanan / Scroll: Orbit & Zoom · WASD: Geser Peta</span>
           </div>
+
+          <ThreeDockOverlay
+            cameraPreset={cameraPreset}
+            onSelectPreset={setCameraPreset}
+            quality={quality}
+            onCycleQuality={cycleQuality}
+            presetLabels={{
+              chase: 'Sudut Rendah',
+              isometric: 'Diorama 3D',
+              diorama: 'Peta Atas'
+            }}
+            extraControls={
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    audioController.playClick();
+                    setInteractionMode((m) => (m === 'paint' ? 'orbit' : 'paint'));
+                  }}
+                  className={`px-2.5 py-1 rounded-md text-[11px] font-semibold flex items-center gap-1 border transition-colors ${
+                    interactionMode === 'paint'
+                      ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                      : 'bg-sky-500/25 text-sky-300 border-sky-500/50'
+                  }`}
+                  title="Ganti Mode Klik/Sentuh: Kuas atau Putar Kamera 3D"
+                >
+                  {interactionMode === 'paint' ? (
+                    <>
+                      <Paintbrush className="w-3 h-3" />
+                      <span>Kuas</span>
+                    </>
+                  ) : (
+                    <>
+                      <Orbit className="w-3 h-3" />
+                      <span>Orbit 3D</span>
+                    </>
+                  )}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => adjustZoom(0.8)}
+                  className="p-1.5 rounded-md bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white border border-white/10"
+                  aria-label="Zoom In"
+                >
+                  <ZoomIn className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => adjustZoom(1.25)}
+                  className="p-1.5 rounded-md bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white border border-white/10"
+                  aria-label="Zoom Out"
+                >
+                  <ZoomOut className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={resetCamera}
+                  className="px-2 py-1 rounded-md bg-slate-900 hover:bg-slate-800 text-[11px] font-mono text-slate-300 hover:text-white border border-white/10"
+                >
+                  Reset
+                </button>
+              </div>
+            }
+          />
         </div>
 
         {/* RIGHT INSPECTOR & CHRONICLE DRAWER */}
@@ -589,6 +798,18 @@ export default function WorldBoxGame({ onGameOver, onScoreUpdate, highScore }: G
                   className="px-2 py-1 text-xs bg-rose-500/20 text-rose-300 border border-rose-500/30 rounded"
                 >
                   Sambar Petir
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (hud.inspected?.status === 'alive') {
+                      focusOnUnit(hud.inspected.unit.x, hud.inspected.unit.y);
+                    }
+                  }}
+                  className="col-span-2 px-2 py-1 text-xs bg-sky-500/20 text-sky-300 border border-sky-500/30 rounded flex items-center justify-center gap-1"
+                >
+                  <Crosshair className="w-3 h-3" />
+                  <span>Fokus Kamera ke Unit</span>
                 </button>
               </div>
             </div>
@@ -653,6 +874,15 @@ export default function WorldBoxGame({ onGameOver, onScoreUpdate, highScore }: G
                   }`}
                 >
                   Bencana Alami: {worldLaws.naturalDisasters ? 'ON' : 'OFF'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setWorldLaws((w) => ({ ...w, showKingdomBorders: !w.showKingdomBorders }))}
+                  className={`px-2 py-1 text-[11px] rounded border ${
+                    worldLaws.showKingdomBorders ? 'bg-sky-500/15 border-sky-500/30 text-sky-300' : 'bg-slate-900 border-slate-800 text-slate-400'
+                  }`}
+                >
+                  Batas Kerajaan: {worldLaws.showKingdomBorders ? 'ON' : 'OFF'}
                 </button>
               </div>
               <div className="space-y-1 max-h-24 overflow-y-auto text-xs font-mono tabular-nums">
@@ -744,8 +974,8 @@ export default function WorldBoxGame({ onGameOver, onScoreUpdate, highScore }: G
         score={score}
         highScore={highScore}
         countdown={countdown}
-        title="WorldBox: God Simulator"
-        description="Bentuk benua 2D Pixel Art, turunkan 4 bangsa fantasi otonom & Naga, saksikan kerajaan bangkit atau berperang, dan selesaikan Tantangan Era Ilahi!"
+        title="WorldBox: God Simulator 3D"
+        description="Bentuk benua 3D Voxel Diorama, turunkan 4 bangsa fantasi otonom & Naga 3D, saksikan kerajaan bangkit atau berperang, dan selesaikan Tantangan Era Ilahi!"
         themeColor="#f59e0b"
         onStart={() => { setScore(0); regenerateWorld(worldTemplate); startWithCountdown(); }}
         onRestart={() => { setScore(0); regenerateWorld(worldTemplate); startWithCountdown(); }}

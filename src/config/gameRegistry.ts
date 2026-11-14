@@ -780,7 +780,7 @@ export const CANONICAL_GAME_REGISTRY: Record<CanonicalGameId, GameRegistryItem> 
   'world-box': {
     id: 'world-box',
     title: 'WorldBox: God Simulator',
-    description: 'Simulasi dewa 2D Pixel Art! Lukis benua & bioma, turunkan 4 bangsa fantasi otonom (Manusia, Elf, Orc, Kurcaci) & Naga, saksikan kerajaan bangkit atau berperang, serta lepaskan mukjizat dan bencana dahsyat.',
+    description: 'Simulasi dewa 3D Voxel Diorama! Lukis benua & bioma 3D, turunkan 4 bangsa fantasi otonom (Manusia, Elf, Orc, Kurcaci) & Naga, saksikan kerajaan bangkit atau berperang, serta lepaskan mukjizat dan bencana dahsyat.',
     genre: 'Strategy / God Sandbox',
     difficulty: 'Medium',
     thumbnail: '/images/thumb_world_box_1794533027215.jpg',
