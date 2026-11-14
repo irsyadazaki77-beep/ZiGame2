@@ -142,7 +142,8 @@ export default function SnakeGame({
           diorama: { position: [0, 18.8, 1.5], lookAt: [0, 0, 0], fov: 46 }
         }
       });
-    } catch {
+    } catch (err) {
+      console.error('[SnakeGame] ThreeStageController init failed:', err);
       return;
     }
 

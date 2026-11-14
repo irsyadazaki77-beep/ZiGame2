@@ -1042,6 +1042,7 @@ export class ThreeStageController {
 
     this.rimLight = new THREE.DirectionalLight(0xc084fc, 0.9);
     this.rimLight.position.set(-14, 12, -14);
+    this.applyRendererQuality();
 
     if (options.enableDefaultLighting !== false) {
       this.scene.add(this.hemiLight);
@@ -1147,7 +1148,9 @@ export class ThreeStageController {
     if (this.isSoftwareGl) {
       this.renderer.setPixelRatio(1);
       this.renderer.shadowMap.enabled = false;
-      this.keyLight.castShadow = false;
+      if (this.keyLight) {
+        this.keyLight.castShadow = false;
+      }
       return;
     }
 
@@ -1167,7 +1170,9 @@ export class ThreeStageController {
 
     this.renderer.setPixelRatio(Math.max(1, targetDpr));
     this.renderer.shadowMap.enabled = shadowsAllowed;
-    this.keyLight.castShadow = shadowsAllowed;
+    if (this.keyLight) {
+      this.keyLight.castShadow = shadowsAllowed;
+    }
 
     if (this.composer) {
       this.composer.setPixelRatio(Math.max(1, targetDpr));
