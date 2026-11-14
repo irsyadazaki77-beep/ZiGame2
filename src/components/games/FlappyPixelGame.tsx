@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
 import { GameComponentProps } from '../../types';
-import { audio } from '../../utils/audio';
+import { audioController } from '../../sdk/audioController';
+import { ObjectPool } from '../../sdk/objectPool';
 import { useGameEngine } from '../../hooks/useGameEngine';
 import { inputManager } from '../../services/inputService';
 import { GameOverlay } from '../gameplay/GameOverlay';
@@ -15,6 +16,8 @@ import { Zap, Sparkles } from 'lucide-react';
 
 interface PipeGate3D {
   group: THREE.Group;
+  botPipe: THREE.Mesh;
+  topPipe: THREE.Mesh;
   x: number;
   gapY: number;
   passed: boolean;
@@ -108,20 +111,16 @@ export default function FlappyPixelGame({
     spawnTimer: 0.4
   });
 
-  const pipesRef = useRef<PipeGate3D[]>([]);
+  const pipePoolRef = useRef<ObjectPool<PipeGate3D> | null>(null);
 
   const flap = useCallback(() => {
     if (gameStateRef.current !== 'playing') return;
     birdStateRef.current.vy = 8.4;
-    audio.playJump?.();
+    audioController.playJump();
   }, []);
 
   const handleStart = useCallback(() => {
-    const stage = stageRef.current;
-    if (stage) {
-      pipesRef.current.forEach((p) => stage.scene.remove(p.group));
-    }
-    pipesRef.current = [];
+    pipePoolRef.current?.releaseAll();
     birdStateRef.current = {
       y: 4.0,
       vy: 4.5,
@@ -142,7 +141,7 @@ export default function FlappyPixelGame({
 
     const unsub = inputManager.subscribe({
       onActionDown: (action) => {
-        if (action === 'ACTION_PRIMARY' || action === 'UP') flap();
+        if (action === 'PRIMARY' || action === 'ACTION_PRIMARY' || action === 'UP') flap();
       }
     });
 
@@ -211,7 +210,38 @@ export default function FlappyPixelGame({
       emissiveIntensity: 0.85
     });
 
+    const unitPipeGeo = new THREE.CylinderGeometry(0.55, 0.55, 1, 14);
+    const coinGeo = new THREE.OctahedronGeometry(0.35, 0);
     const GAP_HALF = 1.65;
+
+    const pipePool = new ObjectPool<PipeGate3D>(
+      () => {
+        const g = new THREE.Group();
+        const botPipe = new THREE.Mesh(unitPipeGeo, pipeMat);
+        botPipe.castShadow = true;
+        const topPipe = new THREE.Mesh(unitPipeGeo, pipeMat);
+        topPipe.castShadow = true;
+        const coinMesh = new THREE.Mesh(coinGeo, coinMat);
+        g.add(botPipe, topPipe, coinMesh);
+        g.visible = false;
+        stage.scene.add(g);
+        return {
+          group: g,
+          botPipe,
+          topPipe,
+          x: 10,
+          gapY: 4,
+          passed: false,
+          coinMesh,
+          coinCollected: false
+        };
+      },
+      (p) => {
+        p.group.visible = false;
+      },
+      10
+    );
+    pipePoolRef.current = pipePool;
 
     stage.startLoop((dt, elapsed) => {
       const wingAngle = Math.sin(elapsed * 18) * 0.55;
@@ -230,7 +260,7 @@ export default function FlappyPixelGame({
       if (b.y < 0.35 || b.y > 8.2) {
         stage.particles.burst(-2.5, Math.max(0.5, b.y), 0, 32, 0xef4444, 9);
         stage.triggerTrauma(0.75);
-        audio.playExplosion?.();
+        audioController.playGameOver();
         triggerGameOver(scoreRef.current);
         return;
       }
@@ -240,38 +270,29 @@ export default function FlappyPixelGame({
       if (b.spawnTimer <= 0) {
         b.spawnTimer = 1.55;
         const gapY = 2.4 + Math.random() * 3.2;
-        const g = new THREE.Group();
-
         const botH = Math.max(0.5, gapY - GAP_HALF);
-        const botPipe = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.55, botH, 14), pipeMat);
-        botPipe.position.y = botH / 2;
-        botPipe.castShadow = true;
-
         const topYStart = gapY + GAP_HALF;
         const topH = Math.max(0.5, 9.0 - topYStart);
-        const topPipe = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.55, topH, 14), pipeMat);
-        topPipe.position.y = topYStart + topH / 2;
-        topPipe.castShadow = true;
 
-        const coinMesh = new THREE.Mesh(new THREE.OctahedronGeometry(0.35, 0), coinMat);
-        coinMesh.position.y = gapY;
+        const p = pipePool.acquire();
+        p.x = 10;
+        p.gapY = gapY;
+        p.passed = false;
+        p.coinCollected = false;
 
-        g.add(botPipe, topPipe, coinMesh);
-        g.position.set(10, 0, 0);
-        stage.scene.add(g);
-
-        pipesRef.current.push({
-          group: g,
-          x: 10,
-          gapY,
-          passed: false,
-          coinMesh,
-          coinCollected: false
-        });
+        p.botPipe.scale.set(1, botH, 1);
+        p.botPipe.position.y = botH / 2;
+        p.topPipe.scale.set(1, topH, 1);
+        p.topPipe.position.y = topYStart + topH / 2;
+        p.coinMesh.position.y = gapY;
+        p.coinMesh.visible = true;
+        p.group.position.set(10, 0, 0);
+        p.group.visible = true;
       }
 
-      for (let i = pipesRef.current.length - 1; i >= 0; i--) {
-        const p = pipesRef.current[i];
+      const activePipes = pipePool.getActiveItems();
+      for (let i = activePipes.length - 1; i >= 0; i--) {
+        const p = activePipes[i];
         p.x -= 5.4 * dt;
         p.group.position.x = p.x;
         p.coinMesh.rotation.y += dt * 4;
@@ -282,14 +303,14 @@ export default function FlappyPixelGame({
             p.coinCollected = true;
             p.coinMesh.visible = false;
             addScore(15);
-            audio.playCoin?.();
+            audioController.playScore();
             stage.particles.burst(-2.5, p.gapY, 0, 14, 0xfacc15, 6);
           }
 
           if (Math.abs(b.y - p.gapY) > GAP_HALF - 0.3) {
             stage.particles.burst(-2.5, b.y, 0, 34, 0xef4444, 10);
             stage.triggerTrauma(0.75);
-            audio.playExplosion?.();
+            audioController.playGameOver();
             triggerGameOver(scoreRef.current);
             return;
           }
@@ -300,16 +321,18 @@ export default function FlappyPixelGame({
           b.gates += 1;
           setGatesPassed(b.gates);
           addScore(10);
+          audioController.playClick();
         }
 
         if (p.x < -10) {
-          stage.scene.remove(p.group);
-          pipesRef.current.splice(i, 1);
+          pipePool.release(i);
         }
       }
     });
 
     return () => {
+      pipePool.releaseAll();
+      pipePoolRef.current = null;
       stage.dispose();
       stageRef.current = null;
     };
@@ -317,8 +340,8 @@ export default function FlappyPixelGame({
 
   return (
     <div
-      className="relative w-full h-full min-h-[460px] bg-slate-950 overflow-hidden rounded-2xl border border-amber-500/20"
-      onClick={flap}
+      className="relative w-full h-full min-h-[260px] sm:min-h-[380px] lg:min-h-[460px] bg-slate-950 overflow-hidden rounded-2xl border border-amber-500/20 touch-none"
+      onPointerDown={flap}
     >
       <div ref={mountRef} className="absolute inset-0 w-full h-full cursor-pointer" />
 

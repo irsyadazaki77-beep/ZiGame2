@@ -119,7 +119,7 @@ function BrickBreakerView({
   }, [addScore, ctx.replay, onScoreUpdate, scoreRef, triggerGameOver]);
 
   return (
-    <div className="relative w-full h-full min-h-[460px] bg-slate-950 overflow-hidden rounded-2xl border border-pink-500/20">
+    <div className="relative w-full h-full min-h-[260px] sm:min-h-[380px] lg:min-h-[460px] bg-slate-950 overflow-hidden rounded-2xl border border-pink-500/20 touch-none">
       <div ref={mountRef} className="absolute inset-0 w-full h-full" />
 
       <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex flex-wrap items-center justify-between gap-2 p-3.5">

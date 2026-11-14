@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
 import { GameComponentProps } from '../../types';
-import { audio } from '../../utils/audio';
+import { audioController } from '../../sdk/audioController';
+import { ObjectPool } from '../../sdk/objectPool';
 import { useGameEngine } from '../../hooks/useGameEngine';
 import { inputManager } from '../../services/inputService';
 import { GameOverlay } from '../gameplay/GameOverlay';
@@ -103,20 +104,20 @@ export default function SpaceDefenderGame({
   });
 
   const keysRef = useRef<Record<string, boolean>>({});
-  const enemiesRef = useRef<EnemyEntity3D[]>([]);
-  const bulletsRef = useRef<BulletEntity3D[]>([]);
-  const powerUpsRef = useRef<PowerUpEntity3D[]>([]);
+  const enemyPoolsRef = useRef<Record<EnemyEntity3D['type'], ObjectPool<EnemyEntity3D>> | null>(null);
+  const bulletPoolRef = useRef<ObjectPool<BulletEntity3D> | null>(null);
+  const powerUpPoolRef = useRef<ObjectPool<PowerUpEntity3D> | null>(null);
   const shipPartsRef = useRef<ReturnType<typeof buildStarfighter3D> | null>(null);
 
   const clearEntities = useCallback(() => {
-    const stage = stageRef.current;
-    if (!stage) return;
-    enemiesRef.current.forEach((e) => stage.scene.remove(e.mesh));
-    bulletsRef.current.forEach((b) => stage.scene.remove(b.mesh));
-    powerUpsRef.current.forEach((p) => stage.scene.remove(p.mesh));
-    enemiesRef.current = [];
-    bulletsRef.current = [];
-    powerUpsRef.current = [];
+    if (enemyPoolsRef.current) {
+      enemyPoolsRef.current.scout.releaseAll();
+      enemyPoolsRef.current.interceptor.releaseAll();
+      enemyPoolsRef.current.tank.releaseAll();
+      enemyPoolsRef.current.commander.releaseAll();
+    }
+    bulletPoolRef.current?.releaseAll();
+    powerUpPoolRef.current?.releaseAll();
   }, []);
 
   const handleStartGame = useCallback(() => {
@@ -184,14 +185,14 @@ export default function SpaceDefenderGame({
         if (action === 'RIGHT') keysRef.current['arrowright'] = true;
         if (action === 'UP') keysRef.current['arrowup'] = true;
         if (action === 'DOWN') keysRef.current['arrowdown'] = true;
-        if (action === 'ACTION_PRIMARY') keysRef.current['Space'] = true;
+        if (action === 'PRIMARY' || action === 'ACTION_PRIMARY') keysRef.current['Space'] = true;
       },
       onActionUp: (action) => {
         if (action === 'LEFT') keysRef.current['arrowleft'] = false;
         if (action === 'RIGHT') keysRef.current['arrowright'] = false;
         if (action === 'UP') keysRef.current['arrowup'] = false;
         if (action === 'DOWN') keysRef.current['arrowdown'] = false;
-        if (action === 'ACTION_PRIMARY') keysRef.current['Space'] = false;
+        if (action === 'PRIMARY' || action === 'ACTION_PRIMARY') keysRef.current['Space'] = false;
       }
     });
 
@@ -254,17 +255,101 @@ export default function SpaceDefenderGame({
     const bulletGeo = new THREE.CapsuleGeometry(0.09, 0.42, 4, 8);
     bulletGeo.rotateX(Math.PI / 2);
 
+    const bulletPool = new ObjectPool<BulletEntity3D>(
+      () => {
+        const mat = new THREE.MeshStandardMaterial({
+          color: 0x22d3ee,
+          emissive: 0x22d3ee,
+          emissiveIntensity: 0.95,
+          roughness: 0.15
+        });
+        const mesh = new THREE.Mesh(bulletGeo, mat);
+        mesh.visible = false;
+        stage.scene.add(mesh);
+        return { mesh, x: 0, z: 0, vx: 0, vz: 0, isEnemy: false, color: 0x22d3ee };
+      },
+      (b) => {
+        b.mesh.visible = false;
+      },
+      36
+    );
+    bulletPoolRef.current = bulletPool;
+
+    const powerUpGeo = new THREE.OctahedronGeometry(0.42, 0);
+    const powerUpRingGeo = new THREE.TorusGeometry(0.58, 0.04, 8, 20);
+    const powerUpRingMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+    const powerUpPool = new ObjectPool<PowerUpEntity3D>(
+      () => {
+        const g = new THREE.Group();
+        const core = new THREE.Mesh(
+          powerUpGeo,
+          new THREE.MeshStandardMaterial({
+            color: 0x10b981,
+            emissive: 0x10b981,
+            emissiveIntensity: 0.85,
+            roughness: 0.2
+          })
+        );
+        const ring = new THREE.Mesh(powerUpRingGeo, powerUpRingMat);
+        g.add(core, ring);
+        g.visible = false;
+        stage.scene.add(g);
+        return { mesh: g, x: 0, z: 0, type: 'shield' };
+      },
+      (p) => {
+        p.mesh.visible = false;
+      },
+      6
+    );
+    powerUpPoolRef.current = powerUpPool;
+
+    const createEnemyPool = (type: EnemyEntity3D['type'], prewarm: number) =>
+      new ObjectPool<EnemyEntity3D>(
+        () => {
+          const mesh = buildEnemyShip3D(type);
+          mesh.visible = false;
+          stage.scene.add(mesh);
+          return {
+            mesh,
+            x: 0,
+            z: 0,
+            speed: 4.2,
+            type,
+            hp: 1,
+            maxHp: 1,
+            points: 15,
+            shootCooldown: 1.5,
+            radius: 0.7
+          };
+        },
+        (e) => {
+          e.mesh.visible = false;
+        },
+        prewarm
+      );
+
+    const enemyPools: Record<EnemyEntity3D['type'], ObjectPool<EnemyEntity3D>> = {
+      scout: createEnemyPool('scout', 10),
+      interceptor: createEnemyPool('interceptor', 8),
+      tank: createEnemyPool('tank', 6),
+      commander: createEnemyPool('commander', 4)
+    };
+    enemyPoolsRef.current = enemyPools;
+    const enemyTypes: EnemyEntity3D['type'][] = ['scout', 'interceptor', 'tank', 'commander'];
+
     const spawnBullet = (x: number, z: number, vx: number, vz: number, isEnemy: boolean, color: number) => {
-      const mat = new THREE.MeshStandardMaterial({
-        color,
-        emissive: color,
-        emissiveIntensity: 0.95,
-        roughness: 0.15
-      });
-      const mesh = new THREE.Mesh(bulletGeo, mat);
-      mesh.position.set(x, 0.65, z);
-      stage.scene.add(mesh);
-      bulletsRef.current.push({ mesh, x, z, vx, vz, isEnemy, color });
+      const b = bulletPool.acquire();
+      b.x = x;
+      b.z = z;
+      b.vx = vx;
+      b.vz = vz;
+      b.isEnemy = isEnemy;
+      b.color = color;
+      const mat = b.mesh.material as THREE.MeshStandardMaterial;
+      mat.color.setHex(color);
+      mat.emissive.setHex(color);
+      b.mesh.position.set(x, 0.65, z);
+      b.mesh.visible = true;
     };
 
     const spawnPowerUp = (x: number, z: number) => {
@@ -277,24 +362,16 @@ export default function SpaceDefenderGame({
         shield: 0x10b981,
         bomb: 0xef4444
       };
-      const g = new THREE.Group();
-      const core = new THREE.Mesh(
-        new THREE.OctahedronGeometry(0.42, 0),
-        new THREE.MeshStandardMaterial({
-          color: colorMap[type],
-          emissive: colorMap[type],
-          emissiveIntensity: 0.85,
-          roughness: 0.2
-        })
-      );
-      const ring = new THREE.Mesh(
-        new THREE.TorusGeometry(0.58, 0.04, 8, 20),
-        new THREE.MeshBasicMaterial({ color: 0xffffff })
-      );
-      g.add(core, ring);
-      g.position.set(x, 0.65, z);
-      stage.scene.add(g);
-      powerUpsRef.current.push({ mesh: g, x, z, type });
+      const p = powerUpPool.acquire();
+      p.x = x;
+      p.z = z;
+      p.type = type;
+      const coreMesh = p.mesh.children[0] as THREE.Mesh;
+      const mat = coreMesh.material as THREE.MeshStandardMaterial;
+      mat.color.setHex(colorMap[type]);
+      mat.emissive.setHex(colorMap[type]);
+      p.mesh.position.set(x, 0.65, z);
+      p.mesh.visible = true;
     };
 
     const spawnEnemy = (waveNum: number) => {
@@ -309,24 +386,19 @@ export default function SpaceDefenderGame({
       const ptsMap = { scout: 15, interceptor: 25, tank: 50, commander: 100 };
       const radMap = { scout: 0.68, interceptor: 0.72, tank: 0.95, commander: 1.15 };
 
-      const mesh = buildEnemyShip3D(type);
+      const e = enemyPools[type].acquire();
       const x = (Math.random() - 0.5) * (ARENA_HALF_W * 1.75);
       const z = ARENA_TOP_Z;
-      mesh.position.set(x, 0.65, z);
-      stage.scene.add(mesh);
-
-      enemiesRef.current.push({
-        mesh,
-        x,
-        z,
-        speed: spdMap[type] + Math.min(2.5, waveNum * 0.18),
-        type,
-        hp: hpMap[type],
-        maxHp: hpMap[type],
-        points: ptsMap[type],
-        shootCooldown: 1.2 + Math.random() * 1.5,
-        radius: radMap[type]
-      });
+      e.x = x;
+      e.z = z;
+      e.speed = spdMap[type] + Math.min(2.5, waveNum * 0.18);
+      e.hp = hpMap[type];
+      e.maxHp = hpMap[type];
+      e.points = ptsMap[type];
+      e.shootCooldown = 1.2 + Math.random() * 1.5;
+      e.radius = radMap[type];
+      e.mesh.position.set(x, 0.65, z);
+      e.mesh.visible = true;
     };
 
     stage.startLoop((dt, elapsed) => {
@@ -374,26 +446,26 @@ export default function SpaceDefenderGame({
       if (ps.invincibleTimer > 0) ps.invincibleTimer -= dt;
       if (ps.weaponTimer > 0) {
         ps.weaponTimer -= dt;
-        if (ps.weaponTimer <= 0) {
+        if (ps.weaponTimer <= 0 && ps.weapon !== 'single') {
           ps.weapon = 'single';
           setWeaponType('single');
         }
       }
       if (ps.comboTimer > 0) {
         ps.comboTimer -= dt;
-        if (ps.comboTimer <= 0) {
+        if (ps.comboTimer <= 0 && ps.combo !== 0) {
           ps.combo = 0;
           setCombo(0);
         }
       }
 
-      // Auto-fire or Space/Touch fire
+      // Auto-fire + rapid fire on Space/Primary
       ps.shootCooldown -= dt;
-      const wantsShoot = keys[' '] || keys['Space'] || keys['z'] || true; // Continuous arcade fire + manual boost
-      if (wantsShoot && ps.shootCooldown <= 0) {
-        const rate = ps.weapon === 'rapid' ? 0.11 : 0.21;
+      const fireHeld = keys[' '] || keys['Space'] || keys['z'];
+      if (ps.shootCooldown <= 0) {
+        const rate = ps.weapon === 'rapid' ? 0.11 : fireHeld ? 0.16 : 0.21;
         ps.shootCooldown = rate;
-        audio.playLaser?.();
+        audioController.playLaser();
         if (ps.weapon === 'single' || ps.weapon === 'rapid') {
           spawnBullet(ps.x, ps.z - 1.1, 0, -24, false, 0x22d3ee);
         } else if (ps.weapon === 'dual') {
@@ -414,23 +486,22 @@ export default function SpaceDefenderGame({
       }
 
       // Update Bullets
-      for (let i = bulletsRef.current.length - 1; i >= 0; i--) {
-        const b = bulletsRef.current[i];
+      const activeBullets = bulletPool.getActiveItems();
+      for (let i = activeBullets.length - 1; i >= 0; i--) {
+        const b = activeBullets[i];
         b.x += b.vx * dt;
         b.z += b.vz * dt;
         b.mesh.position.set(b.x, 0.65, b.z);
 
         if (b.z < ARENA_TOP_Z - 3 || b.z > ARENA_BOT_Z + 3 || Math.abs(b.x) > ARENA_HALF_W + 3) {
-          stage.scene.remove(b.mesh);
-          bulletsRef.current.splice(i, 1);
+          bulletPool.release(i);
           continue;
         }
 
         if (b.isEnemy) {
           const dist = Math.hypot(b.x - ps.x, b.z - ps.z);
           if (dist < 0.78) {
-            stage.scene.remove(b.mesh);
-            bulletsRef.current.splice(i, 1);
+            bulletPool.release(i);
             if (ps.invincibleTimer <= 0) {
               if (ps.shield) {
                 ps.shield = false;
@@ -438,17 +509,19 @@ export default function SpaceDefenderGame({
                 ps.invincibleTimer = 1.2;
                 stage.particles.burst(ps.x, 0.65, ps.z, 22, 0x22d3ee, 8);
                 stage.triggerTrauma(0.35);
+                audioController.playShield();
               } else {
                 ps.lives -= 1;
                 setLives(ps.lives);
                 ps.invincibleTimer = 1.8;
                 stage.particles.burst(ps.x, 0.65, ps.z, 32, 0xef4444, 10);
                 stage.triggerTrauma(0.65);
-                audio.playExplosion?.();
                 if (ps.lives <= 0) {
+                  audioController.playGameOver();
                   triggerGameOver(scoreRef.current);
                   return;
                 }
+                audioController.playHit();
               }
             }
           }
@@ -456,158 +529,181 @@ export default function SpaceDefenderGame({
       }
 
       // Update Enemies
-      for (let i = enemiesRef.current.length - 1; i >= 0; i--) {
-        const e = enemiesRef.current[i];
-        e.z += e.speed * dt;
-        if (e.type === 'interceptor') {
-          e.x += Math.sin(elapsed * 3.5 + i) * 2.5 * dt;
-        }
-        e.mesh.position.set(e.x, 0.65, e.z);
-        e.mesh.rotation.z = Math.sin(elapsed * 4 + i) * 0.15;
-
-        // Enemy shooting
-        e.shootCooldown -= dt;
-        if (e.shootCooldown <= 0 && e.z < ps.z - 2.5) {
-          e.shootCooldown = e.type === 'commander' ? 1.1 : 2.1;
-          spawnBullet(e.x, e.z + 0.8, 0, 11.5, true, 0xf43f5e);
-        }
-
-        // Check bullet collisions with enemy
-        let destroyed = false;
-        for (let j = bulletsRef.current.length - 1; j >= 0; j--) {
-          const b = bulletsRef.current[j];
-          if (b.isEnemy) continue;
-          if (Math.hypot(b.x - e.x, b.z - e.z) < e.radius + 0.25) {
-            stage.scene.remove(b.mesh);
-            bulletsRef.current.splice(j, 1);
-            e.hp -= 1;
-            stage.particles.burst(e.x, 0.65, e.z, 8, 0x38bdf8, 5);
-            if (e.hp <= 0) {
-              destroyed = true;
-              break;
-            }
+      for (const eType of enemyTypes) {
+        const pool = enemyPools[eType];
+        const activeEnemies = pool.getActiveItems();
+        for (let i = activeEnemies.length - 1; i >= 0; i--) {
+          const e = activeEnemies[i];
+          e.z += e.speed * dt;
+          if (e.type === 'interceptor') {
+            e.x += Math.sin(elapsed * 3.5 + i) * 2.5 * dt;
           }
-        }
+          e.mesh.position.set(e.x, 0.65, e.z);
+          e.mesh.rotation.z = Math.sin(elapsed * 4 + i) * 0.15;
 
-        if (destroyed) {
-          stage.scene.remove(e.mesh);
-          enemiesRef.current.splice(i, 1);
-          ps.combo += 1;
-          ps.comboTimer = 3.2;
-          setCombo(ps.combo);
-          const mult = Math.min(4, 1 + Math.floor(ps.combo / 5));
-          addScore(e.points * mult);
-
-          stage.particles.burst(
-            e.x,
-            0.65,
-            e.z,
-            e.type === 'commander' ? 42 : 20,
-            e.type === 'commander' ? 0xf59e0b : 0xf43f5e,
-            8.5
-          );
-          stage.triggerTrauma(e.type === 'commander' ? 0.55 : 0.22);
-          if (e.type === 'commander') {
-            stage.triggerSlowMo(0.38, 0.25);
-            stage.kickFov(4.5);
-          }
-          audio.playExplosion?.();
-
-          if (Math.random() < 0.16) {
-            spawnPowerUp(e.x, e.z);
+          // Enemy shooting
+          e.shootCooldown -= dt;
+          if (e.shootCooldown <= 0 && e.z < ps.z - 2.5) {
+            e.shootCooldown = e.type === 'commander' ? 1.1 : 2.1;
+            spawnBullet(e.x, e.z + 0.8, 0, 11.5, true, 0xf43f5e);
           }
 
-          ps.killsInWave += 1;
-          if (ps.killsInWave >= 10 + ps.wave * 4) {
-            ps.killsInWave = 0;
-            ps.wave += 1;
-            setWave(ps.wave);
-            stage.kickFov(6);
-          }
-          continue;
-        }
-
-        // Player body collision or enemy passed bottom
-        if (Math.hypot(e.x - ps.x, e.z - ps.z) < e.radius + 0.65) {
-          stage.scene.remove(e.mesh);
-          enemiesRef.current.splice(i, 1);
-          if (ps.invincibleTimer <= 0) {
-            if (ps.shield) {
-              ps.shield = false;
-              setHasShield(false);
-              ps.invincibleTimer = 1.2;
-              stage.particles.burst(ps.x, 0.65, ps.z, 25, 0x22d3ee, 8);
-            } else {
-              ps.lives -= 1;
-              setLives(ps.lives);
-              ps.invincibleTimer = 1.8;
-              stage.particles.burst(ps.x, 0.65, ps.z, 35, 0xef4444, 10);
-              stage.triggerTrauma(0.7);
-              if (ps.lives <= 0) {
-                triggerGameOver(scoreRef.current);
-                return;
+          // Check bullet collisions with enemy
+          let destroyed = false;
+          for (let j = activeBullets.length - 1; j >= 0; j--) {
+            const b = activeBullets[j];
+            if (b.isEnemy) continue;
+            if (Math.hypot(b.x - e.x, b.z - e.z) < e.radius + 0.25) {
+              bulletPool.release(j);
+              e.hp -= 1;
+              stage.particles.burst(e.x, 0.65, e.z, 8, 0x38bdf8, 5);
+              if (e.hp <= 0) {
+                destroyed = true;
+                break;
               }
             }
           }
-          continue;
-        }
 
-        if (e.z > ARENA_BOT_Z + 2.5) {
-          stage.scene.remove(e.mesh);
-          enemiesRef.current.splice(i, 1);
+          if (destroyed) {
+            const ex = e.x;
+            const ez = e.z;
+            const pts = e.points;
+            const isCmd = e.type === 'commander';
+            pool.release(i);
+            ps.combo += 1;
+            ps.comboTimer = 3.2;
+            setCombo(ps.combo);
+            const mult = Math.min(4, 1 + Math.floor(ps.combo / 5));
+            addScore(pts * mult);
+
+            stage.particles.burst(
+              ex,
+              0.65,
+              ez,
+              isCmd ? 42 : 20,
+              isCmd ? 0xf59e0b : 0xf43f5e,
+              8.5
+            );
+            stage.triggerTrauma(isCmd ? 0.55 : 0.22);
+            if (isCmd) {
+              stage.triggerSlowMo(0.38, 0.25);
+              stage.kickFov(4.5);
+            }
+            if (ps.combo > 1) {
+              audioController.playCombo(ps.combo);
+            } else {
+              audioController.playExplosion();
+            }
+
+            if (Math.random() < 0.16) {
+              spawnPowerUp(ex, ez);
+            }
+
+            ps.killsInWave += 1;
+            if (ps.killsInWave >= 10 + ps.wave * 4) {
+              ps.killsInWave = 0;
+              ps.wave += 1;
+              setWave(ps.wave);
+              stage.kickFov(6);
+              audioController.playPowerup();
+            }
+            continue;
+          }
+
+          // Player body collision or enemy passed bottom
+          if (Math.hypot(e.x - ps.x, e.z - ps.z) < e.radius + 0.65) {
+            pool.release(i);
+            if (ps.invincibleTimer <= 0) {
+              if (ps.shield) {
+                ps.shield = false;
+                setHasShield(false);
+                ps.invincibleTimer = 1.2;
+                stage.particles.burst(ps.x, 0.65, ps.z, 25, 0x22d3ee, 8);
+                audioController.playShield();
+              } else {
+                ps.lives -= 1;
+                setLives(ps.lives);
+                ps.invincibleTimer = 1.8;
+                stage.particles.burst(ps.x, 0.65, ps.z, 35, 0xef4444, 10);
+                stage.triggerTrauma(0.7);
+                if (ps.lives <= 0) {
+                  audioController.playGameOver();
+                  triggerGameOver(scoreRef.current);
+                  return;
+                }
+                audioController.playHit();
+              }
+            }
+            continue;
+          }
+
+          if (e.z > ARENA_BOT_Z + 2.5) {
+            pool.release(i);
+          }
         }
       }
 
       // Update PowerUps
-      for (let i = powerUpsRef.current.length - 1; i >= 0; i--) {
-        const p = powerUpsRef.current[i];
+      const activePowerUps = powerUpPool.getActiveItems();
+      for (let i = activePowerUps.length - 1; i >= 0; i--) {
+        const p = activePowerUps[i];
         p.z += 3.2 * dt;
         p.mesh.position.set(p.x, 0.65, p.z);
         p.mesh.rotation.y += dt * 3;
         p.mesh.rotation.x += dt * 2;
 
         if (Math.hypot(p.x - ps.x, p.z - ps.z) < 1.1) {
-          stage.scene.remove(p.mesh);
-          powerUpsRef.current.splice(i, 1);
-          audio.playPowerUp?.();
+          const pType = p.type;
+          powerUpPool.release(i);
+          audioController.playPowerup();
           stage.particles.burst(ps.x, 0.65, ps.z, 24, 0x10b981, 7);
           stage.kickFov(-3.5);
 
-          if (p.type === 'shield') {
+          if (pType === 'shield') {
             ps.shield = true;
             setHasShield(true);
-          } else if (p.type === 'bomb') {
-            enemiesRef.current.forEach((en) => {
-              stage.particles.burst(en.x, 0.65, en.z, 18, 0xf59e0b, 9);
-              stage.scene.remove(en.mesh);
-              addScore(en.points);
-            });
-            enemiesRef.current = [];
+          } else if (pType === 'bomb') {
+            for (const eType of enemyTypes) {
+              const ePool = enemyPools[eType];
+              for (const en of ePool.getActiveItems()) {
+                stage.particles.burst(en.x, 0.65, en.z, 18, 0xf59e0b, 9);
+                addScore(en.points);
+              }
+              ePool.releaseAll();
+            }
             stage.triggerTrauma(0.8);
             stage.triggerSlowMo(0.35, 0.3);
           } else {
-            ps.weapon = p.type;
+            ps.weapon = pType;
             ps.weaponTimer = 10;
-            setWeaponType(p.type);
+            setWeaponType(pType);
           }
           continue;
         }
 
         if (p.z > ARENA_BOT_Z + 2) {
-          stage.scene.remove(p.mesh);
-          powerUpsRef.current.splice(i, 1);
+          powerUpPool.release(i);
         }
       }
     });
 
     return () => {
+      enemyPools.scout.releaseAll();
+      enemyPools.interceptor.releaseAll();
+      enemyPools.tank.releaseAll();
+      enemyPools.commander.releaseAll();
+      bulletPool.releaseAll();
+      powerUpPool.releaseAll();
+      enemyPoolsRef.current = null;
+      bulletPoolRef.current = null;
+      powerUpPoolRef.current = null;
       stage.dispose();
       stageRef.current = null;
     };
   }, [addScore, scoreRef, triggerGameOver]);
 
   return (
-    <div className="relative w-full h-full min-h-[460px] bg-slate-950 overflow-hidden rounded-2xl border border-indigo-500/20">
+    <div className="relative w-full h-full min-h-[260px] sm:min-h-[380px] lg:min-h-[460px] bg-slate-950 overflow-hidden rounded-2xl border border-indigo-500/20">
       {/* Dedicated Empty WebGL Mount Container */}
       <div ref={mountRef} className="absolute inset-0 w-full h-full" />
 

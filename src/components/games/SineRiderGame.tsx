@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
 import { GameComponentProps } from '../../types';
-import { audio } from '../../utils/audio';
+import { audioController } from '../../sdk/audioController';
+import { ObjectPool } from '../../sdk/objectPool';
 import { useGameEngine } from '../../hooks/useGameEngine';
 import { inputManager } from '../../services/inputService';
 import { GameOverlay } from '../gameplay/GameOverlay';
@@ -63,14 +64,12 @@ export default function SineRiderGame({
     spawnTimer: 0.4
   });
 
-  const gatesRef = useRef<SineGate3D[]>([]);
+  const ringPoolRef = useRef<ObjectPool<SineGate3D> | null>(null);
+  const hazardPoolRef = useRef<ObjectPool<SineGate3D> | null>(null);
 
   const handleStart = useCallback(() => {
-    const stage = stageRef.current;
-    if (stage) {
-      gatesRef.current.forEach((g) => stage.scene.remove(g.mesh));
-    }
-    gatesRef.current = [];
+    ringPoolRef.current?.releaseAll();
+    hazardPoolRef.current?.releaseAll();
     riderRef.current = {
       phase: 0,
       freq: 2.8,
@@ -102,13 +101,13 @@ export default function SineRiderGame({
 
     const unsub = inputManager.subscribe({
       onActionDown: (action) => {
-        if (action === 'ACTION_PRIMARY' || action === 'UP') {
+        if (action === 'PRIMARY' || action === 'ACTION_PRIMARY' || action === 'UP') {
           riderRef.current.boosting = true;
           setFreqLabel('2.2 Hz');
         }
       },
       onActionUp: (action) => {
-        if (action === 'ACTION_PRIMARY' || action === 'UP') {
+        if (action === 'PRIMARY' || action === 'ACTION_PRIMARY' || action === 'UP') {
           riderRef.current.boosting = false;
           setFreqLabel('1.0 Hz');
         }
@@ -193,6 +192,26 @@ export default function SineRiderGame({
       emissiveIntensity: 0.85
     });
 
+    const createGatePool = (isHazard: boolean, prewarm: number) =>
+      new ObjectPool<SineGate3D>(
+        () => {
+          const mesh = new THREE.Mesh(isHazard ? hazardGeo : ringGeo, isHazard ? hazardMat : ringMat);
+          mesh.visible = false;
+          stage.scene.add(mesh);
+          return { mesh, x: 11, y: 3.2, isHazard, passed: false };
+        },
+        (g) => {
+          g.mesh.visible = false;
+          g.passed = false;
+        },
+        prewarm
+      );
+
+    const ringPool = createGatePool(false, 10);
+    const hazardPool = createGatePool(true, 10);
+    ringPoolRef.current = ringPool;
+    hazardPoolRef.current = hazardPool;
+
     stage.startLoop((dt) => {
       if (gameStateRef.current !== 'playing') return;
 
@@ -221,46 +240,53 @@ export default function SineRiderGame({
       if (r.spawnTimer <= 0) {
         r.spawnTimer = 0.78;
         const isHazard = Math.random() < 0.42;
-        const mesh = new THREE.Mesh(isHazard ? hazardGeo : ringGeo, isHazard ? hazardMat : ringMat);
+        const g = (isHazard ? hazardPool : ringPool).acquire();
         const gy = 3.2 + (Math.random() - 0.5) * 4.2;
-        mesh.position.set(11, gy, 0);
-        stage.scene.add(mesh);
-        gatesRef.current.push({ mesh, x: 11, y: gy, isHazard, passed: false });
+        g.x = 11;
+        g.y = gy;
+        g.passed = false;
+        g.mesh.position.set(11, gy, 0);
+        g.mesh.visible = true;
       }
 
-      for (let i = gatesRef.current.length - 1; i >= 0; i--) {
-        const g = gatesRef.current[i];
-        g.x -= r.speed * dt;
-        g.mesh.position.x = g.x;
-        if (g.isHazard) g.mesh.rotation.y += dt * 4;
+      for (const pool of [ringPool, hazardPool]) {
+        const activeList = pool.getActiveItems();
+        for (let i = activeList.length - 1; i >= 0; i--) {
+          const g = activeList[i];
+          g.x -= r.speed * dt;
+          g.mesh.position.x = g.x;
+          if (g.isHazard) g.mesh.rotation.y += dt * 4;
 
-        if (!g.passed && Math.abs(g.x - -3.2) < 0.72) {
-          const distY = Math.abs(g.y - r.y);
-          if (g.isHazard && distY < 0.78) {
-            stage.particles.burst(-3.2, r.y, 0, 34, 0xef4444, 9.5);
-            stage.triggerTrauma(0.75);
-            audio.playExplosion?.();
-            triggerGameOver(scoreRef.current);
-            return;
-          } else if (!g.isHazard && distY < 0.95) {
-            g.passed = true;
-            stage.scene.remove(g.mesh);
-            gatesRef.current.splice(i, 1);
-            addScore(25);
-            audio.playCoin?.();
-            stage.particles.burst(-3.2, r.y, 0, 18, 0x22d3ee, 7);
-            continue;
+          if (!g.passed && Math.abs(g.x - -3.2) < 0.72) {
+            const distY = Math.abs(g.y - r.y);
+            if (g.isHazard && distY < 0.78) {
+              stage.particles.burst(-3.2, r.y, 0, 34, 0xef4444, 9.5);
+              stage.triggerTrauma(0.75);
+              audioController.playGameOver();
+              triggerGameOver(scoreRef.current);
+              return;
+            } else if (!g.isHazard && distY < 0.95) {
+              g.passed = true;
+              pool.release(i);
+              addScore(25);
+              audioController.playScore();
+              stage.particles.burst(-3.2, r.y, 0, 18, 0x22d3ee, 7);
+              continue;
+            }
           }
-        }
 
-        if (g.x < -10) {
-          stage.scene.remove(g.mesh);
-          gatesRef.current.splice(i, 1);
+          if (g.x < -10) {
+            pool.release(i);
+          }
         }
       }
     });
 
     return () => {
+      ringPool.releaseAll();
+      hazardPool.releaseAll();
+      ringPoolRef.current = null;
+      hazardPoolRef.current = null;
       stage.dispose();
       stageRef.current = null;
     };
@@ -268,12 +294,16 @@ export default function SineRiderGame({
 
   return (
     <div
-      className="relative w-full h-full min-h-[460px] bg-slate-950 overflow-hidden rounded-2xl border border-cyan-500/20"
+      className="relative w-full h-full min-h-[260px] sm:min-h-[380px] lg:min-h-[460px] bg-slate-950 overflow-hidden rounded-2xl border border-cyan-500/20 touch-none"
       onPointerDown={() => {
         riderRef.current.boosting = true;
         setFreqLabel('2.2 Hz');
       }}
       onPointerUp={() => {
+        riderRef.current.boosting = false;
+        setFreqLabel('1.0 Hz');
+      }}
+      onPointerCancel={() => {
         riderRef.current.boosting = false;
         setFreqLabel('1.0 Hz');
       }}

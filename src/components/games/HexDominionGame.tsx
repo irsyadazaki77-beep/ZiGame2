@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
 import { GameComponentProps } from '../../types';
-import { audio } from '../../utils/audio';
+import { audioController } from '../../sdk/audioController';
 import { useGameEngine } from '../../hooks/useGameEngine';
 import { GameOverlay } from '../gameplay/GameOverlay';
 import { ThreeDockOverlay } from '../gameplay/ThreeDockOverlay';
@@ -10,7 +10,7 @@ import {
   CameraPreset3D,
   QualityLevel3D
 } from '../../utils/threeStage';
-import { Hexagon, Swords, Trophy } from 'lucide-react';
+import { Hexagon, Swords } from 'lucide-react';
 
 type HexOwner = 'neutral' | 'player' | 'ai';
 
@@ -91,13 +91,14 @@ export default function HexDominionGame({
       if (targetTile.owner === 'player') {
         targetTile.power += 2;
         addScore(20);
+        audioController.playPowerup();
       } else {
         targetTile.owner = 'player';
         targetTile.power = Math.max(2, targetTile.power);
         addScore(45);
+        audioController.playScore();
       }
       syncTileVisuals(targetTile);
-      audio.playCoin?.();
       stage?.particles.burst(targetTile.x, 0.85, targetTile.z, 20, 0x6366f1, 6.5);
 
       // AI Counter-Move
@@ -123,9 +124,11 @@ export default function HexDominionGame({
       if (pCount === 0 || aCount === 0 || tiles.every((t) => t.owner !== 'neutral')) {
         if (pCount >= aCount) {
           addScore(200);
+          audioController.playLevelUp();
           stage?.kickFov(5);
           resetBoardRef.current();
         } else {
+          audioController.playGameOver();
           triggerGameOver(scoreRef.current);
         }
       }
@@ -290,8 +293,8 @@ export default function HexDominionGame({
   }, [executeTileCommand, syncTileVisuals]);
 
   return (
-    <div className="relative w-full h-full min-h-[460px] bg-slate-950 overflow-hidden rounded-2xl border border-indigo-500/20">
-      <div ref={mountRef} className="absolute inset-0 w-full h-full cursor-pointer" />
+    <div className="relative w-full h-full min-h-[280px] sm:min-h-[380px] lg:min-h-[460px] bg-slate-950 overflow-hidden rounded-2xl border border-indigo-500/20 select-none">
+      <div ref={mountRef} className="absolute inset-0 w-full h-full cursor-pointer touch-none" />
 
       <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex flex-wrap items-center justify-between gap-2 p-3.5">
         <div className="flex items-center gap-3 rounded-xl border border-white/10 bg-slate-950/85 px-3.5 py-2 text-xs text-slate-200 tabular-nums">

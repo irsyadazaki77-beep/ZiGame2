@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { audio } from '../../../utils/audio';
+import { audioController } from '../../../sdk/audioController';
 import {
   ThreeStageController,
   CameraPreset3D,
@@ -65,6 +65,7 @@ export class BrickBreakerEngine {
   private disposed = false;
 
   private score = 0;
+  private combo = 0;
   private lastReportedScore = 0;
   private lastReportedLives = 3;
 
@@ -134,6 +135,7 @@ export class BrickBreakerEngine {
 
   public resetGame(randomDirection = Math.random() > 0.5 ? 1 : -1): void {
     this.score = 0;
+    this.combo = 0;
     this.lastReportedScore = 0;
     this.lastReportedLives = 3;
 
@@ -274,12 +276,13 @@ export class BrickBreakerEngine {
     st.vz = stepResult.vz;
 
     if (stepResult.wallBounced) {
-      audio.playClick?.();
+      audioController.playClick();
     }
 
     if (stepResult.paddleBounced) {
+      this.combo = 0;
       this.stage?.particles.burst(st.ballX, 0.35, BRICK_PADDLE_Z, 12, 0x38bdf8, 5);
-      audio.playJump?.();
+      audioController.playReflect();
       this.callbacks.onTrajectoryPoint?.(st.paddleX, st.ballZ, 'paddle_hit');
     } else {
       this.callbacks.onTrajectoryPoint?.(st.paddleX, st.ballZ);
@@ -293,6 +296,7 @@ export class BrickBreakerEngine {
         if (hitBrick.mesh) {
           hitBrick.mesh.visible = false;
         }
+        this.combo += 1;
         this.score += stepResult.scoreDelta;
         this.callbacks.onScoreAdd?.(stepResult.scoreDelta);
 
@@ -304,7 +308,11 @@ export class BrickBreakerEngine {
 
         this.stage?.particles.burst(hitBrick.x, 0.4, hitBrick.z, 20, hitBrick.color, 7.5);
         this.stage?.triggerTrauma(0.22);
-        audio.playCoin?.();
+        if (this.combo > 1) {
+          audioController.playCombo(this.combo);
+        } else {
+          audioController.playScore();
+        }
       }
     }
 
@@ -327,15 +335,18 @@ export class BrickBreakerEngine {
 
       if (st.stage > 5) {
         // Player completed all 5 stages!
+        audioController.playWin();
         this.callbacks.onGameOver?.(true);
         return;
       }
 
+      audioController.playPowerup();
       this.rebuildBricks();
     }
 
     // Ball lost off bottom edge
     if (stepResult.ballLost) {
+      this.combo = 0;
       st.lives -= 1;
 
       // Notify UI listener only if lives actually changed
@@ -347,13 +358,14 @@ export class BrickBreakerEngine {
 
       this.stage?.particles.burst(st.ballX, 0.4, BRICK_PADDLE_Z, 30, 0xef4444, 9);
       this.stage?.triggerTrauma(0.65);
-      audio.playExplosion?.();
 
       if (st.lives <= 0) {
+        audioController.playGameOver();
         this.callbacks.onGameOver?.(false);
         return;
       }
 
+      audioController.playHit();
       st.ballX = st.paddleX;
       st.ballZ = 4.2;
       st.vx = 5.5 * (Math.random() > 0.5 ? 1 : -1);
@@ -476,6 +488,7 @@ export class BrickBreakerEngine {
     this.rebuildBricks();
 
     container.addEventListener('pointermove', this.handlePointerMove);
+    container.addEventListener('pointerdown', this.handlePointerMove);
 
     stage.startLoop((dt) => {
       if (this.callbacks.isPlaying && !this.callbacks.isPlaying()) return;
@@ -507,6 +520,7 @@ export class BrickBreakerEngine {
 
     if (this.container) {
       this.container.removeEventListener('pointermove', this.handlePointerMove);
+      this.container.removeEventListener('pointerdown', this.handlePointerMove);
       this.container = null;
     }
 

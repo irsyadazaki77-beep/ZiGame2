@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
 import { GameComponentProps } from '../../types';
-import { audio } from '../../utils/audio';
+import { audioController } from '../../sdk/audioController';
 import { useGameEngine } from '../../hooks/useGameEngine';
 import { GameOverlay } from '../gameplay/GameOverlay';
 import { ThreeDockOverlay } from '../gameplay/ThreeDockOverlay';
@@ -52,6 +52,14 @@ export default function MemoryPathGame({
   useEffect(() => {
     gameStateRef.current = gameState;
   }, [gameState]);
+
+  const lastPhaseRef = useRef('HAFALKAN JALUR');
+  const setPhaseLabelSafe = useCallback((label: string) => {
+    if (lastPhaseRef.current !== label) {
+      lastPhaseRef.current = label;
+      setPhaseLabel(label);
+    }
+  }, []);
 
   const pathStateRef = useRef({
     safeCols: [1, 2, 1, 2, 1] as number[],
@@ -172,7 +180,7 @@ export default function MemoryPathGame({
       pathStateRef.current.safeCols = safe;
       pathStateRef.current.currentRow = 0;
       pathStateRef.current.previewTimer = Math.max(1.1, 2.2 - pathStateRef.current.round * 0.15);
-      setPhaseLabel('HAFALKAN JALUR 3D');
+      setPhaseLabelSafe('HAFALKAN JALUR 3D');
       syncBridgeVisuals(true);
     };
     generateBridgeRef.current();
@@ -186,7 +194,7 @@ export default function MemoryPathGame({
       if (st.safeCols[tile.r] === tile.c) {
         st.currentRow += 1;
         addScore(30 * st.round);
-        audio.playCoin?.();
+        audioController.playScore();
         stage.particles.burst(
           tile.mesh.position.x,
           0.55,
@@ -201,7 +209,7 @@ export default function MemoryPathGame({
           addScore(100);
           st.round += 1;
           setRound(st.round);
-          audio.playPowerUp?.();
+          audioController.playLevelUp();
           stage.kickFov(4.5);
           generateBridgeRef.current();
         }
@@ -218,7 +226,8 @@ export default function MemoryPathGame({
           9.5
         );
         stage.triggerTrauma(0.75);
-        audio.playExplosion?.();
+        audioController.playExplosion();
+        audioController.playGameOver();
         triggerGameOver(scoreRef.current);
       }
     };
@@ -248,11 +257,11 @@ export default function MemoryPathGame({
       if (st.previewTimer > 0) {
         st.previewTimer -= dt;
         if (st.previewTimer <= 0) {
-          setPhaseLabel(`LANGKAH BARIS ${st.currentRow + 1} / ${BRIDGE_ROWS}`);
+          setPhaseLabelSafe(`LANGKAH BARIS ${st.currentRow + 1} / ${BRIDGE_ROWS}`);
           syncBridgeVisuals(false);
         }
       } else {
-        setPhaseLabel(`LANGKAH BARIS ${st.currentRow + 1} / ${BRIDGE_ROWS}`);
+        setPhaseLabelSafe(`LANGKAH BARIS ${st.currentRow + 1} / ${BRIDGE_ROWS}`);
       }
     });
 
@@ -261,11 +270,11 @@ export default function MemoryPathGame({
       stage.dispose();
       stageRef.current = null;
     };
-  }, [addScore, scoreRef, triggerGameOver]);
+  }, [addScore, scoreRef, setPhaseLabelSafe, triggerGameOver]);
 
   return (
-    <div className="relative w-full h-full min-h-[460px] bg-slate-950 overflow-hidden rounded-2xl border border-blue-500/20">
-      <div ref={mountRef} className="absolute inset-0 w-full h-full cursor-pointer" />
+    <div className="relative w-full h-full min-h-[280px] sm:min-h-[380px] lg:min-h-[460px] bg-slate-950 overflow-hidden rounded-2xl border border-blue-500/20 select-none">
+      <div ref={mountRef} className="absolute inset-0 w-full h-full cursor-pointer touch-none" />
 
       <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex flex-wrap items-center justify-between gap-2 p-3.5">
         <div className="flex items-center gap-3 rounded-xl border border-white/10 bg-slate-950/85 px-3.5 py-2 text-xs text-slate-200 tabular-nums">

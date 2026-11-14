@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
 import { GameComponentProps } from '../../types';
-import { audio } from '../../utils/audio';
+import { audioController } from '../../sdk';
 import { useGameEngine } from '../../hooks/useGameEngine';
 import { inputManager } from '../../services/inputService';
 import { GameOverlay } from '../gameplay/GameOverlay';
@@ -63,11 +63,10 @@ export default function LockBreakerGame({
     if (diff > Math.PI) diff = Math.PI * 2 - diff;
 
     if (diff < 0.34) {
-      // Hit target lock pin!
       st.dir *= -1;
       st.pinsRemaining -= 1;
       addScore(30 * st.vault);
-      audio.playCoin?.();
+      audioController.playScore();
 
       const tx = Math.cos(st.targetAngle) * 3.1;
       const tz = Math.sin(st.targetAngle) * 3.1;
@@ -81,15 +80,16 @@ export default function LockBreakerGame({
         setVaultLevel(st.vault);
         addScore(100);
         stage?.kickFov(5);
-        audio.playPowerUp?.();
+        audioController.playLevelUp();
+        audioController.playPowerup();
       }
       setPinsLeft(st.pinsRemaining);
       st.targetAngle = (st.needleAngle + Math.PI * (0.45 + Math.random() * 1.1)) % (Math.PI * 2);
     } else {
-      // Missed pin -> Vault Lockdown
       stage?.particles.burst(0, 0.8, 0, 36, 0xef4444, 9.5);
       stage?.triggerTrauma(0.75);
-      audio.playExplosion?.();
+      audioController.playExplosion();
+      audioController.playGameOver();
       triggerGameOver(scoreRef.current);
     }
   }, [addScore, scoreRef, triggerGameOver]);
@@ -109,21 +109,15 @@ export default function LockBreakerGame({
   }, [startWithCountdown]);
 
   useEffect(() => {
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === ' ' || e.key === 'Enter') {
-        attemptStrike();
-      }
-    };
-    window.addEventListener('keydown', onKeyDown);
-
     const unsub = inputManager.subscribe({
       onActionDown: (action) => {
-        if (action === 'ACTION_PRIMARY') attemptStrike();
+        if (action === 'PRIMARY' || action === 'ACTION_PRIMARY') {
+          attemptStrike();
+        }
       }
     });
 
     return () => {
-      window.removeEventListener('keydown', onKeyDown);
       unsub();
     };
   }, [attemptStrike]);
@@ -169,7 +163,6 @@ export default function LockBreakerGame({
     stageRef.current = stage;
     setQuality(stage.getQualityLevel());
 
-    // Build Multi-Part 3D Titanium Vault Dial (6 parts)
     const vaultGroup = new THREE.Group();
     const steelMat = new THREE.MeshPhysicalMaterial({
       color: 0x334155,
@@ -196,7 +189,6 @@ export default function LockBreakerGame({
     vaultGroup.add(outerRing, centerHub);
     stage.scene.add(vaultGroup);
 
-    // Target Lock Pin Orb
     const targetOrb = new THREE.Mesh(
       new THREE.OctahedronGeometry(0.45, 0),
       new THREE.MeshStandardMaterial({
@@ -207,7 +199,6 @@ export default function LockBreakerGame({
     );
     stage.scene.add(targetOrb);
 
-    // Rotating Laser Needle Arm
     const needleMesh = new THREE.Mesh(
       new THREE.BoxGeometry(0.28, 0.25, 0.9),
       new THREE.MeshStandardMaterial({
@@ -242,14 +233,15 @@ export default function LockBreakerGame({
   }, []);
 
   return (
-    <div
-      className="relative w-full h-full min-h-[460px] bg-slate-950 overflow-hidden rounded-2xl border border-amber-500/20"
-      onClick={attemptStrike}
-    >
-      <div ref={mountRef} className="absolute inset-0 w-full h-full cursor-pointer" />
+    <div className="relative w-full h-full min-h-[280px] sm:min-h-[380px] lg:min-h-[460px] bg-slate-950 overflow-hidden rounded-2xl border border-amber-500/20 touch-none select-none">
+      <div
+        ref={mountRef}
+        className="absolute inset-0 w-full h-full cursor-pointer touch-none"
+        onPointerDown={attemptStrike}
+      />
 
-      <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex flex-wrap items-center justify-between gap-2 p-3.5">
-        <div className="flex items-center gap-3 rounded-xl border border-white/10 bg-slate-950/85 px-3.5 py-2 text-xs text-slate-200 tabular-nums">
+      <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex flex-wrap items-center justify-between gap-2 p-3 sm:p-3.5">
+        <div className="flex items-center gap-2 sm:gap-3 rounded-xl border border-white/10 bg-slate-950/85 px-3 py-1.5 sm:px-3.5 sm:py-2 text-xs text-slate-200 tabular-nums">
           <span className="flex items-center gap-1 font-semibold text-amber-400">
             <Lock className="w-3.5 h-3.5" /> BRANKAS #{vaultLevel}
           </span>
@@ -257,7 +249,7 @@ export default function LockBreakerGame({
           <span>SKOR: <strong className="text-white">{score}</strong></span>
         </div>
 
-        <div className="flex items-center gap-1.5 rounded-xl border border-white/10 bg-slate-950/85 px-3.5 py-2 text-xs font-semibold text-cyan-400 tabular-nums">
+        <div className="flex items-center gap-1.5 rounded-xl border border-white/10 bg-slate-950/85 px-3 py-1.5 sm:px-3.5 sm:py-2 text-xs font-semibold text-cyan-400 tabular-nums">
           <Unlock className="w-3.5 h-3.5" /> PIN TERSISA: {pinsLeft}
         </div>
       </div>

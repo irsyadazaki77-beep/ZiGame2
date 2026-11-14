@@ -1,7 +1,7 @@
 import React from 'react';
 import { Trophy, Shield, RefreshCw, Swords, Maximize, Minimize, CloudOff } from 'lucide-react';
 import { GameStats, CompetitiveRating } from '../../types';
-import { audio } from '../../utils/audio';
+import { audioController } from '../../sdk/audioController';
 import { RANKED_GAME_ALLOWLIST } from '../../config/competitiveConfig';
 import { useAuth } from '../../contexts/AuthContext';
 
@@ -44,7 +44,7 @@ export const GameHUDBar: React.FC<GameHUDBarProps> = ({
         {isRankedEligible && (
           <button
             onClick={() => {
-              audio.playCoin();
+              audioController.playCoin();
               setIsRankedMode(!isRankedMode);
               onRestart();
             }}
@@ -53,11 +53,11 @@ export const GameHUDBar: React.FC<GameHUDBarProps> = ({
             title={!isFirebaseUser ? 'Mode Ranked memerlukan login Firebase untuk sinkronisasi leaderboard & rating' : 'Beralih mode Ranked / Normal'}
             className={`flex items-center gap-1 px-1.5 py-0.5 sm:px-3 sm:py-1 border rounded-lg text-[9px] xs:text-[10px] sm:text-xs font-bold transition-all cursor-pointer select-none shrink-0 ${
               isRankedMode 
-                ? 'bg-rose-500/15 border-rose-500/35 text-rose-400 animate-pulse' 
+                ? 'bg-rose-500/15 border-rose-500/35 text-rose-400' 
                 : 'bg-white/[0.03] border-white/[0.06] text-zinc-400 hover:text-white hover:bg-white/[0.06]'
             }`}
           >
-            <span className={`w-1 h-1 sm:w-1.5 sm:h-1.5 rounded-full ${isRankedMode ? 'bg-rose-500 animate-ping' : 'bg-zinc-600'}`} />
+            <span className={`w-1.5 h-1.5 rounded-full ${isRankedMode ? 'bg-rose-500' : 'bg-zinc-600'}`} />
             <span>{isRankedMode ? 'RANK' : 'NORM'}</span>
           </button>
         )}
@@ -76,8 +76,8 @@ export const GameHUDBar: React.FC<GameHUDBarProps> = ({
       {/* Right: Quick actions like competitive profile & quick retry */}
       <div className="flex items-center gap-1 sm:gap-2">
         {competitiveInfo && isRankedMode && (
-          <div className="flex items-center gap-1 px-1.5 py-0.5 sm:px-3 sm:py-1 bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 rounded-lg text-[9px] xs:text-[10px] sm:text-xs font-semibold select-none">
-            <Shield size={10} className="text-emerald-400 animate-pulse shrink-0" />
+          <div className="flex items-center gap-1 px-1.5 py-0.5 sm:px-3 sm:py-1 bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 rounded-lg text-[9px] xs:text-[10px] sm:text-xs font-semibold select-none tabular-nums">
+            <Shield size={10} className="text-emerald-400 shrink-0" />
             <span className="font-mono">{competitiveInfo.rating}<span className="hidden xs:inline"> pts</span></span>
           </div>
         )}
@@ -85,7 +85,7 @@ export const GameHUDBar: React.FC<GameHUDBarProps> = ({
         {onToggleFullscreen && (
           <button
             onClick={() => {
-              audio.playClick();
+              audioController.playClick();
               onToggleFullscreen();
             }}
             className="px-1.5 py-0.5 sm:px-3 sm:py-1 bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.08] hover:border-teal-500/40 text-zinc-300 hover:text-white rounded-lg text-[9px] xs:text-[10px] sm:text-xs font-bold flex items-center gap-1 transition-all cursor-pointer active:scale-95 select-none"

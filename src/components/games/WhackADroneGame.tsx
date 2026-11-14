@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
 import { GameComponentProps } from '../../types';
-import { audio } from '../../utils/audio';
+import { audioController } from '../../sdk';
 import { useGameEngine } from '../../hooks/useGameEngine';
 import { GameOverlay } from '../gameplay/GameOverlay';
 import { ThreeDockOverlay } from '../gameplay/ThreeDockOverlay';
@@ -65,6 +65,7 @@ export default function WhackADroneGame({
     spawnTimer: 0.4
   });
 
+  const lastTimeShownRef = useRef(45);
   const podsRef = useRef<DronePod3D[]>([]);
 
   const whackPod = useCallback(
@@ -76,7 +77,11 @@ export default function WhackADroneGame({
       setCombo(stateRef.current.combo);
       const pts = (pod.isGolden ? 50 : 20) + Math.min(30, stateRef.current.combo * 2);
       addScore(pts);
-      audio.playCoin?.();
+      if (pod.isGolden) {
+        audioController.playPowerup();
+      } else {
+        audioController.playScore();
+      }
       const stage = stageRef.current;
       if (stage) {
         stage.particles.burst(
@@ -104,6 +109,7 @@ export default function WhackADroneGame({
       combo: 0,
       spawnTimer: 0.4
     };
+    lastTimeShownRef.current = 45;
     setTimeLeft(45);
     setCombo(0);
     startWithCountdown();
@@ -277,8 +283,13 @@ export default function WhackADroneGame({
 
       const st = stateRef.current;
       st.timeLeft -= dt;
-      setTimeLeft(Math.max(0, Math.ceil(st.timeLeft)));
+      const nextTime = Math.max(0, Math.ceil(st.timeLeft));
+      if (nextTime !== lastTimeShownRef.current) {
+        lastTimeShownRef.current = nextTime;
+        setTimeLeft(nextTime);
+      }
       if (st.timeLeft <= 0) {
+        audioController.playGameOver();
         triggerGameOver(scoreRef.current);
         return;
       }
@@ -324,11 +335,11 @@ export default function WhackADroneGame({
   }, [scoreRef, triggerGameOver, whackPod]);
 
   return (
-    <div className="relative w-full h-full min-h-[460px] bg-slate-950 overflow-hidden rounded-2xl border border-fuchsia-500/20">
-      <div ref={mountRef} className="absolute inset-0 w-full h-full cursor-pointer" />
+    <div className="relative w-full h-full min-h-[280px] sm:min-h-[380px] lg:min-h-[460px] bg-slate-950 overflow-hidden rounded-2xl border border-fuchsia-500/20 touch-none select-none">
+      <div ref={mountRef} className="absolute inset-0 w-full h-full cursor-pointer touch-none" />
 
-      <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex flex-wrap items-center justify-between gap-2 p-3.5">
-        <div className="flex items-center gap-3 rounded-xl border border-white/10 bg-slate-950/85 px-3.5 py-2 text-xs text-slate-200 tabular-nums">
+      <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex flex-wrap items-center justify-between gap-2 p-3 sm:p-3.5">
+        <div className="flex items-center gap-2 sm:gap-3 rounded-xl border border-white/10 bg-slate-950/85 px-3 py-1.5 sm:px-3.5 sm:py-2 text-xs text-slate-200 tabular-nums">
           <span className="flex items-center gap-1 font-semibold text-fuchsia-400">
             <Hammer className="w-3.5 h-3.5" /> SKOR: {score}
           </span>
@@ -340,7 +351,7 @@ export default function WhackADroneGame({
           )}
         </div>
 
-        <div className="flex items-center gap-2 rounded-xl border border-white/10 bg-slate-950/85 px-3.5 py-2 text-xs text-cyan-400 font-semibold tabular-nums">
+        <div className="flex items-center gap-2 rounded-xl border border-white/10 bg-slate-950/85 px-3 py-1.5 sm:px-3.5 sm:py-2 text-xs text-cyan-400 font-semibold tabular-nums">
           <Timer className="w-3.5 h-3.5" /> {timeLeft}s
         </div>
       </div>

@@ -2,6 +2,10 @@ import { IAudioController } from '../types/gameSdk';
 import { audio } from '../utils/audio';
 
 export class AudioController implements IAudioController {
+  public playClick(): void {
+    audio.playClick();
+  }
+
   public playCoin(): void {
     audio.playCoin();
   }
@@ -46,6 +50,10 @@ export class AudioController implements IAudioController {
     audio.playCountdownGo();
   }
 
+  public playWin(): void {
+    audio.playWin();
+  }
+
   public playGameOver(): void {
     audio.playGameOver();
   }
@@ -82,11 +90,49 @@ export class AudioController implements IAudioController {
     return audio.toggleMute();
   }
 
+  public setMuted(muted: boolean): boolean {
+    return audio.setMuted(muted);
+  }
+
   public isMuted(): boolean {
     return audio.getMuteState();
+  }
+
+  public getMasterVolume(): number {
+    return audio.getMasterVolume();
+  }
+
+  public setMasterVolume(vol: number): void {
+    audio.setMasterVolume(vol);
+  }
+
+  public getSfxVolume(): number {
+    return audio.getSfxVolume();
+  }
+
+  public setSfxVolume(vol: number): void {
+    audio.setSfxVolume(vol);
+  }
+
+  public getMusicVolume(): number {
+    return audio.getMusicVolume();
+  }
+
+  public setMusicVolume(vol: number): void {
+    audio.setMusicVolume(vol);
+  }
+
+  public subscribe(listener: () => void): () => void {
+    return audio.subscribe(listener);
+  }
+
+  public unlockAudio(): void {
+    audio.unlockAudio();
   }
 
   public stopAll(): void {
     audio.stopAllSounds();
   }
 }
+
+export const audioController = new AudioController();

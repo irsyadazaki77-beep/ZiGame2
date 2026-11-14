@@ -1,9 +1,14 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import * as THREE from 'three';
-import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import { audio } from '../../utils/audio';
-import { useGameEngine } from '../../sdk';
-import { disposeThreeScene } from '../../utils/threeCleanup';
+import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
+import { audioController, useGameEngine } from '../../sdk';
+import { inputManager } from '../../services/inputService';
+import {
+  ThreeStageController,
+  createStoneCathedralMaps,
+  createEmissiveGridTexture,
+  followDirectionalShadow
+} from '../../utils/threeStage';
 import { screenShake } from '../../utils/screenShake';
 import { GameOverlay } from '../gameplay/GameOverlay';
 import { Eye, Zap, Clock, Compass, ChevronDown, ChevronUp, ArrowUp, ArrowDown, ArrowLeft, ArrowRight } from 'lucide-react';
@@ -17,53 +22,23 @@ interface GameProps {
 type MazeCell = 'wall' | 'path' | 'start' | 'goal' | 'orb' | 'phase';
 type CameraPreset = 'chase' | 'isometric' | 'overhead';
 
-interface FallingWallFragment {
-  mesh: THREE.Mesh;
-  vel: THREE.Vector3;
-  rotVel: THREE.Vector3;
-  life: number;
+interface PendingEffect {
+  type: 'bump' | 'break' | 'orb' | 'phase' | 'goal';
+  x: number;
+  z: number;
 }
 
-const _camTargetPos = new THREE.Vector3();
-const _camLookAt = new THREE.Vector3();
-
-function createFloorGridTexture(anisotropy: number): THREE.CanvasTexture {
-  const canvas = document.createElement('canvas');
-  canvas.width = 512;
-  canvas.height = 512;
-  const ctx = canvas.getContext('2d')!;
-
-  ctx.fillStyle = '#070b14';
-  ctx.fillRect(0, 0, 512, 512);
-
-  ctx.strokeStyle = 'rgba(6, 182, 212, 0.22)';
-  ctx.lineWidth = 4;
-  ctx.strokeRect(4, 4, 504, 504);
-
-  ctx.strokeStyle = 'rgba(56, 189, 248, 0.08)';
-  ctx.lineWidth = 2;
-  for (let i = 64; i < 512; i += 64) {
-    ctx.beginPath();
-    ctx.moveTo(i, 0);
-    ctx.lineTo(i, 512);
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.moveTo(0, i);
-    ctx.lineTo(512, i);
-    ctx.stroke();
-  }
-
-  const tex = new THREE.CanvasTexture(canvas);
-  tex.wrapS = THREE.RepeatWrapping;
-  tex.wrapT = THREE.RepeatWrapping;
-  tex.colorSpace = THREE.SRGBColorSpace;
-  tex.anisotropy = anisotropy;
-  return tex;
-}
+const MAX_WALL_INSTANCES = 170;
+const _camTargetPos = new THREE.Vector3(0, 9.5, 7.5);
+const _camSmoothPos = new THREE.Vector3(0, 9.5, 7.5);
+const _camLookAt = new THREE.Vector3(0, 0, 0);
+const _dummy = new THREE.Object3D();
+const _lampOffset = new THREE.Vector3(8, 16, 10);
 
 function buildExplorerDrone(isSoftwareGl: boolean): {
   group: THREE.Group;
   ring: THREE.Mesh;
+  ringMat: THREE.MeshStandardMaterial;
   core: THREE.Mesh;
 } {
   const group = new THREE.Group();
@@ -79,11 +54,18 @@ function buildExplorerDrone(isSoftwareGl: boolean): {
     metalness: 0.6,
     roughness: 0.45
   });
+  const ringMat = new THREE.MeshStandardMaterial({
+    color: 0x1e293b,
+    emissive: 0x06b6d4,
+    emissiveIntensity: 0.85,
+    metalness: 0.7,
+    roughness: 0.25
+  });
   const coreMat = new THREE.MeshStandardMaterial({
-    color: 0xf59e0b,
+    color: 0xfef08a,
     emissive: 0xf59e0b,
-    emissiveIntensity: 0.9,
-    roughness: 0.15,
+    emissiveIntensity: 1.95,
+    roughness: 0.12,
     metalness: 0.2
   });
   const canopyMat = new THREE.MeshPhysicalMaterial({
@@ -109,7 +91,7 @@ function buildExplorerDrone(isSoftwareGl: boolean): {
   group.add(canopy);
 
   // 3. Rotating Gyro Scanner Ring
-  const ring = new THREE.Mesh(new THREE.TorusGeometry(0.42, 0.035, 10, 28), trimMat);
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(0.42, 0.036, 10, 28), ringMat);
   ring.rotation.x = Math.PI / 2;
   ring.position.y = 0.36;
   group.add(ring);
@@ -123,12 +105,17 @@ function buildExplorerDrone(isSoftwareGl: boolean): {
   podR.position.x = 0.32;
   group.add(podL, podR);
 
-  // 5. Glowing Energy Core
+  // 5. Glowing HDR Energy Core
   const core = new THREE.Mesh(new THREE.OctahedronGeometry(0.14, 0), coreMat);
   core.position.set(0, 0.66, 0);
   group.add(core);
 
-  return { group, ring, core };
+  // 6. Local Drone Torch PointLight illuminating bump-mapped stone corridor
+  const torchLight = new THREE.PointLight(0x22d3ee, 2.4, 5.5, 1.4);
+  torchLight.position.set(0, 0.85, 0);
+  group.add(torchLight);
+
+  return { group, ring, ringMat, core };
 }
 
 function generateSolvableMaze(size: number): MazeCell[][] {
@@ -166,7 +153,6 @@ function generateSolvableMaze(size: number): MazeCell[][] {
     }
   }
 
-  // Carve a few extra loops so the player has tactical routes
   for (let r = 2; r < size - 2; r++) {
     for (let c = 2; c < size - 2; c++) {
       if (grid[r][c] === 'wall' && Math.random() < 0.14) {
@@ -180,7 +166,6 @@ function generateSolvableMaze(size: number): MazeCell[][] {
   grid[size - 2][size - 3] = 'path';
   grid[size - 3][size - 2] = 'path';
 
-  // Place Chrono Orbs and Phase Crystals
   let orbsPlaced = 0;
   let phasePlaced = 0;
   for (let r = 1; r < size - 1; r++) {
@@ -211,8 +196,6 @@ export default function MazeRunnerGame({ onGameOver, onScoreUpdate, highScore }:
     countdown,
     triggerGameOver,
     resumeGame,
-    startLoop,
-    stopLoop,
     gameStateRef,
     scoreRef
   } = useGameEngine({
@@ -236,6 +219,10 @@ export default function MazeRunnerGame({ onGameOver, onScoreUpdate, highScore }:
   const phaseActiveRef = useRef(false);
   const comboRef = useRef(1);
   const levelRef = useRef(1);
+  const timeLeftRef = useRef(45);
+  const lastTimeShownRef = useRef(45);
+  const swipeStartRef = useRef<{ x: number; y: number } | null>(null);
+  const bannerTimerRef = useRef<number | null>(null);
 
   const mazeStateRef = useRef<{
     size: number;
@@ -249,6 +236,7 @@ export default function MazeRunnerGame({ onGameOver, onScoreUpdate, highScore }:
     facingDr: number;
     facingDc: number;
     rebuildRequested: boolean;
+    fxQueue: PendingEffect[];
   }>({
     size: 7,
     grid: generateSolvableMaze(7),
@@ -260,17 +248,31 @@ export default function MazeRunnerGame({ onGameOver, onScoreUpdate, highScore }:
     currentYaw: 0,
     facingDr: 0,
     facingDc: 1,
-    rebuildRequested: true
+    rebuildRequested: true,
+    fxQueue: []
   });
 
   useEffect(() => {
     cameraPresetRef.current = cameraPreset;
   }, [cameraPreset]);
 
+  useEffect(() => {
+    return () => {
+      if (bannerTimerRef.current !== null) {
+        clearTimeout(bannerTimerRef.current);
+      }
+    };
+  }, []);
+
   const showBanner = useCallback((msg: string) => {
     setStatusBanner(msg);
-    const t = window.setTimeout(() => setStatusBanner(null), 1300);
-    return () => clearTimeout(t);
+    if (bannerTimerRef.current !== null) {
+      clearTimeout(bannerTimerRef.current);
+    }
+    bannerTimerRef.current = window.setTimeout(() => {
+      setStatusBanner(null);
+      bannerTimerRef.current = null;
+    }, 1300);
   }, []);
 
   const setupLevel = useCallback((lvl: number) => {
@@ -288,7 +290,8 @@ export default function MazeRunnerGame({ onGameOver, onScoreUpdate, highScore }:
       currentYaw: 0,
       facingDr: 0,
       facingDc: 1,
-      rebuildRequested: true
+      rebuildRequested: true,
+      fxQueue: mazeStateRef.current.fxQueue
     };
   }, []);
 
@@ -296,6 +299,8 @@ export default function MazeRunnerGame({ onGameOver, onScoreUpdate, highScore }:
     updateScore(0);
     setLevel(1);
     levelRef.current = 1;
+    timeLeftRef.current = 45;
+    lastTimeShownRef.current = 45;
     setTimeLeft(45);
     setCombo(1);
     comboRef.current = 1;
@@ -306,7 +311,7 @@ export default function MazeRunnerGame({ onGameOver, onScoreUpdate, highScore }:
     setupLevel(1);
 
     startWithCountdown(() => {
-      audio.playClick();
+      audioController.playClick();
     });
   }, [setupLevel, startWithCountdown, updateScore]);
 
@@ -315,7 +320,7 @@ export default function MazeRunnerGame({ onGameOver, onScoreUpdate, highScore }:
     if (phaseChargesRef.current <= 0 || phaseActiveRef.current) return;
     phaseActiveRef.current = true;
     setPhaseActive(true);
-    audio.playLaser();
+    audioController.playLaser();
     showBanner('PHASE BREAKER SIAP: TEMBUS 1 DINDING!');
   }, [gameStateRef, showBanner]);
 
@@ -323,6 +328,7 @@ export default function MazeRunnerGame({ onGameOver, onScoreUpdate, highScore }:
     (dr: number, dc: number) => {
       if (gameStateRef.current !== 'playing') return;
       const st = mazeStateRef.current;
+      const half = (st.size - 1) / 2;
       const nr = st.playerR + dr;
       const nc = st.playerC + dc;
       st.facingDr = dr;
@@ -330,8 +336,9 @@ export default function MazeRunnerGame({ onGameOver, onScoreUpdate, highScore }:
       st.targetYaw = Math.atan2(dc, dr);
 
       if (nr <= 0 || nr >= st.size - 1 || nc <= 0 || nc >= st.size - 1) {
-        audio.playHit();
+        audioController.playHit();
         screenShake.trigger('light');
+        st.fxQueue.push({ type: 'bump', x: nc - half, z: nr - half });
         return;
       }
 
@@ -339,7 +346,6 @@ export default function MazeRunnerGame({ onGameOver, onScoreUpdate, highScore }:
 
       if (cell === 'wall') {
         if (phaseActiveRef.current && phaseChargesRef.current > 0) {
-          // Break through the wall!
           phaseActiveRef.current = false;
           phaseChargesRef.current -= 1;
           setPhaseActive(false);
@@ -348,45 +354,52 @@ export default function MazeRunnerGame({ onGameOver, onScoreUpdate, highScore }:
           st.playerR = nr;
           st.playerC = nc;
           st.rebuildRequested = true;
-          audio.playExplosion();
+          st.fxQueue.push({ type: 'break', x: nc - half, z: nr - half });
+          audioController.playExplosion();
           screenShake.trigger('medium');
           addScore(40 * comboRef.current);
           showBanner('DINDING DITEMBUS! +40');
         } else {
-          audio.playHit();
+          audioController.playHit();
           screenShake.trigger('light');
+          st.fxQueue.push({ type: 'bump', x: nc - half, z: nr - half });
           comboRef.current = 1;
           setCombo(1);
         }
         return;
       }
 
-      // Move onto path/item/goal
-      audio.playClick();
+      audioController.playClick();
       st.playerR = nr;
       st.playerC = nc;
 
       if (cell === 'orb') {
         st.grid[nr][nc] = 'path';
         st.rebuildRequested = true;
-        audio.playCoin();
+        st.fxQueue.push({ type: 'orb', x: nc - half, z: nr - half });
+        audioController.playPowerup();
         comboRef.current = Math.min(8, comboRef.current + 1);
         setCombo(comboRef.current);
         const pts = 50 * comboRef.current;
         addScore(pts);
-        setTimeLeft((prev) => Math.min(60, prev + 6));
+        timeLeftRef.current = Math.min(60, timeLeftRef.current + 6);
+        const nextSec = Math.ceil(timeLeftRef.current);
+        lastTimeShownRef.current = nextSec;
+        setTimeLeft(nextSec);
         showBanner(`CHRONO ORB +6 DETIK · x${comboRef.current} KOMBO!`);
       } else if (cell === 'phase') {
         st.grid[nr][nc] = 'path';
         st.rebuildRequested = true;
-        audio.playLevelUp();
+        st.fxQueue.push({ type: 'phase', x: nc - half, z: nr - half });
+        audioController.playLevelUp();
         phaseChargesRef.current = Math.min(3, phaseChargesRef.current + 1);
         setPhaseCharges(phaseChargesRef.current);
         addScore(35 * comboRef.current);
         showBanner('PHASE CHARGE DITEMUKAN!');
       } else if (cell === 'goal') {
-        audio.playLevelUp();
+        audioController.playWin();
         screenShake.trigger('medium');
+        st.fxQueue.push({ type: 'goal', x: nc - half, z: nr - half });
         const nextLvl = levelRef.current + 1;
         const clearBonus = (120 + levelRef.current * 30) * comboRef.current;
         addScore(clearBonus);
@@ -394,7 +407,10 @@ export default function MazeRunnerGame({ onGameOver, onScoreUpdate, highScore }:
         setCombo(comboRef.current);
         levelRef.current = nextLvl;
         setLevel(nextLvl);
-        setTimeLeft((prev) => Math.min(60, prev + 12));
+        timeLeftRef.current = Math.min(60, timeLeftRef.current + 12);
+        const nextSec = Math.ceil(timeLeftRef.current);
+        lastTimeShownRef.current = nextSec;
+        setTimeLeft(nextSec);
         showBanner(`SEKTOR ${nextLvl - 1} SELESAI! +${clearBonus}`);
         setupLevel(nextLvl);
       }
@@ -402,205 +418,195 @@ export default function MazeRunnerGame({ onGameOver, onScoreUpdate, highScore }:
     [addScore, gameStateRef, setupLevel, showBanner]
   );
 
-  // Keyboard controls
+  // Keyboard & InputManager controls
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'h' || e.key === 'H') {
         setDockCollapsed((prev) => !prev);
-        return;
-      }
-      if (e.key === 'c' || e.key === 'C') {
+      } else if (e.key === 'c' || e.key === 'C') {
         setCameraPreset((prev) => (prev === 'chase' ? 'isometric' : prev === 'isometric' ? 'overhead' : 'chase'));
-        return;
-      }
-      if (gameStateRef.current !== 'playing') return;
-
-      if (e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W') {
-        e.preventDefault();
-        movePlayer(-1, 0);
-      } else if (e.key === 'ArrowDown' || e.key === 's' || e.key === 'S') {
-        e.preventDefault();
-        movePlayer(1, 0);
-      } else if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') {
-        e.preventDefault();
-        movePlayer(0, -1);
-      } else if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') {
-        e.preventDefault();
-        movePlayer(0, 1);
-      } else if (e.key === ' ' || e.key === 'Shift') {
-        e.preventDefault();
-        activatePhaseMode();
       }
     };
 
+    const unsubInput = inputManager.subscribe({
+      onActionDown: (action) => {
+        if (gameStateRef.current !== 'playing') return;
+        if (action === 'UP') movePlayer(-1, 0);
+        else if (action === 'DOWN') movePlayer(1, 0);
+        else if (action === 'LEFT') movePlayer(0, -1);
+        else if (action === 'RIGHT') movePlayer(0, 1);
+        else if (
+          action === 'PRIMARY' ||
+          action === 'ACTION_PRIMARY' ||
+          action === 'SECONDARY' ||
+          action === 'ACTION_SECONDARY'
+        ) {
+          activatePhaseMode();
+        }
+      }
+    });
+
     window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    return () => {
+      unsubInput();
+      window.removeEventListener('keydown', handleKeyDown);
+    };
   }, [activatePhaseMode, gameStateRef, movePlayer]);
 
-  // Countdown game timer
-  useEffect(() => {
-    if (gameState !== 'playing') return;
-    const timer = window.setInterval(() => {
-      setTimeLeft((prev) => {
-        if (prev <= 1) {
-          triggerGameOver(scoreRef.current);
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-    return () => clearInterval(timer);
-  }, [gameState, scoreRef, triggerGameOver]);
-
-  // Isolated Three.js WebGL Lifecycle (mounts once)
+  // Unified ThreeStageController WebGL Maze Lifecycle
   useEffect(() => {
     const mount = canvasMountRef.current;
     if (!mount) return;
 
-    const isSoftwareGl = (() => {
-      const gl = document.createElement('canvas').getContext('webgl2');
-      if (!gl) return true;
-      const ext = gl.getExtension('WEBGL_debug_renderer_info');
-      const param = ext ? ext.UNMASKED_RENDERER_WEBGL : gl.RENDERER;
-      const gpu = String(gl.getParameter(param));
-      gl.getExtension('WEBGL_lose_context')?.loseContext();
-      return /SwiftShader|llvmpipe|softpipe|Software|Basic Render/i.test(gpu);
-    })();
+    let stage: ThreeStageController;
+    try {
+      stage = new ThreeStageController({
+        container: mount,
+        backgroundColor: 0x050811,
+        fogColor: 0x050811,
+        fogDensity: 0.04,
+        fov: 56,
+        near: 0.1,
+        far: 120,
+        manualCamera: true,
+        enableGridFloor: false,
+        shadowBounds: 10,
+        toneMappingExposure: 1.12,
+        bloom: {
+          enabled: true,
+          strength: 0.54,
+          radius: 0.4,
+          threshold: 0.8
+        }
+      });
+    } catch {
+      return;
+    }
 
-    const width = mount.clientWidth || 640;
-    const height = mount.clientHeight || 520;
-
-    const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x050811);
-    scene.fog = new THREE.FogExp2(0x050811, 0.045);
-
-    const camera = new THREE.PerspectiveCamera(56, width / height, 0.1, 120);
+    const { scene, camera, renderer } = stage;
     camera.position.set(0, 9.5, 7.5);
+    stage.rimLight.color.setHex(0xa855f7);
+    stage.rimLight.position.set(-10, 8, -10);
 
-    const renderer = new THREE.WebGLRenderer({
-      antialias: !isSoftwareGl,
-      powerPreference: 'high-performance'
+    // Procedural PBR Stone Cathedral Maps for Maze Walls + Emissive Cyber Grid for Floor
+    const wallMaps = createStoneCathedralMaps(renderer, {
+      baseColor: '#1e293b',
+      mortarColor: '#090d16',
+      tileRows: 2,
+      tileCols: 2,
+      repeatX: 1,
+      repeatY: 1
     });
-    renderer.outputColorSpace = THREE.SRGBColorSpace;
-    renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.12;
-    renderer.setPixelRatio(isSoftwareGl ? 1 : Math.min(window.devicePixelRatio, 2));
-    renderer.setSize(width, height);
-    renderer.shadowMap.enabled = !isSoftwareGl;
-    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-    mount.appendChild(renderer.domElement);
-
-    const pmremGenerator = new THREE.PMREMGenerator(renderer);
-    scene.environment = pmremGenerator.fromScene(new RoomEnvironment(), 0.04).texture;
-    pmremGenerator.dispose();
-
-    // 3-Point Warm/Cool Studio Lighting
-    const hemiLight = new THREE.HemisphereLight(0x38bdf8, 0x090d16, 0.75);
-    scene.add(hemiLight);
-
-    const keyLight = new THREE.DirectionalLight(0xfffbeb, 1.65);
-    keyLight.position.set(8, 16, 10);
-    keyLight.castShadow = !isSoftwareGl;
-    keyLight.shadow.mapSize.set(1024, 1024);
-    const d = 10;
-    keyLight.shadow.camera.left = -d;
-    keyLight.shadow.camera.right = d;
-    keyLight.shadow.camera.top = d;
-    keyLight.shadow.camera.bottom = -d;
-    keyLight.shadow.bias = -0.0005;
-    keyLight.shadow.normalBias = 0.02;
-    scene.add(keyLight);
-
-    const rimLight = new THREE.DirectionalLight(0xa855f7, 0.85);
-    rimLight.position.set(-10, 8, -10);
-    scene.add(rimLight);
-
-    const maxAniso = renderer.capabilities.getMaxAnisotropy();
-    const floorTex = createFloorGridTexture(maxAniso);
-
-    const levelGroup = new THREE.Group();
-    scene.add(levelGroup);
-
-    const wallGeo = new THREE.BoxGeometry(0.94, 0.88, 0.94);
-    const wallMat = new THREE.MeshPhysicalMaterial({
-      color: 0x1e293b,
-      metalness: 0.65,
-      roughness: 0.25,
-      clearcoat: 0.6
+    const floorTex = createEmissiveGridTexture(renderer, {
+      primaryHex: '#06b6d4',
+      secondaryHex: 'rgba(56, 189, 248, 0.14)',
+      backgroundHex: '#070b14',
+      subdivisions: 4
     });
-    const wallCapGeo = new THREE.BoxGeometry(0.96, 0.06, 0.96);
+
+    const floorMat = new THREE.MeshStandardMaterial({
+      map: floorTex,
+      roughness: 0.42,
+      metalness: 0.28
+    });
+    const floorMesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), floorMat);
+    floorMesh.rotation.x = -Math.PI / 2;
+    floorMesh.receiveShadow = !stage.isSoftwareGl;
+    scene.add(floorMesh);
+
+    // InstancedMesh Maze Walls + Neon Caps (Max 169 walls in 2 draw calls!)
+    const wallGeo = new RoundedBoxGeometry(0.94, 0.88, 0.94, 2, 0.06);
+    const wallMat = new THREE.MeshStandardMaterial({
+      map: wallMaps.map,
+      roughnessMap: wallMaps.roughnessMap,
+      bumpMap: wallMaps.bumpMap,
+      bumpScale: 0.04,
+      metalness: 0.35,
+      roughness: 0.58
+    });
+    const wallInst = new THREE.InstancedMesh(wallGeo, wallMat, MAX_WALL_INSTANCES);
+    wallInst.castShadow = !stage.isSoftwareGl;
+    wallInst.receiveShadow = !stage.isSoftwareGl;
+    wallInst.frustumCulled = false;
+    scene.add(wallInst);
+
+    const wallCapGeo = new THREE.BoxGeometry(0.82, 0.05, 0.82);
     const wallCapMat = new THREE.MeshStandardMaterial({
-      color: 0x06b6d4,
-      emissive: 0x0891b2,
-      emissiveIntensity: 0.45,
+      color: 0x22d3ee,
+      emissive: 0x06b6d4,
+      emissiveIntensity: 1.25,
       roughness: 0.2,
       metalness: 0.5
     });
+    const wallCapInst = new THREE.InstancedMesh(wallCapGeo, wallCapMat, MAX_WALL_INSTANCES);
+    wallCapInst.frustumCulled = false;
+    scene.add(wallCapInst);
+
+    const itemsGroup = new THREE.Group();
+    scene.add(itemsGroup);
 
     const orbGeo = new THREE.OctahedronGeometry(0.24, 0);
     const orbMat = new THREE.MeshStandardMaterial({
-      color: 0xf59e0b,
-      emissive: 0xd97706,
-      emissiveIntensity: 0.85,
+      color: 0xfde047,
+      emissive: 0xf59e0b,
+      emissiveIntensity: 1.95,
       roughness: 0.15,
-      metalness: 0.3
+      metalness: 0.2
     });
 
     const phaseGeo = new THREE.TorusGeometry(0.22, 0.06, 10, 20);
     const phaseMat = new THREE.MeshStandardMaterial({
-      color: 0xec4899,
-      emissive: 0xdb2777,
-      emissiveIntensity: 0.85,
-      roughness: 0.2,
-      metalness: 0.5
+      color: 0xf472b6,
+      emissive: 0xec4899,
+      emissiveIntensity: 1.9,
+      roughness: 0.15,
+      metalness: 0.4
     });
 
     const goalGroup = new THREE.Group();
     const portalOuter = new THREE.Mesh(
-      new THREE.TorusGeometry(0.38, 0.055, 12, 32),
+      new THREE.TorusGeometry(0.38, 0.06, 12, 32),
       new THREE.MeshStandardMaterial({
-        color: 0xa855f7,
-        emissive: 0x9333ea,
-        emissiveIntensity: 1.0,
+        color: 0xc084fc,
+        emissive: 0xa855f7,
+        emissiveIntensity: 2.05,
         roughness: 0.15
       })
     );
     portalOuter.position.y = 0.5;
     const portalInner = new THREE.Mesh(
       new THREE.CylinderGeometry(0.3, 0.3, 0.06, 24),
-      new THREE.MeshBasicMaterial({ color: 0xe879f9, transparent: true, opacity: 0.75 })
+      new THREE.MeshStandardMaterial({
+        color: 0xf0abfc,
+        emissive: 0xe879f9,
+        emissiveIntensity: 1.65,
+        transparent: true,
+        opacity: 0.82
+      })
     );
     portalInner.rotation.x = Math.PI / 2;
     portalInner.position.y = 0.5;
     goalGroup.add(portalOuter, portalInner);
     scene.add(goalGroup);
 
-    const drone = buildExplorerDrone(isSoftwareGl);
+    const drone = buildExplorerDrone(stage.isSoftwareGl);
     scene.add(drone.group);
 
     let animatedItems: { mesh: THREE.Object3D; type: 'orb' | 'phase' }[] = [];
 
     const rebuildMazeMeshes = () => {
-      while (levelGroup.children.length > 0) {
-        levelGroup.remove(levelGroup.children[0]);
+      while (itemsGroup.children.length > 0) {
+        itemsGroup.remove(itemsGroup.children[0]);
       }
       animatedItems = [];
 
       const st = mazeStateRef.current;
       const half = (st.size - 1) / 2;
 
+      floorMesh.scale.set(st.size + 0.4, st.size + 0.4, 1);
       floorTex.repeat.set(st.size, st.size);
-      const floorMesh = new THREE.Mesh(
-        new THREE.PlaneGeometry(st.size + 0.4, st.size + 0.4),
-        new THREE.MeshStandardMaterial({
-          map: floorTex,
-          roughness: 0.45,
-          metalness: 0.3
-        })
-      );
-      floorMesh.rotation.x = -Math.PI / 2;
-      floorMesh.receiveShadow = !isSoftwareGl;
-      levelGroup.add(floorMesh);
+
+      let wallCount = 0;
 
       for (let r = 0; r < st.size; r++) {
         for (let c = 0; c < st.size; c++) {
@@ -608,59 +614,82 @@ export default function MazeRunnerGame({ onGameOver, onScoreUpdate, highScore }:
           const wx = c - half;
           const wz = r - half;
 
-          if (cell === 'wall') {
-            const wMesh = new THREE.Mesh(wallGeo, wallMat);
-            wMesh.position.set(wx, 0.44, wz);
-            wMesh.castShadow = !isSoftwareGl;
-            wMesh.receiveShadow = !isSoftwareGl;
-            levelGroup.add(wMesh);
+          if (cell === 'wall' && wallCount < MAX_WALL_INSTANCES) {
+            _dummy.position.set(wx, 0.44, wz);
+            _dummy.rotation.set(0, 0, 0);
+            _dummy.scale.setScalar(1);
+            _dummy.updateMatrix();
+            wallInst.setMatrixAt(wallCount, _dummy.matrix);
 
-            const capMesh = new THREE.Mesh(wallCapGeo, wallCapMat);
-            capMesh.position.set(wx, 0.89, wz);
-            levelGroup.add(capMesh);
+            _dummy.position.set(wx, 0.89, wz);
+            _dummy.updateMatrix();
+            wallCapInst.setMatrixAt(wallCount, _dummy.matrix);
+            wallCount++;
           } else if (cell === 'orb') {
             const oMesh = new THREE.Mesh(orbGeo, orbMat);
             oMesh.position.set(wx, 0.45, wz);
-            levelGroup.add(oMesh);
+            itemsGroup.add(oMesh);
             animatedItems.push({ mesh: oMesh, type: 'orb' });
           } else if (cell === 'phase') {
             const pMesh = new THREE.Mesh(phaseGeo, phaseMat);
             pMesh.position.set(wx, 0.45, wz);
-            levelGroup.add(pMesh);
+            itemsGroup.add(pMesh);
             animatedItems.push({ mesh: pMesh, type: 'phase' });
           } else if (cell === 'goal') {
             goalGroup.position.set(wx, 0.02, wz);
           }
         }
       }
+
+      wallInst.count = wallCount;
+      wallCapInst.count = wallCount;
+      wallInst.instanceMatrix.needsUpdate = true;
+      wallCapInst.instanceMatrix.needsUpdate = true;
       st.rebuildRequested = false;
     };
 
     rebuildMazeMeshes();
+    _camSmoothPos.set(0, 9.5, 7.5);
 
-    const handleResize = () => {
-      if (!mount) return;
-      const w = mount.clientWidth || 640;
-      const h = mount.clientHeight || 520;
-      camera.aspect = w / h;
-      camera.updateProjectionMatrix();
-      renderer.setSize(w, h);
-    };
-    const resizeObserver = new ResizeObserver(handleResize);
-    resizeObserver.observe(mount);
-    window.addEventListener('resize', handleResize);
-
-    let elapsed = 0;
-    let swRenderAcc = 0;
-    let hasRenderedInitial = false;
-
-    startLoop((_timestamp, deltaTimeMs) => {
-      const delta = Math.min(deltaTimeMs / 1000, 0.05);
-      elapsed += delta;
+    stage.startLoop((dt, elapsed) => {
+      const delta = Math.min(dt, 0.05);
       const st = mazeStateRef.current;
+
+      if (gameStateRef.current === 'playing') {
+        timeLeftRef.current = Math.max(0, timeLeftRef.current - delta);
+        const sec = Math.ceil(timeLeftRef.current);
+        if (sec !== lastTimeShownRef.current) {
+          lastTimeShownRef.current = sec;
+          setTimeLeft(sec);
+        }
+        if (timeLeftRef.current <= 0) {
+          audioController.playGameOver();
+          triggerGameOver(scoreRef.current);
+          return;
+        }
+      }
 
       if (st.rebuildRequested) {
         rebuildMazeMeshes();
+      }
+
+      while (st.fxQueue.length > 0) {
+        const fx = st.fxQueue.shift()!;
+        if (fx.type === 'bump') {
+          stage.cameraRig.addTrauma(0.28);
+          stage.particles.burst(fx.x, 0.45, fx.z, 8, 0xf43f5e, 4.5);
+        } else if (fx.type === 'break') {
+          stage.cameraRig.addTrauma(0.55);
+          stage.particles.burst(fx.x, 0.5, fx.z, 26, 0xec4899, 8.5);
+        } else if (fx.type === 'orb') {
+          stage.particles.burst(fx.x, 0.5, fx.z, 18, 0xfacc15, 6);
+        } else if (fx.type === 'phase') {
+          stage.particles.burst(fx.x, 0.5, fx.z, 18, 0xec4899, 6);
+        } else if (fx.type === 'goal') {
+          stage.cameraRig.addTrauma(0.42);
+          stage.particles.burst(fx.x, 0.6, fx.z, 32, 0xa855f7, 9);
+          stage.cameraRig.kickFov(6);
+        }
       }
 
       const half = (st.size - 1) / 2;
@@ -676,10 +705,13 @@ export default function MazeRunnerGame({ onGameOver, onScoreUpdate, highScore }:
       drone.ring.rotation.z = elapsed * 2.8;
       drone.core.rotation.y = elapsed * 3.5;
 
-      // Highlight drone ring when Phase Mode is active
-      (drone.ring.material as THREE.MeshStandardMaterial).emissive.setHex(
-        phaseActiveRef.current ? 0xec4899 : 0x000000
-      );
+      if (phaseActiveRef.current) {
+        drone.ringMat.emissive.setHex(0xec4899);
+        drone.ringMat.emissiveIntensity = 1.9;
+      } else {
+        drone.ringMat.emissive.setHex(0x06b6d4);
+        drone.ringMat.emissiveIntensity = 0.85;
+      }
 
       portalOuter.rotation.y = elapsed * 2.2;
       portalInner.scale.setScalar(0.9 + Math.sin(elapsed * 5) * 0.1);
@@ -688,6 +720,8 @@ export default function MazeRunnerGame({ onGameOver, onScoreUpdate, highScore }:
         item.mesh.rotation.y = elapsed * 2.4;
         item.mesh.position.y = 0.44 + Math.sin(elapsed * 3.5 + item.mesh.position.x) * 0.08;
       }
+
+      followDirectionalShadow(stage.keyLight, drone.group.position, 10, true, _lampOffset);
 
       const preset = cameraPresetRef.current;
       if (preset === 'chase') {
@@ -701,40 +735,51 @@ export default function MazeRunnerGame({ onGameOver, onScoreUpdate, highScore }:
         _camLookAt.set(0, 0, 0);
       }
 
-      camera.position.x = THREE.MathUtils.damp(camera.position.x, _camTargetPos.x, 7, delta);
-      camera.position.y = THREE.MathUtils.damp(camera.position.y, _camTargetPos.y, 7, delta);
-      camera.position.z = THREE.MathUtils.damp(camera.position.z, _camTargetPos.z, 7, delta);
-      camera.lookAt(_camLookAt);
+      _camSmoothPos.x = THREE.MathUtils.damp(_camSmoothPos.x, _camTargetPos.x, 7, delta);
+      _camSmoothPos.y = THREE.MathUtils.damp(_camSmoothPos.y, _camTargetPos.y, 7, delta);
+      _camSmoothPos.z = THREE.MathUtils.damp(_camSmoothPos.z, _camTargetPos.z, 7, delta);
 
-      if (!isSoftwareGl) {
-        renderer.render(scene, camera);
-      } else {
-        swRenderAcc += delta;
-        if (!hasRenderedInitial || swRenderAcc >= 0.06) {
-          hasRenderedInitial = true;
-          swRenderAcc = 0;
-          renderer.render(scene, camera);
-        }
-      }
+      stage.cameraRig.stepFovRecovery(camera, 56, delta);
+      stage.cameraRig.applyTraumaToCamera(camera, _camSmoothPos, delta, 0.38);
+      camera.lookAt(_camLookAt);
     });
 
     return () => {
-      stopLoop();
-      resizeObserver.disconnect();
-      window.removeEventListener('resize', handleResize);
+      wallMaps.dispose();
       floorTex.dispose();
-      disposeThreeScene(scene, renderer);
+      stage.dispose();
     };
-  }, [startLoop, stopLoop]);
+  }, [gameStateRef, scoreRef, triggerGameOver]);
 
   return (
-    <div className="relative w-full h-full min-h-[480px] flex flex-col items-center justify-center bg-[#050811] overflow-hidden select-none">
+    <div
+      onPointerDown={(e) => {
+        swipeStartRef.current = { x: e.clientX, y: e.clientY };
+      }}
+      onPointerUp={(e) => {
+        const start = swipeStartRef.current;
+        swipeStartRef.current = null;
+        if (!start || gameStateRef.current !== 'playing') return;
+        const dx = e.clientX - start.x;
+        const dy = e.clientY - start.y;
+        if (Math.hypot(dx, dy) < 22) return;
+        if (Math.abs(dx) > Math.abs(dy)) {
+          movePlayer(0, dx > 0 ? 1 : -1);
+        } else {
+          movePlayer(dy > 0 ? 1 : -1, 0);
+        }
+      }}
+      onPointerCancel={() => {
+        swipeStartRef.current = null;
+      }}
+      className="relative w-full h-full min-h-[280px] sm:min-h-[380px] lg:min-h-[480px] flex flex-col items-center justify-center bg-[#050811] overflow-hidden select-none touch-none"
+    >
       {/* Dedicated WebGL Mount Container */}
       <div ref={canvasMountRef} className="absolute inset-0 w-full h-full" />
 
       {/* Top Semantic HUD */}
-      <div className="absolute top-3 left-4 right-4 flex items-center justify-between pointer-events-none z-10">
-        <div className="flex items-center gap-3 bg-slate-950/90 border border-white/10 px-3.5 py-2 rounded-xl text-xs font-mono tabular-nums">
+      <div className="absolute top-2.5 inset-x-3 flex flex-wrap items-center justify-between gap-2 pointer-events-none z-10">
+        <div className="flex items-center gap-2 sm:gap-3 bg-slate-950/90 border border-white/10 px-3 py-1.5 sm:py-2 rounded-xl text-[11px] sm:text-xs font-mono tabular-nums">
           <span className="text-cyan-400 font-semibold">SEKTOR {level}</span>
           <span aria-hidden="true" className="text-slate-600">·</span>
           <span className={timeLeft <= 10 ? 'text-red-400 font-bold' : 'text-slate-200'}>
@@ -745,22 +790,26 @@ export default function MazeRunnerGame({ onGameOver, onScoreUpdate, highScore }:
           <span className="text-amber-400 font-semibold">x{combo}</span>
         </div>
 
-        <div className="bg-slate-950/90 border border-white/10 px-4 py-2 rounded-xl text-xs font-mono tabular-nums">
-          <span className="text-slate-400 mr-2">SKOR</span>
-          <span className="text-white font-bold text-base">{score.toLocaleString()}</span>
+        <div className="bg-slate-950/90 border border-white/10 px-3 sm:px-4 py-1.5 sm:py-2 rounded-xl text-[11px] sm:text-xs font-mono tabular-nums">
+          <span className="text-slate-400 mr-1.5 sm:mr-2">SKOR</span>
+          <span className="text-white font-bold text-sm sm:text-base">{score.toLocaleString()}</span>
         </div>
       </div>
 
       {/* Status Notification Toast */}
       {statusBanner && (
-        <div className="absolute top-16 left-1/2 -translate-x-1/2 z-20 pointer-events-none bg-slate-950/95 border border-cyan-500/40 px-4 py-1.5 rounded-lg text-xs font-mono font-bold text-cyan-300 tracking-wide shadow-lg">
+        <div className="absolute top-16 left-1/2 -translate-x-1/2 z-20 pointer-events-none bg-slate-950/95 border border-cyan-500/40 px-4 py-1.5 rounded-lg text-xs font-mono font-bold text-cyan-300 tracking-wide shadow-lg whitespace-nowrap">
           {statusBanner}
         </div>
       )}
 
-      {/* Mobile Touch D-Pad (Bottom-Left on touch screens) */}
+      {/* Mobile Touch D-Pad (Bottom-Left on touch screens, clear of bottom dock) */}
       {gameState === 'playing' && (
-        <div className="absolute bottom-20 left-4 z-10 flex flex-col items-center gap-1 md:hidden pointer-events-auto touch-none">
+        <div
+          onPointerDown={(e) => e.stopPropagation()}
+          onPointerUp={(e) => e.stopPropagation()}
+          className={`absolute ${dockCollapsed ? 'bottom-12' : 'bottom-28 sm:bottom-24'} left-3 z-10 flex flex-col items-center gap-1 md:hidden pointer-events-auto touch-none transition-all`}
+        >
           <button
             onPointerDown={(e) => {
               e.preventDefault();
@@ -808,28 +857,33 @@ export default function MazeRunnerGame({ onGameOver, onScoreUpdate, highScore }:
 
       {/* Unified Collapsible Bottom Control Dock */}
       <div
-        className="absolute bottom-3 left-1/2 -translate-x-1/2 z-10 w-[94%] max-w-[640px] transition-transform duration-200 pointer-events-auto"
+        onPointerDown={(e) => e.stopPropagation()}
+        onPointerUp={(e) => e.stopPropagation()}
+        className="absolute bottom-3 left-1/2 -translate-x-1/2 z-10 w-[94%] max-w-[640px] transition-transform duration-200 pointer-events-auto pb-[env(safe-area-inset-bottom)]"
         style={{ transform: `translate(-50%, ${dockCollapsed ? 'calc(100% - 28px)' : '0px'})` }}
       >
         <div className="flex justify-center mb-1">
           <button
             onClick={() => setDockCollapsed((prev) => !prev)}
-            className="px-3 py-1 rounded-t-lg bg-slate-950/90 border border-b-0 border-white/10 text-[11px] font-mono text-slate-300 hover:text-white flex items-center gap-1 whitespace-nowrap"
+            className="px-3 min-h-[36px] sm:min-h-0 py-1 rounded-t-lg bg-slate-950/90 border border-b-0 border-white/10 text-[11px] font-mono text-slate-300 hover:text-white flex items-center gap-1 whitespace-nowrap"
           >
             {dockCollapsed ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
             {dockCollapsed ? 'Tampilkan Kontrol' : 'Sembunyikan Kontrol'}
           </button>
         </div>
 
-        <div className="bg-slate-950/95 border border-white/10 rounded-xl px-4 py-2.5 flex flex-wrap items-center justify-between gap-3 text-xs">
-          <div className="flex items-center gap-2">
+        <div className="bg-slate-950/95 border border-white/10 rounded-xl px-3 sm:px-4 py-2 sm:py-2.5 flex flex-wrap items-center justify-between gap-2 text-xs">
+          <div className="flex items-center gap-1.5 sm:gap-2">
             <Compass className="w-4 h-4 text-cyan-400 shrink-0" />
             <span className="text-slate-400 hidden sm:inline">Kamera:</span>
             {(['chase', 'isometric', 'overhead'] as CameraPreset[]).map((preset) => (
               <button
                 key={preset}
-                onClick={() => setCameraPreset(preset)}
-                className={`px-2.5 py-1 rounded-md font-medium capitalize transition-colors whitespace-nowrap ${
+                onClick={() => {
+                  audioController.playClick();
+                  setCameraPreset(preset);
+                }}
+                className={`px-2.5 min-h-[44px] sm:min-h-0 py-1 rounded-md font-medium capitalize transition-colors whitespace-nowrap ${
                   cameraPreset === preset
                     ? 'bg-cyan-500 text-slate-950 font-semibold'
                     : 'bg-slate-900 text-slate-300 hover:text-white'
@@ -843,7 +897,7 @@ export default function MazeRunnerGame({ onGameOver, onScoreUpdate, highScore }:
           <button
             onClick={activatePhaseMode}
             disabled={phaseCharges <= 0 || phaseActive}
-            className={`px-3 py-1.5 rounded-lg font-mono font-semibold flex items-center gap-1.5 transition-colors whitespace-nowrap ${
+            className={`px-3 min-h-[44px] sm:min-h-0 py-1.5 rounded-lg font-mono font-semibold flex items-center gap-1.5 transition-colors whitespace-nowrap ${
               phaseActive
                 ? 'bg-pink-500 text-white'
                 : phaseCharges > 0
@@ -852,7 +906,7 @@ export default function MazeRunnerGame({ onGameOver, onScoreUpdate, highScore }:
             }`}
           >
             <Zap className="w-3.5 h-3.5" />
-            <span>Phase Breaker ({phaseCharges})</span>
+            <span>Phase ({phaseCharges})</span>
           </button>
         </div>
       </div>

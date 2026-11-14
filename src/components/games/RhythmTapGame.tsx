@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
 import { GameComponentProps } from '../../types';
-import { audio } from '../../utils/audio';
+import { audioController } from '../../sdk/audioController';
+import { ObjectPool } from '../../sdk/objectPool';
 import { useGameEngine } from '../../hooks/useGameEngine';
 import { GameOverlay } from '../gameplay/GameOverlay';
 import { ThreeDockOverlay } from '../gameplay/ThreeDockOverlay';
@@ -63,18 +64,20 @@ export default function RhythmTapGame({
     spawnTimer: 0.35
   });
 
-  const notesRef = useRef<RhythmNote3D[]>([]);
+  const notePoolRef = useRef<ObjectPool<RhythmNote3D> | null>(null);
 
   const tapLane = useCallback(
     (laneIdx: number) => {
       if (gameStateRef.current !== 'playing') return;
       const stage = stageRef.current;
       const st = rhythmRef.current;
+      const activeNotes = notePoolRef.current?.getActiveItems() ?? [];
 
       // Find closest note in this lane near HIT_Z
       let bestIdx = -1;
       let bestDist = Infinity;
-      notesRef.current.forEach((n, idx) => {
+      for (let idx = 0; idx < activeNotes.length; idx++) {
+        const n = activeNotes[idx];
         if (n.lane === laneIdx && !n.hit) {
           const d = Math.abs(n.z - HIT_Z);
           if (d < bestDist) {
@@ -82,13 +85,10 @@ export default function RhythmTapGame({
             bestIdx = idx;
           }
         }
-      });
+      }
 
       if (bestIdx !== -1 && bestDist < 1.35) {
-        const note = notesRef.current[bestIdx];
-        note.hit = true;
-        stage?.scene.remove(note.mesh);
-        notesRef.current.splice(bestIdx, 1);
+        notePoolRef.current?.release(bestIdx);
 
         const isPerfect = bestDist < 0.55;
         st.combo += 1;
@@ -96,7 +96,11 @@ export default function RhythmTapGame({
         setJudgment(isPerfect ? 'PERFECT!' : 'GREAT!');
         const mult = Math.min(4, 1 + Math.floor(st.combo / 6));
         addScore((isPerfect ? 30 : 15) * mult);
-        audio.playCoin?.();
+        if (st.combo > 1) {
+          audioController.playCombo(st.combo);
+        } else {
+          audioController.playScore();
+        }
         stage?.particles.burst(
           LANE_X[laneIdx],
           0.45,
@@ -108,18 +112,14 @@ export default function RhythmTapGame({
         if (isPerfect) stage?.triggerTrauma(0.18);
       } else {
         stage?.particles.burst(LANE_X[laneIdx], 0.3, HIT_Z, 6, 0x64748b, 3.5);
-        audio.playClick?.();
+        audioController.playClick();
       }
     },
     [addScore]
   );
 
   const handleStart = useCallback(() => {
-    const stage = stageRef.current;
-    if (stage) {
-      notesRef.current.forEach((n) => stage.scene.remove(n.mesh));
-    }
-    notesRef.current = [];
+    notePoolRef.current?.releaseAll();
     rhythmRef.current = {
       combo: 0,
       missesLeft: 5,
@@ -200,6 +200,28 @@ export default function RhythmTapGame({
     }
 
     const noteGeo = new THREE.BoxGeometry(1.25, 0.36, 0.65);
+    const notePool = new ObjectPool<RhythmNote3D>(
+      () => {
+        const mat = new THREE.MeshPhysicalMaterial({
+          color: LANE_COLORS[0],
+          emissive: LANE_COLORS[0],
+          emissiveIntensity: 0.75,
+          roughness: 0.15,
+          clearcoat: 0.9
+        });
+        const mesh = new THREE.Mesh(noteGeo, mat);
+        mesh.castShadow = true;
+        mesh.visible = false;
+        stage.scene.add(mesh);
+        return { mesh, lane: 0, z: -15, hit: false };
+      },
+      (n) => {
+        n.hit = false;
+        n.mesh.visible = false;
+      },
+      16
+    );
+    notePoolRef.current = notePool;
 
     stage.startLoop((dt) => {
       if (gameStateRef.current !== 'playing') return;
@@ -211,28 +233,25 @@ export default function RhythmTapGame({
       if (st.spawnTimer <= 0) {
         st.spawnTimer = Math.max(0.24, 0.55 - (st.speed - 11.5) * 0.02);
         const lane = Math.floor(Math.random() * 4);
-        const mat = new THREE.MeshPhysicalMaterial({
-          color: LANE_COLORS[lane],
-          emissive: LANE_COLORS[lane],
-          emissiveIntensity: 0.75,
-          roughness: 0.15,
-          clearcoat: 0.9
-        });
-        const mesh = new THREE.Mesh(noteGeo, mat);
-        mesh.position.set(LANE_X[lane], 0.28, -15);
-        mesh.castShadow = true;
-        stage.scene.add(mesh);
-        notesRef.current.push({ mesh, lane, z: -15, hit: false });
+        const n = notePool.acquire();
+        n.lane = lane;
+        n.z = -15;
+        n.hit = false;
+        const mat = n.mesh.material as THREE.MeshPhysicalMaterial;
+        mat.color.setHex(LANE_COLORS[lane]);
+        mat.emissive.setHex(LANE_COLORS[lane]);
+        n.mesh.position.set(LANE_X[lane], 0.28, -15);
+        n.mesh.visible = true;
       }
 
-      for (let i = notesRef.current.length - 1; i >= 0; i--) {
-        const n = notesRef.current[i];
+      const activeNotes = notePool.getActiveItems();
+      for (let i = activeNotes.length - 1; i >= 0; i--) {
+        const n = activeNotes[i];
         n.z += st.speed * dt;
         n.mesh.position.z = n.z;
 
         if (n.z > HIT_Z + 1.45) {
-          stage.scene.remove(n.mesh);
-          notesRef.current.splice(i, 1);
+          notePool.release(i);
           st.combo = 0;
           setCombo(0);
           setJudgment('MISS');
@@ -240,25 +259,29 @@ export default function RhythmTapGame({
           setMissesLeft(st.missesLeft);
           stage.triggerTrauma(0.35);
           if (st.missesLeft <= 0) {
+            audioController.playGameOver();
             triggerGameOver(scoreRef.current);
             return;
           }
+          audioController.playHit();
         }
       }
     });
 
     return () => {
+      notePool.releaseAll();
+      notePoolRef.current = null;
       stage.dispose();
       stageRef.current = null;
     };
   }, [scoreRef, triggerGameOver]);
 
   return (
-    <div className="relative w-full h-full min-h-[460px] bg-slate-950 overflow-hidden rounded-2xl border border-purple-500/20">
+    <div className="relative w-full h-full min-h-[260px] sm:min-h-[380px] lg:min-h-[460px] bg-slate-950 overflow-hidden rounded-2xl border border-purple-500/20 touch-none">
       <div ref={mountRef} className="absolute inset-0 w-full h-full" />
 
-      <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex flex-wrap items-center justify-between gap-2 p-3.5">
-        <div className="flex items-center gap-3 rounded-xl border border-white/10 bg-slate-950/85 px-3.5 py-2 text-xs text-slate-200 tabular-nums">
+      <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex flex-wrap items-center justify-between gap-2 p-2.5 sm:p-3.5">
+        <div className="flex items-center gap-2 sm:gap-3 rounded-xl border border-white/10 bg-slate-950/85 px-2.5 sm:px-3.5 py-2 text-[11px] sm:text-xs text-slate-200 tabular-nums">
           <span className="flex items-center gap-1 font-semibold text-purple-400">
             <Music className="w-3.5 h-3.5" /> {judgment}
           </span>
@@ -267,29 +290,37 @@ export default function RhythmTapGame({
           {combo > 1 && (
             <>
               <span aria-hidden="true">·</span>
-              <span className="text-amber-400 font-semibold">{combo}x COMBO</span>
+              <span className="text-amber-400 font-semibold">{combo}x</span>
             </>
           )}
         </div>
 
-        <div className="flex items-center gap-1.5 rounded-xl border border-white/10 bg-slate-950/85 px-3.5 py-2 text-xs font-semibold text-rose-400 tabular-nums">
+        <div className="flex items-center gap-1.5 rounded-xl border border-white/10 bg-slate-950/85 px-2.5 sm:px-3.5 py-2 text-[11px] sm:text-xs font-semibold text-rose-400 tabular-nums">
           <Flame className="w-3.5 h-3.5" /> NYAWA: {missesLeft}
         </div>
       </div>
 
       {/* Interactive Touch / Click 4-Lane Buttons above Dock */}
       {gameState === 'playing' && (
-        <div className="pointer-events-auto absolute inset-x-0 bottom-16 z-10 flex justify-center gap-2 px-4">
-          {['D (Lane 1)', 'F (Lane 2)', 'J (Lane 3)', 'K (Lane 4)'].map((lbl, idx) => (
-            <button
-              key={lbl}
-              type="button"
-              onPointerDown={() => tapLane(idx)}
-              className="rounded-xl border border-white/15 bg-slate-900/90 px-4 py-2.5 text-xs font-semibold text-white shadow-lg active:scale-95 transition-transform whitespace-nowrap shrink-0"
-            >
-              {lbl}
-            </button>
-          ))}
+        <div className="pointer-events-auto absolute inset-x-0 bottom-20 sm:bottom-16 z-10 px-2.5 sm:px-4">
+          <div className="grid grid-cols-4 gap-1.5 sm:gap-2 max-w-md mx-auto">
+            {[
+              { key: 'D', lane: '1' },
+              { key: 'F', lane: '2' },
+              { key: 'J', lane: '3' },
+              { key: 'K', lane: '4' }
+            ].map((pad, idx) => (
+              <button
+                key={pad.key}
+                type="button"
+                onPointerDown={() => tapLane(idx)}
+                className="min-h-[48px] rounded-xl border border-white/15 bg-slate-900/90 px-2 py-2.5 text-xs font-semibold text-white shadow-lg active:scale-95 transition-transform whitespace-nowrap"
+              >
+                {pad.key}
+                <span className="hidden sm:inline text-slate-400"> (Lane {pad.lane})</span>
+              </button>
+            ))}
+          </div>
         </div>
       )}
 

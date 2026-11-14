@@ -1,5 +1,11 @@
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
+import { performanceService } from '../services/performanceService';
+import type { PerformanceSettings } from '../types';
 import { disposeThreeScene } from './threeCleanup';
 
 export type CameraPreset3D = 'chase' | 'isometric' | 'diorama';
@@ -11,24 +17,50 @@ export interface CameraPresetConfig {
   fov: number;
 }
 
+export interface BloomOptions {
+  enabled: boolean;
+  strength?: number;
+  radius?: number;
+  threshold?: number;
+}
+
+export interface PBRTextureSet {
+  map: THREE.CanvasTexture;
+  roughnessMap: THREE.CanvasTexture;
+  bumpMap: THREE.CanvasTexture;
+  dispose: () => void;
+}
+
 export interface ThreeStageOptions {
   container: HTMLElement;
   backgroundColor?: number;
   fogColor?: number;
   fogDensity?: number;
+  fogEnabled?: boolean;
   cameraPresets?: Record<CameraPreset3D, CameraPresetConfig>;
   initialPreset?: CameraPreset3D;
+  fov?: number;
+  near?: number;
+  far?: number;
+  manualCamera?: boolean;
+  enableDefaultLighting?: boolean;
+  enableShadows?: boolean;
   shadowBounds?: number;
+  toneMappingExposure?: number;
   enableGridFloor?: boolean;
   gridSize?: number;
   gridPrimaryColor?: string;
   gridSecondaryColor?: string;
+  bloom?: BloomOptions;
+  maxDpr?: number;
+  particleCapacity?: number;
 }
 
 // Pre-allocated module-scope math scratchpads (Zero GC in render loop)
 const _targetPos = new THREE.Vector3();
 const _targetLook = new THREE.Vector3();
 const _shakeOffset = new THREE.Vector3();
+const _shadowOffset = new THREE.Vector3();
 const _dummyMatrix = new THREE.Matrix4();
 const _dummyPos = new THREE.Vector3();
 const _dummyQuat = new THREE.Quaternion();
@@ -67,6 +99,25 @@ export function detectSoftwareWebGL(): boolean {
 }
 
 /**
+ * Deterministic PRNG for procedural PBR surface synthesis (zero runtime Math.random drift).
+ */
+function createSeededRandom(seed: number): () => number {
+  let s = seed >>> 0;
+  return () => {
+    s = (s * 1664525 + 1013904223) >>> 0;
+    return s / 4294967296;
+  };
+}
+
+function getSafeAnisotropy(renderer?: THREE.WebGLRenderer | null): number {
+  try {
+    return Math.min(8, renderer?.capabilities?.getMaxAnisotropy?.() || 1);
+  } catch {
+    return 1;
+  }
+}
+
+/**
  * Generates a high-sharpness procedural grid texture with SRGBColorSpace & max anisotropy.
  */
 export function createCyberGridTexture(
@@ -83,7 +134,6 @@ export function createCyberGridTexture(
     ctx.fillStyle = bgHex;
     ctx.fillRect(0, 0, 512, 512);
 
-    // Sub-grid lines
     ctx.strokeStyle = 'rgba(148, 163, 184, 0.12)';
     ctx.lineWidth = 1;
     const step = 512 / subdivisions;
@@ -97,12 +147,10 @@ export function createCyberGridTexture(
       ctx.stroke();
     }
 
-    // Main perimeter border
     ctx.strokeStyle = primaryHex;
     ctx.lineWidth = 4;
     ctx.strokeRect(2, 2, 508, 508);
 
-    // Corner node accents
     ctx.fillStyle = primaryHex;
     ctx.fillRect(0, 0, 14, 14);
     ctx.fillRect(498, 0, 14, 14);
@@ -114,7 +162,80 @@ export function createCyberGridTexture(
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.wrapS = THREE.RepeatWrapping;
   tex.wrapT = THREE.RepeatWrapping;
-  tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+  tex.anisotropy = getSafeAnisotropy(renderer);
+  return tex;
+}
+
+/**
+ * Generates an emissive neon grid texture suitable for map / emissiveMap slots.
+ */
+export function createEmissiveGridTexture(
+  renderer: THREE.WebGLRenderer,
+  options: {
+    primaryHex?: string;
+    secondaryHex?: string;
+    backgroundHex?: string;
+    subdivisions?: number;
+    repeatX?: number;
+    repeatY?: number;
+    size?: number;
+  } = {}
+): THREE.CanvasTexture {
+  const size = options.size ?? 512;
+  const subdivisions = options.subdivisions ?? 4;
+  const primaryHex = options.primaryHex ?? '#22d3ee';
+  const secondaryHex = options.secondaryHex ?? 'rgba(56, 189, 248, 0.25)';
+  const backgroundHex = options.backgroundHex ?? '#050814';
+
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  if (ctx) {
+    ctx.fillStyle = backgroundHex;
+    ctx.fillRect(0, 0, size, size);
+
+    ctx.strokeStyle = secondaryHex;
+    ctx.lineWidth = Math.max(1, size / 256);
+    const step = size / subdivisions;
+    for (let i = 1; i < subdivisions; i++) {
+      const p = i * step;
+      ctx.beginPath();
+      ctx.moveTo(p, 0);
+      ctx.lineTo(p, size);
+      ctx.moveTo(0, p);
+      ctx.lineTo(size, p);
+      ctx.stroke();
+    }
+
+    // Soft bloom halo along outer cell edges
+    ctx.save();
+    ctx.strokeStyle = primaryHex;
+    ctx.lineWidth = Math.max(4, size / 64);
+    ctx.globalAlpha = 0.25;
+    ctx.strokeRect(2, 2, size - 4, size - 4);
+    ctx.restore();
+
+    ctx.strokeStyle = primaryHex;
+    ctx.lineWidth = Math.max(2, size / 128);
+    ctx.strokeRect(1, 1, size - 2, size - 2);
+
+    const node = Math.max(8, size / 40);
+    ctx.fillStyle = primaryHex;
+    ctx.fillRect(0, 0, node, node);
+    ctx.fillRect(size - node, 0, node, node);
+    ctx.fillRect(0, size - node, node, node);
+    ctx.fillRect(size - node, size - node, node, node);
+  }
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.RepeatWrapping;
+  if (options.repeatX || options.repeatY) {
+    tex.repeat.set(options.repeatX ?? 1, options.repeatY ?? 1);
+  }
+  tex.anisotropy = getSafeAnisotropy(renderer);
   return tex;
 }
 
@@ -140,8 +261,465 @@ export function createBrushedMetalTexture(renderer: THREE.WebGLRenderer, baseHex
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.wrapS = THREE.RepeatWrapping;
   tex.wrapT = THREE.RepeatWrapping;
-  tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+  tex.anisotropy = getSafeAnisotropy(renderer);
   return tex;
+}
+
+/**
+ * Procedural Wet Asphalt PBR texture maps (albedo, roughnessMap, bumpMap)
+ * providing realistic specular puddle breakup and mineral grain for racing surfaces.
+ */
+export function createWetAsphaltMaps(
+  renderer: THREE.WebGLRenderer,
+  options: {
+    baseColor?: string;
+    stripeColor?: string;
+    puddleIntensity?: number;
+    repeatX?: number;
+    repeatY?: number;
+    size?: number;
+  } = {}
+): PBRTextureSet {
+  const size = options.size ?? 512;
+  const baseColor = options.baseColor ?? '#111622';
+  const puddleIntensity = options.puddleIntensity ?? 0.65;
+  const rand = createSeededRandom(0x41a2b9c3);
+  const anisotropy = getSafeAnisotropy(renderer);
+
+  const albedoCanvas = document.createElement('canvas');
+  const roughCanvas = document.createElement('canvas');
+  const bumpCanvas = document.createElement('canvas');
+  albedoCanvas.width = roughCanvas.width = bumpCanvas.width = size;
+  albedoCanvas.height = roughCanvas.height = bumpCanvas.height = size;
+
+  const aCtx = albedoCanvas.getContext('2d');
+  const rCtx = roughCanvas.getContext('2d');
+  const bCtx = bumpCanvas.getContext('2d');
+
+  if (aCtx && rCtx && bCtx) {
+    aCtx.fillStyle = baseColor;
+    aCtx.fillRect(0, 0, size, size);
+
+    // Dry asphalt default roughness (~0.78 -> grayscale 200)
+    rCtx.fillStyle = 'rgb(202, 202, 202)';
+    rCtx.fillRect(0, 0, size, size);
+
+    // Neutral mid-height bump
+    bCtx.fillStyle = 'rgb(128, 128, 128)';
+    bCtx.fillRect(0, 0, size, size);
+
+    // Subtle tire wear tracks along V axis
+    const laneLeft = size * 0.28;
+    const laneRight = size * 0.72;
+    [laneLeft, laneRight].forEach((cx) => {
+      const grad = rCtx.createLinearGradient(cx - size * 0.12, 0, cx + size * 0.12, 0);
+      grad.addColorStop(0, 'rgba(130, 130, 130, 0)');
+      grad.addColorStop(0.5, 'rgba(95, 95, 95, 0.35)');
+      grad.addColorStop(1, 'rgba(130, 130, 130, 0)');
+      rCtx.fillStyle = grad;
+      rCtx.fillRect(cx - size * 0.14, 0, size * 0.28, size);
+    });
+
+    // Organic wet specular puddle patches (low roughness = bright reflections)
+    const puddleCount = 14;
+    for (let i = 0; i < puddleCount; i++) {
+      const px = rand() * size;
+      const py = rand() * size;
+      const rx = size * (0.08 + rand() * 0.16);
+      const ry = size * (0.14 + rand() * 0.22);
+
+      // Wrap across tile borders so repeat tiling stays seamless
+      for (let ox = -1; ox <= 1; ox++) {
+        for (let oy = -1; oy <= 1; oy++) {
+          const x = px + ox * size;
+          const y = py + oy * size;
+          if (x + rx < 0 || x - rx > size || y + ry < 0 || y - ry > size) continue;
+
+          rCtx.save();
+          rCtx.translate(x, y);
+          rCtx.scale(1, ry / rx);
+          const pGrad = rCtx.createRadialGradient(0, 0, rx * 0.1, 0, 0, rx);
+          const darkVal = Math.round(28 + (1 - puddleIntensity) * 55);
+          pGrad.addColorStop(0, `rgba(${darkVal}, ${darkVal}, ${darkVal}, ${0.85 * puddleIntensity})`);
+          pGrad.addColorStop(0.6, `rgba(${darkVal + 30}, ${darkVal + 30}, ${darkVal + 30}, ${0.45 * puddleIntensity})`);
+          pGrad.addColorStop(1, 'rgba(180, 180, 180, 0)');
+          rCtx.fillStyle = pGrad;
+          rCtx.beginPath();
+          rCtx.arc(0, 0, rx, 0, Math.PI * 2);
+          rCtx.fill();
+          rCtx.restore();
+
+          // Wet areas look slightly darker in albedo
+          aCtx.save();
+          aCtx.translate(x, y);
+          aCtx.scale(1, ry / rx);
+          const aGrad = aCtx.createRadialGradient(0, 0, rx * 0.1, 0, 0, rx);
+          aGrad.addColorStop(0, `rgba(4, 7, 15, ${0.38 * puddleIntensity})`);
+          aGrad.addColorStop(1, 'rgba(4, 7, 15, 0)');
+          aCtx.fillStyle = aGrad;
+          aCtx.beginPath();
+          aCtx.arc(0, 0, rx, 0, Math.PI * 2);
+          aCtx.fill();
+          aCtx.restore();
+        }
+      }
+    }
+
+    // Fine aggregate grit on albedo, roughness, and bump
+    const grainCount = Math.floor(size * size * 0.045);
+    for (let i = 0; i < grainCount; i++) {
+      const gx = rand() * size;
+      const gy = rand() * size;
+      const gSize = 1 + (rand() > 0.72 ? 1.5 : 0);
+      const bright = rand() > 0.48;
+
+      aCtx.fillStyle = bright ? 'rgba(255,255,255,0.045)' : 'rgba(0,0,0,0.14)';
+      aCtx.fillRect(gx, gy, gSize, gSize);
+
+      bCtx.fillStyle = bright ? 'rgba(230,230,230,0.38)' : 'rgba(40,40,40,0.38)';
+      bCtx.fillRect(gx, gy, gSize, gSize);
+
+      rCtx.fillStyle = bright ? 'rgba(235,235,235,0.22)' : 'rgba(155,155,155,0.18)';
+      rCtx.fillRect(gx, gy, gSize, gSize);
+    }
+
+    // Optional subtle road stripe accent along edges
+    if (options.stripeColor) {
+      aCtx.fillStyle = options.stripeColor;
+      aCtx.fillRect(size * 0.04, 0, size * 0.015, size);
+      aCtx.fillRect(size * 0.945, 0, size * 0.015, size);
+    }
+  }
+
+  const repeatX = options.repeatX ?? 1;
+  const repeatY = options.repeatY ?? 1;
+
+  const configure = (canvas: HTMLCanvasElement, colorSpace: THREE.ColorSpace) => {
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.colorSpace = colorSpace;
+    tex.wrapS = THREE.RepeatWrapping;
+    tex.wrapT = THREE.RepeatWrapping;
+    tex.repeat.set(repeatX, repeatY);
+    tex.anisotropy = anisotropy;
+    return tex;
+  };
+
+  const map = configure(albedoCanvas, THREE.SRGBColorSpace);
+  const roughnessMap = configure(roughCanvas, THREE.NoColorSpace);
+  const bumpMap = configure(bumpCanvas, THREE.NoColorSpace);
+
+  return {
+    map,
+    roughnessMap,
+    bumpMap,
+    dispose: () => {
+      map.dispose();
+      roughnessMap.dispose();
+      bumpMap.dispose();
+    }
+  };
+}
+
+/**
+ * Procedural Stone Cathedral PBR texture maps (albedo, roughnessMap, bumpMap)
+ * featuring ashlar masonry joints, aged patina, and chiseled micro-pitting.
+ */
+export function createStoneCathedralMaps(
+  renderer: THREE.WebGLRenderer,
+  options: {
+    baseColor?: string;
+    mortarColor?: string;
+    tileRows?: number;
+    tileCols?: number;
+    repeatX?: number;
+    repeatY?: number;
+    size?: number;
+  } = {}
+): PBRTextureSet {
+  const size = options.size ?? 512;
+  const baseColor = options.baseColor ?? '#1b2030';
+  const mortarColor = options.mortarColor ?? '#0b0e17';
+  const rows = options.tileRows ?? 4;
+  const cols = options.tileCols ?? 4;
+  const rand = createSeededRandom(0x88d41f72);
+  const anisotropy = getSafeAnisotropy(renderer);
+
+  const albedoCanvas = document.createElement('canvas');
+  const roughCanvas = document.createElement('canvas');
+  const bumpCanvas = document.createElement('canvas');
+  albedoCanvas.width = roughCanvas.width = bumpCanvas.width = size;
+  albedoCanvas.height = roughCanvas.height = bumpCanvas.height = size;
+
+  const aCtx = albedoCanvas.getContext('2d');
+  const rCtx = roughCanvas.getContext('2d');
+  const bCtx = bumpCanvas.getContext('2d');
+
+  if (aCtx && rCtx && bCtx) {
+    aCtx.fillStyle = mortarColor;
+    aCtx.fillRect(0, 0, size, size);
+
+    // Mortar is rough (235) and recessed (30)
+    rCtx.fillStyle = 'rgb(238, 238, 238)';
+    rCtx.fillRect(0, 0, size, size);
+    bCtx.fillStyle = 'rgb(28, 28, 28)';
+    bCtx.fillRect(0, 0, size, size);
+
+    const cellH = size / rows;
+    const cellW = size / cols;
+    const gap = Math.max(3, Math.round(size * 0.012));
+
+    for (let r = 0; r < rows; r++) {
+      const stagger = (r % 2) * (cellW * 0.5);
+      for (let c = -1; c <= cols; c++) {
+        const x = c * cellW + stagger + gap * 0.5;
+        const y = r * cellH + gap * 0.5;
+        const w = cellW - gap;
+        const h = cellH - gap;
+
+        const toneShift = Math.round((rand() - 0.5) * 18);
+        aCtx.fillStyle = baseColor;
+        aCtx.fillRect(x, y, w, h);
+        aCtx.fillStyle = toneShift >= 0
+          ? `rgba(148, 163, 184, ${toneShift / 220})`
+          : `rgba(2, 6, 23, ${-toneShift / 140})`;
+        aCtx.fillRect(x, y, w, h);
+
+        // Polished slab faces vary between 120 and 185 roughness
+        const roughVal = Math.round(125 + rand() * 58);
+        rCtx.fillStyle = `rgb(${roughVal}, ${roughVal}, ${roughVal})`;
+        rCtx.fillRect(x, y, w, h);
+
+        // Slab bevel + elevated height
+        const bumpVal = Math.round(165 + rand() * 35);
+        bCtx.fillStyle = `rgb(${bumpVal}, ${bumpVal}, ${bumpVal})`;
+        bCtx.fillRect(x, y, w, h);
+        bCtx.strokeStyle = 'rgba(235, 235, 235, 0.45)';
+        bCtx.lineWidth = 2;
+        bCtx.strokeRect(x + 1, y + 1, Math.max(2, w - 2), Math.max(2, h - 2));
+      }
+    }
+
+    // Subtle stone veins & chiseled micro-pitting
+    for (let i = 0; i < 65; i++) {
+      const vx = rand() * size;
+      const vy = rand() * size;
+      const len = 18 + rand() * 44;
+      const ang = (rand() - 0.5) * 1.2;
+      aCtx.strokeStyle = rand() > 0.5 ? 'rgba(203, 213, 225, 0.05)' : 'rgba(2, 6, 23, 0.16)';
+      aCtx.lineWidth = 1;
+      aCtx.beginPath();
+      aCtx.moveTo(vx, vy);
+      aCtx.lineTo(vx + Math.cos(ang) * len, vy + Math.sin(ang) * len);
+      aCtx.stroke();
+
+      bCtx.strokeStyle = 'rgba(70, 70, 70, 0.35)';
+      bCtx.beginPath();
+      bCtx.moveTo(vx, vy);
+      bCtx.lineTo(vx + Math.cos(ang) * len, vy + Math.sin(ang) * len);
+      bCtx.stroke();
+    }
+
+    const pitCount = Math.floor(size * size * 0.02);
+    for (let i = 0; i < pitCount; i++) {
+      const px = rand() * size;
+      const py = rand() * size;
+      const light = rand() > 0.5;
+      bCtx.fillStyle = light ? 'rgba(220,220,220,0.22)' : 'rgba(40,40,40,0.28)';
+      bCtx.fillRect(px, py, 2, 2);
+      rCtx.fillStyle = light ? 'rgba(110,110,110,0.2)' : 'rgba(210,210,210,0.2)';
+      rCtx.fillRect(px, py, 2, 2);
+    }
+  }
+
+  const repeatX = options.repeatX ?? 1;
+  const repeatY = options.repeatY ?? 1;
+
+  const configure = (canvas: HTMLCanvasElement, colorSpace: THREE.ColorSpace) => {
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.colorSpace = colorSpace;
+    tex.wrapS = THREE.RepeatWrapping;
+    tex.wrapT = THREE.RepeatWrapping;
+    tex.repeat.set(repeatX, repeatY);
+    tex.anisotropy = anisotropy;
+    return tex;
+  };
+
+  const map = configure(albedoCanvas, THREE.SRGBColorSpace);
+  const roughnessMap = configure(roughCanvas, THREE.NoColorSpace);
+  const bumpMap = configure(bumpCanvas, THREE.NoColorSpace);
+
+  return {
+    map,
+    roughnessMap,
+    bumpMap,
+    dispose: () => {
+      map.dispose();
+      roughnessMap.dispose();
+      bumpMap.dispose();
+    }
+  };
+}
+
+/**
+ * 3D Game-Feel Camera Rig Helper:
+ * - Decayed quadratic trauma screen shake
+ * - Smooth speed-driven dynamic FOV kicks
+ */
+export class CameraRigHelper {
+  private trauma = 0;
+  private traumaTime = 0;
+  private fovOffset = 0;
+  private lastAppliedOffset = new THREE.Vector3();
+
+  public addTrauma(amount: number): void {
+    this.trauma = Math.min(1.0, Math.max(this.trauma, 0) + Math.max(0, amount));
+  }
+
+  public getTrauma(): number {
+    return this.trauma;
+  }
+
+  public kickFov(deltaDegrees: number): void {
+    this.fovOffset = THREE.MathUtils.clamp(this.fovOffset + deltaDegrees, -14, 20);
+  }
+
+  public getFovOffset(): number {
+    return this.fovOffset;
+  }
+
+  /**
+   * Computes current decayed quadratic trauma offset into `out` and decays trauma.
+   */
+  public stepShake(dt: number, out: THREE.Vector3 = _shakeOffset, amplitude = 0.55): THREE.Vector3 {
+    const clampedDt = Math.min(Math.max(dt, 0), 0.1);
+    if (this.trauma > 0.001) {
+      this.traumaTime += clampedDt * 38;
+      const shake = this.trauma * this.trauma;
+      out.set(
+        Math.sin(this.traumaTime * 1.7) * amplitude * shake,
+        Math.cos(this.traumaTime * 2.3) * (amplitude * 0.82) * shake,
+        Math.sin(this.traumaTime * 1.3) * (amplitude * 0.82) * shake
+      );
+      this.trauma = Math.max(0, this.trauma - clampedDt * 1.85);
+    } else {
+      out.set(0, 0, 0);
+      this.trauma = 0;
+    }
+    this.lastAppliedOffset.copy(out);
+    return out;
+  }
+
+  /**
+   * Applies decayed trauma shake directly on top of a manual camera's basePosition.
+   */
+  public applyTraumaToCamera(
+    camera: THREE.Camera,
+    basePosition: THREE.Vector3,
+    dt: number,
+    amplitude = 0.45
+  ): void {
+    this.stepShake(dt, _shakeOffset, amplitude);
+    camera.position.copy(basePosition).add(_shakeOffset);
+  }
+
+  /**
+   * Applies additive shake on top of a camera managed externally (e.g. OrbitControls),
+   * removing the previous frame's shake offset first so it never drifts.
+   */
+  public applyAdditiveShake(camera: THREE.Camera, dt: number, amplitude = 0.35): void {
+    camera.position.sub(this.lastAppliedOffset);
+    this.stepShake(dt, _shakeOffset, amplitude);
+    camera.position.add(_shakeOffset);
+  }
+
+  /**
+   * Smoothly adjusts camera FOV proportional to speedRatio [0..1+] + temporary fovOffset kicks.
+   */
+  public updateDynamicFov(
+    camera: THREE.PerspectiveCamera,
+    baseFov: number,
+    speedRatio: number,
+    dt: number,
+    maxBoostDegrees = 14
+  ): void {
+    const clampedDt = Math.min(Math.max(dt, 0), 0.1);
+    this.fovOffset = THREE.MathUtils.damp(this.fovOffset, 0, 7.5, clampedDt);
+    const clampedRatio = THREE.MathUtils.clamp(speedRatio, -0.25, 1.35);
+    const desiredFov = baseFov + clampedRatio * maxBoostDegrees + this.fovOffset;
+    const nextFov = THREE.MathUtils.damp(camera.fov, desiredFov, 8.5, clampedDt);
+    if (Math.abs(camera.fov - nextFov) > 0.03) {
+      camera.fov = nextFov;
+      camera.updateProjectionMatrix();
+    }
+  }
+
+  /**
+   * Recovers manual FOV kicks back toward baseFov when no speedRatio is driving it.
+   */
+  public stepFovRecovery(camera: THREE.PerspectiveCamera, baseFov: number, dt: number): void {
+    const clampedDt = Math.min(Math.max(dt, 0), 0.1);
+    this.fovOffset = THREE.MathUtils.damp(this.fovOffset, 0, 7.5, clampedDt);
+    const targetFov = baseFov + this.fovOffset;
+    if (Math.abs(camera.fov - targetFov) > 0.05) {
+      camera.fov = targetFov;
+      camera.updateProjectionMatrix();
+    }
+  }
+
+  public reset(): void {
+    this.trauma = 0;
+    this.traumaTime = 0;
+    this.fovOffset = 0;
+    this.lastAppliedOffset.set(0, 0, 0);
+  }
+}
+
+/**
+ * Keeps a DirectionalLight's shadow frustum tightly centered on a moving target,
+ * optionally snapping target coordinates to shadow-map texels to prevent shadow shimmering.
+ */
+export function followDirectionalShadow(
+  light: THREE.DirectionalLight,
+  targetPosition: THREE.Vector3,
+  frustumSize = 16,
+  texelSnap = true,
+  lightOffset?: THREE.Vector3
+): void {
+  if (!light.userData.baseShadowOffset) {
+    light.userData.baseShadowOffset = light.position.clone();
+  }
+  const offset = lightOffset || (light.userData.baseShadowOffset as THREE.Vector3) || _shadowOffset.set(12, 22, 14);
+
+  let sx = targetPosition.x;
+  const sy = targetPosition.y;
+  let sz = targetPosition.z;
+
+  if (texelSnap) {
+    const mapSize = Math.max(256, light.shadow.mapSize.width || 1024);
+    const worldUnitsPerTexel = (frustumSize * 2) / mapSize;
+    if (worldUnitsPerTexel > 0) {
+      sx = Math.round(sx / worldUnitsPerTexel) * worldUnitsPerTexel;
+      sz = Math.round(sz / worldUnitsPerTexel) * worldUnitsPerTexel;
+    }
+  }
+
+  const cam = light.shadow.camera;
+  if (
+    cam.left !== -frustumSize ||
+    cam.right !== frustumSize ||
+    cam.top !== frustumSize ||
+    cam.bottom !== -frustumSize
+  ) {
+    cam.left = -frustumSize;
+    cam.right = frustumSize;
+    cam.top = frustumSize;
+    cam.bottom = -frustumSize;
+    cam.updateProjectionMatrix();
+  }
+
+  light.target.position.set(sx, sy, sz);
+  light.target.updateMatrixWorld();
+  light.position.set(sx + offset.x, sy + offset.y, sz + offset.z);
 }
 
 /**
@@ -303,13 +881,15 @@ export class InstancedParticlePool3D {
 }
 
 /**
- * Studio 3D Stage Controller with Adaptive Camera Rig, 3D Trauma Shake, Dynamic FOV, Slow-Mo, and 60 FPS Guard.
+ * Studio 3D Stage Controller with Adaptive Quality, Selective Bloom Post-Processing,
+ * CameraRigHelper (3D Trauma Shake & Dynamic FOV), Slow-Mo, and 60 FPS Guard.
  */
 export class ThreeStageController {
   public readonly scene: THREE.Scene;
   public readonly camera: THREE.PerspectiveCamera;
   public readonly renderer: THREE.WebGLRenderer;
   public readonly particles: InstancedParticlePool3D;
+  public readonly cameraRig: CameraRigHelper;
   public readonly isSoftwareGl: boolean;
   public readonly keyLight: THREE.DirectionalLight;
   public readonly hemiLight: THREE.HemisphereLight;
@@ -319,9 +899,9 @@ export class ThreeStageController {
   private presets: Record<CameraPreset3D, CameraPresetConfig>;
   private currentPreset: CameraPreset3D;
   private quality: QualityLevel3D;
-  private trauma = 0;
-  private traumaTime = 0;
-  private fovOffset = 0;
+  private manualCamera: boolean;
+  private enableShadowsOption: boolean;
+  private maxAllowedDpr: number;
   private timeScale = 1.0;
   private slowMoTimer = 0;
   private currentCamPos = new THREE.Vector3();
@@ -335,10 +915,34 @@ export class ThreeStageController {
   private disposed = false;
   private onTickCallback: ((dt: number, elapsed: number) => void) | null = null;
 
+  private bloomConfig: BloomOptions;
+  private composer: EffectComposer | null = null;
+  private renderPass: RenderPass | null = null;
+  private bloomPass: UnrealBloomPass | null = null;
+  private outputPass: OutputPass | null = null;
+
+  private perfSettings: PerformanceSettings;
+  private unsubscribePerf: (() => void) | null = null;
+
   constructor(options: ThreeStageOptions) {
     this.container = options.container;
     this.isSoftwareGl = detectSoftwareWebGL();
-    this.quality = this.isSoftwareGl ? 'performance' : 'ultra';
+    this.perfSettings = performanceService.getFastSettings();
+    this.manualCamera = options.manualCamera ?? false;
+    this.enableShadowsOption = options.enableShadows ?? true;
+    this.bloomConfig = {
+      enabled: options.bloom?.enabled ?? false,
+      strength: options.bloom?.strength ?? 0.55,
+      radius: options.bloom?.radius ?? 0.4,
+      threshold: options.bloom?.threshold ?? 0.82
+    };
+
+    const isMobileDevice = typeof window !== 'undefined' && (
+      /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent) ||
+      ('ontouchstart' in window && (window.innerWidth <= 840 || window.innerHeight <= 840))
+    );
+    this.maxAllowedDpr = options.maxDpr ?? (isMobileDevice ? 1.75 : 2.0);
+    this.quality = this.resolveInitialQuality();
 
     this.presets = options.cameraPresets || {
       chase: { position: [0, 7.5, 13.5], lookAt: [0, 0.5, -1.5], fov: 55 },
@@ -353,17 +957,25 @@ export class ThreeStageController {
 
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(bgHex);
-    this.scene.fog = new THREE.FogExp2(fogHex, fogDensity);
+    if (options.fogEnabled !== false && fogDensity > 0) {
+      this.scene.fog = new THREE.FogExp2(fogHex, fogDensity);
+    }
 
     const w = Math.max(320, this.container.clientWidth || 800);
     const h = Math.max(240, this.container.clientHeight || 500);
     const initialCfg = this.presets[this.currentPreset];
+    const camFov = options.fov ?? initialCfg.fov;
+    const camNear = options.near ?? 0.1;
+    const camFar = options.far ?? 250;
 
-    this.camera = new THREE.PerspectiveCamera(initialCfg.fov, w / h, 0.1, 250);
+    this.camera = new THREE.PerspectiveCamera(camFov, w / h, camNear, camFar);
+    this.cameraRig = new CameraRigHelper();
     this.currentCamPos.set(...initialCfg.position);
     this.currentCamLook.set(...initialCfg.lookAt);
-    this.camera.position.copy(this.currentCamPos);
-    this.camera.lookAt(this.currentCamLook);
+    if (!this.manualCamera) {
+      this.camera.position.copy(this.currentCamPos);
+      this.camera.lookAt(this.currentCamLook);
+    }
 
     this.renderer = new THREE.WebGLRenderer({
       antialias: !this.isSoftwareGl,
@@ -371,19 +983,12 @@ export class ThreeStageController {
     });
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.12;
-
-    // Mobile DPR auto-clamping: limit to 1.75 max to prevent high-DPI GPU throttling and battery drain
-    const isMobileDevice = typeof window !== 'undefined' && (
-      /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent) ||
-      ('ontouchstart' in window && (window.innerWidth <= 840 || window.innerHeight <= 840))
-    );
-    const maxAllowedDpr = isMobileDevice ? 1.75 : 2.0;
-    this.renderer.setPixelRatio(this.isSoftwareGl ? 1 : Math.min(window.devicePixelRatio || 1, maxAllowedDpr));
-    this.renderer.setSize(w, h);
-    this.renderer.shadowMap.enabled = !this.isSoftwareGl;
+    this.renderer.toneMappingExposure = options.toneMappingExposure ?? 1.12;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer.domElement.className = 'w-full h-full block select-none touch-none';
+
+    this.applyRendererQuality();
+    this.renderer.setSize(w, h);
 
     this.container.innerHTML = '';
     this.container.appendChild(this.renderer.domElement);
@@ -408,12 +1013,11 @@ export class ThreeStageController {
     // Three-Point Studio Lighting Rig
     this.hemiLight = new THREE.HemisphereLight(0x38bdf8, 0x0f172a, 0.75);
     this.hemiLight.position.set(0, 30, 0);
-    this.scene.add(this.hemiLight);
 
     const shadowD = options.shadowBounds ?? 16;
     this.keyLight = new THREE.DirectionalLight(0xfffbeb, 1.85);
     this.keyLight.position.set(12, 22, 14);
-    this.keyLight.castShadow = !this.isSoftwareGl;
+    this.keyLight.castShadow = !this.isSoftwareGl && this.enableShadowsOption;
     this.keyLight.shadow.mapSize.set(1024, 1024);
     this.keyLight.shadow.camera.near = 1;
     this.keyLight.shadow.camera.far = 65;
@@ -423,11 +1027,16 @@ export class ThreeStageController {
     this.keyLight.shadow.camera.bottom = -shadowD;
     this.keyLight.shadow.bias = -0.0005;
     this.keyLight.shadow.normalBias = 0.02;
-    this.scene.add(this.keyLight);
 
     this.rimLight = new THREE.DirectionalLight(0xc084fc, 0.9);
     this.rimLight.position.set(-14, 12, -14);
-    this.scene.add(this.rimLight);
+
+    if (options.enableDefaultLighting !== false) {
+      this.scene.add(this.hemiLight);
+      this.scene.add(this.keyLight);
+      this.scene.add(this.keyLight.target);
+      this.scene.add(this.rimLight);
+    }
 
     if (options.enableGridFloor !== false) {
       const gridSize = options.gridSize ?? 48;
@@ -451,7 +1060,21 @@ export class ThreeStageController {
       this.scene.add(floorMesh);
     }
 
-    this.particles = new InstancedParticlePool3D(this.scene, this.isSoftwareGl ? 120 : 260);
+    const defaultCapacity = this.isSoftwareGl ? 120 : 260;
+    this.particles = new InstancedParticlePool3D(this.scene, options.particleCapacity ?? defaultCapacity);
+
+    // Initialize Post-Processing Pipeline (EffectComposer + UnrealBloomPass + OutputPass)
+    if (this.bloomConfig.enabled && !this.isSoftwareGl) {
+      this.initPostProcessing(w, h);
+    }
+
+    // Subscribe to global PerformanceService for adaptive DPR, shadows, and bloom toggling
+    this.unsubscribePerf = performanceService.subscribe((settings) => {
+      if (this.disposed) return;
+      this.perfSettings = settings;
+      this.quality = this.resolveQualityFromSettings(settings);
+      this.applyRendererQuality();
+    });
 
     // Responsive ResizeObserver
     if (typeof ResizeObserver !== 'undefined') {
@@ -461,6 +1084,129 @@ export class ThreeStageController {
     window.addEventListener('resize', this.handleResize);
   }
 
+  private resolveInitialQuality(): QualityLevel3D {
+    if (this.isSoftwareGl) return 'performance';
+    return this.resolveQualityFromSettings(this.perfSettings);
+  }
+
+  private resolveQualityFromSettings(settings: PerformanceSettings): QualityLevel3D {
+    if (this.isSoftwareGl || settings.tier === 'low' || settings.batterySaver) {
+      return 'performance';
+    }
+    if (settings.tier === 'medium') {
+      return 'balanced';
+    }
+    return 'ultra';
+  }
+
+  private initPostProcessing(width: number, height: number): void {
+    try {
+      const composer = new EffectComposer(this.renderer);
+      composer.setPixelRatio(this.renderer.getPixelRatio());
+      composer.setSize(width, height);
+
+      const renderPass = new RenderPass(this.scene, this.camera);
+      const bloomPass = new UnrealBloomPass(
+        new THREE.Vector2(width, height),
+        this.bloomConfig.strength ?? 0.55,
+        this.bloomConfig.radius ?? 0.4,
+        this.bloomConfig.threshold ?? 0.82
+      );
+      const outputPass = new OutputPass();
+
+      composer.addPass(renderPass);
+      composer.addPass(bloomPass);
+      composer.addPass(outputPass);
+
+      this.composer = composer;
+      this.renderPass = renderPass;
+      this.bloomPass = bloomPass;
+      this.outputPass = outputPass;
+    } catch {
+      this.composer = null;
+      this.renderPass = null;
+      this.bloomPass = null;
+      this.outputPass = null;
+    }
+  }
+
+  private applyRendererQuality(): void {
+    if (this.disposed) return;
+    if (this.isSoftwareGl) {
+      this.renderer.setPixelRatio(1);
+      this.renderer.shadowMap.enabled = false;
+      this.keyLight.castShadow = false;
+      return;
+    }
+
+    const rawDpr = typeof window !== 'undefined' ? (window.devicePixelRatio || 1) : 1;
+    const perfCap = this.perfSettings?.dprCap ?? 1.75;
+    let targetDpr = 1;
+    let shadowsAllowed = this.enableShadowsOption && (this.perfSettings?.enableShadows ?? true);
+
+    if (this.quality === 'performance') {
+      targetDpr = 1;
+      shadowsAllowed = false;
+    } else if (this.quality === 'balanced') {
+      targetDpr = Math.min(rawDpr, perfCap, 1.5, this.maxAllowedDpr);
+    } else {
+      targetDpr = Math.min(rawDpr, perfCap, this.maxAllowedDpr);
+    }
+
+    this.renderer.setPixelRatio(Math.max(1, targetDpr));
+    this.renderer.shadowMap.enabled = shadowsAllowed;
+    this.keyLight.castShadow = shadowsAllowed;
+
+    if (this.composer) {
+      this.composer.setPixelRatio(Math.max(1, targetDpr));
+    }
+  }
+
+  public isPostProcessingActive(): boolean {
+    return Boolean(
+      this.bloomConfig.enabled &&
+      !this.isSoftwareGl &&
+      this.quality !== 'performance' &&
+      this.perfSettings.enableGlow &&
+      this.composer
+    );
+  }
+
+  public setBloomParams(params: Partial<BloomOptions>): void {
+    if (params.enabled !== undefined) {
+      this.bloomConfig.enabled = params.enabled;
+      if (params.enabled && !this.composer && !this.isSoftwareGl) {
+        const w = Math.max(300, this.container.clientWidth || 800);
+        const h = Math.max(220, this.container.clientHeight || 500);
+        this.initPostProcessing(w, h);
+      }
+    }
+    if (this.bloomPass) {
+      if (params.strength !== undefined) {
+        this.bloomConfig.strength = params.strength;
+        this.bloomPass.strength = params.strength;
+      }
+      if (params.radius !== undefined) {
+        this.bloomConfig.radius = params.radius;
+        this.bloomPass.radius = params.radius;
+      }
+      if (params.threshold !== undefined) {
+        this.bloomConfig.threshold = params.threshold;
+        this.bloomPass.threshold = params.threshold;
+      }
+    }
+  }
+
+  public followShadow(
+    targetPosition: THREE.Vector3,
+    frustumSize = 16,
+    texelSnap = true,
+    light: THREE.DirectionalLight = this.keyLight,
+    lightOffset?: THREE.Vector3
+  ): void {
+    followDirectionalShadow(light, targetPosition, frustumSize, texelSnap, lightOffset);
+  }
+
   public handleResize = (): void => {
     if (this.disposed || !this.container) return;
     const w = Math.max(300, this.container.clientWidth || 800);
@@ -468,6 +1214,10 @@ export class ThreeStageController {
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(w, h);
+    if (this.composer) {
+      this.composer.setPixelRatio(this.renderer.getPixelRatio());
+      this.composer.setSize(w, h);
+    }
   };
 
   public setCameraPreset(preset: CameraPreset3D): void {
@@ -485,32 +1235,22 @@ export class ThreeStageController {
   }
 
   public setQualityLevel(level: QualityLevel3D): void {
-    this.quality = level;
-    if (this.isSoftwareGl) return;
-    if (level === 'performance') {
-      this.renderer.setPixelRatio(1);
-      this.renderer.shadowMap.enabled = false;
-    } else if (level === 'balanced') {
-      this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
-      this.renderer.shadowMap.enabled = true;
-    } else {
-      this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
-      this.renderer.shadowMap.enabled = true;
-    }
+    this.quality = this.isSoftwareGl ? 'performance' : level;
+    this.applyRendererQuality();
   }
 
   /**
    * Adds 3D camera trauma (0.0 to 1.0) for rotational & translational screen-shake.
    */
   public triggerTrauma(amount: number): void {
-    this.trauma = Math.min(1.0, this.trauma + amount);
+    this.cameraRig.addTrauma(amount);
   }
 
   /**
    * Triggers a temporary FOV kick (positive = zoom out speed sense, negative = zoom in focus).
    */
   public kickFov(deltaDegrees: number): void {
-    this.fovOffset = THREE.MathUtils.clamp(this.fovOffset + deltaDegrees, -14, 18);
+    this.cameraRig.kickFov(deltaDegrees);
   }
 
   /**
@@ -563,51 +1303,31 @@ export class ThreeStageController {
 
     const scaledDt = clampedDt * this.timeScale;
 
-    // Smooth camera preset & target interpolation
-    const cfg = this.presets[this.currentPreset];
-    _targetPos.set(
-      cfg.position[0] + this.targetOffset.x,
-      cfg.position[1] + this.targetOffset.y,
-      cfg.position[2] + this.targetOffset.z
-    );
-    _targetLook.set(
-      cfg.lookAt[0] + this.lookOffset.x,
-      cfg.lookAt[1] + this.lookOffset.y,
-      cfg.lookAt[2] + this.lookOffset.z
-    );
-
-    this.currentCamPos.x = THREE.MathUtils.damp(this.currentCamPos.x, _targetPos.x, 6.5, clampedDt);
-    this.currentCamPos.y = THREE.MathUtils.damp(this.currentCamPos.y, _targetPos.y, 6.5, clampedDt);
-    this.currentCamPos.z = THREE.MathUtils.damp(this.currentCamPos.z, _targetPos.z, 6.5, clampedDt);
-
-    this.currentCamLook.x = THREE.MathUtils.damp(this.currentCamLook.x, _targetLook.x, 8.5, clampedDt);
-    this.currentCamLook.y = THREE.MathUtils.damp(this.currentCamLook.y, _targetLook.y, 8.5, clampedDt);
-    this.currentCamLook.z = THREE.MathUtils.damp(this.currentCamLook.z, _targetLook.z, 8.5, clampedDt);
-
-    // 3D Trauma Shake (Quadratic falloff)
-    if (this.trauma > 0.001) {
-      this.traumaTime += clampedDt * 38;
-      const shake = this.trauma * this.trauma;
-      _shakeOffset.set(
-        Math.sin(this.traumaTime * 1.7) * 0.55 * shake,
-        Math.cos(this.traumaTime * 2.3) * 0.45 * shake,
-        Math.sin(this.traumaTime * 1.3) * 0.45 * shake
+    if (!this.manualCamera) {
+      // Smooth camera preset & target interpolation
+      const cfg = this.presets[this.currentPreset];
+      _targetPos.set(
+        cfg.position[0] + this.targetOffset.x,
+        cfg.position[1] + this.targetOffset.y,
+        cfg.position[2] + this.targetOffset.z
       );
-      this.trauma = Math.max(0, this.trauma - clampedDt * 1.85);
-    } else {
-      _shakeOffset.set(0, 0, 0);
-      this.trauma = 0;
-    }
+      _targetLook.set(
+        cfg.lookAt[0] + this.lookOffset.x,
+        cfg.lookAt[1] + this.lookOffset.y,
+        cfg.lookAt[2] + this.lookOffset.z
+      );
 
-    this.camera.position.copy(this.currentCamPos).add(_shakeOffset);
-    this.camera.lookAt(this.currentCamLook);
+      this.currentCamPos.x = THREE.MathUtils.damp(this.currentCamPos.x, _targetPos.x, 6.5, clampedDt);
+      this.currentCamPos.y = THREE.MathUtils.damp(this.currentCamPos.y, _targetPos.y, 6.5, clampedDt);
+      this.currentCamPos.z = THREE.MathUtils.damp(this.currentCamPos.z, _targetPos.z, 6.5, clampedDt);
 
-    // Dynamic FOV kick recovery
-    this.fovOffset = THREE.MathUtils.damp(this.fovOffset, 0, 7.5, clampedDt);
-    const targetFov = cfg.fov + this.fovOffset;
-    if (Math.abs(this.camera.fov - targetFov) > 0.05) {
-      this.camera.fov = targetFov;
-      this.camera.updateProjectionMatrix();
+      this.currentCamLook.x = THREE.MathUtils.damp(this.currentCamLook.x, _targetLook.x, 8.5, clampedDt);
+      this.currentCamLook.y = THREE.MathUtils.damp(this.currentCamLook.y, _targetLook.y, 8.5, clampedDt);
+      this.currentCamLook.z = THREE.MathUtils.damp(this.currentCamLook.z, _targetLook.z, 8.5, clampedDt);
+
+      this.cameraRig.applyTraumaToCamera(this.camera, this.currentCamPos, clampedDt, 0.55);
+      this.camera.lookAt(this.currentCamLook);
+      this.cameraRig.stepFovRecovery(this.camera, cfg.fov, clampedDt);
     }
 
     // Step instanced 3D particles
@@ -618,7 +1338,11 @@ export class ThreeStageController {
 
   public render(): void {
     if (this.disposed) return;
-    this.renderer.render(this.scene, this.camera);
+    if (this.isPostProcessingActive() && this.composer) {
+      this.composer.render();
+    } else {
+      this.renderer.render(this.scene, this.camera);
+    }
   }
 
   private handleVisibilityChange = (): void => {
@@ -681,7 +1405,6 @@ export class ThreeStageController {
     const loop = () => {
       if (this.disposed) return;
       if (this.isPaused) {
-        // Power-saving mode when mobile device is locked or user switched apps/tabs
         this.frameId = window.requestAnimationFrame(loop);
         return;
       }
@@ -718,6 +1441,11 @@ export class ThreeStageController {
     this.disposed = true;
     this.stopLoop();
     this.onTickCallback = null;
+
+    if (this.unsubscribePerf) {
+      this.unsubscribePerf();
+      this.unsubscribePerf = null;
+    }
     if (this.resizeObserver) {
       this.resizeObserver.disconnect();
       this.resizeObserver = null;
@@ -730,6 +1458,27 @@ export class ThreeStageController {
       this.renderer.domElement.removeEventListener('webglcontextlost', this.handleContextLost);
       this.renderer.domElement.removeEventListener('webglcontextrestored', this.handleContextRestored);
     }
+
+    if (this.bloomPass) {
+      try {
+        this.bloomPass.dispose();
+      } catch {}
+      this.bloomPass = null;
+    }
+    if (this.outputPass) {
+      try {
+        this.outputPass.dispose();
+      } catch {}
+      this.outputPass = null;
+    }
+    if (this.composer) {
+      try {
+        this.composer.dispose();
+      } catch {}
+      this.composer = null;
+    }
+    this.renderPass = null;
+
     disposeThreeScene(this.scene, this.renderer);
   }
 }
@@ -873,19 +1622,16 @@ export function buildEnemyShip3D(type: 'scout' | 'interceptor' | 'tank' | 'comma
     roughness: 0.15
   });
 
-  // 1. Central Core Body
   const bodySize = type === 'commander' ? 0.95 : type === 'tank' ? 0.78 : 0.52;
   const body = new THREE.Mesh(new THREE.OctahedronGeometry(bodySize, 1), hullMat);
   body.scale.set(1, 0.55, 1.25);
   body.castShadow = true;
   g.add(body);
 
-  // 2. Glowing Cockpit Eye
   const eye = new THREE.Mesh(new THREE.SphereGeometry(bodySize * 0.38, 10, 10), coreMat);
   eye.position.set(0, 0.12, bodySize * 0.55);
   g.add(eye);
 
-  // 3 & 4. Solar/Blade Wings
   const wingSpan = type === 'commander' ? 2.4 : type === 'interceptor' ? 1.8 : 1.35;
   const wingL = new THREE.Mesh(new THREE.BoxGeometry(wingSpan * 0.5, 0.08, 0.65), darkMat);
   wingL.position.set(-wingSpan * 0.38, 0, 0);
@@ -895,7 +1641,6 @@ export function buildEnemyShip3D(type: 'scout' | 'interceptor' | 'tank' | 'comma
   wingR.rotation.z = 0.22;
   g.add(wingL, wingR);
 
-  // 5. Rear Engine Ring
   const ring = new THREE.Mesh(new THREE.TorusGeometry(bodySize * 0.45, 0.06, 8, 16), coreMat);
   ring.position.set(0, 0, -bodySize * 0.7);
   g.add(ring);
@@ -930,7 +1675,6 @@ export function buildCyberActionHero3D(primaryColor = 0x38bdf8, visorColor = 0xf
     roughness: 0.15
   });
 
-  // 1 & 2. Legs (pivoted so character stands at y=0)
   const legGeo = new THREE.CapsuleGeometry(0.11, 0.38, 6, 8);
   const legL = new THREE.Mesh(legGeo, suitMat);
   legL.position.set(-0.15, 0.28, 0);
@@ -939,19 +1683,16 @@ export function buildCyberActionHero3D(primaryColor = 0x38bdf8, visorColor = 0xf
   legR.position.x = 0.15;
   group.add(legL, legR);
 
-  // 3. Armored Torso
   const torso = new THREE.Mesh(new THREE.BoxGeometry(0.48, 0.56, 0.28), armorMat);
   torso.position.set(0, 0.78, 0);
   torso.castShadow = true;
   group.add(torso);
 
-  // 4. Chest Reactor Core
   const chestCore = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 0.06, 12), visorMat);
   chestCore.rotation.x = Math.PI / 2;
   chestCore.position.set(0, 0.82, 0.14);
   group.add(chestCore);
 
-  // 5 & 6. Arms
   const armGeo = new THREE.CapsuleGeometry(0.09, 0.34, 6, 8);
   const armL = new THREE.Mesh(armGeo, armorMat);
   armL.position.set(-0.34, 0.78, 0);
@@ -959,13 +1700,11 @@ export function buildCyberActionHero3D(primaryColor = 0x38bdf8, visorColor = 0xf
   armR.position.x = 0.34;
   group.add(armL, armR);
 
-  // 7. Cyber Helmet
   const head = new THREE.Mesh(new THREE.SphereGeometry(0.22, 14, 12), armorMat);
   head.position.set(0, 1.24, 0);
   head.castShadow = true;
   group.add(head);
 
-  // 8. Glowing Visor Strip
   const visor = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.08, 0.16), visorMat);
   visor.position.set(0, 1.25, 0.14);
   group.add(visor);

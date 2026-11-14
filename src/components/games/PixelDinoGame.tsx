@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
 import { GameComponentProps } from '../../types';
-import { audio } from '../../utils/audio';
+import { audioController, ObjectPool } from '../../sdk';
 import { useGameEngine } from '../../hooks/useGameEngine';
 import { inputManager } from '../../services/inputService';
 import { GameOverlay } from '../gameplay/GameOverlay';
@@ -11,13 +11,14 @@ import {
   CameraPreset3D,
   QualityLevel3D
 } from '../../utils/threeStage';
-import { Zap, Sun } from 'lucide-react';
+import { Zap, Sun, ArrowDown } from 'lucide-react';
 
 interface DinoObstacle3D {
   mesh: THREE.Group;
   x: number;
   type: 'cactus' | 'ptero';
   y: number;
+  active: boolean;
 }
 
 function buildVoxelDino3D(): {
@@ -43,7 +44,6 @@ function buildVoxelDino3D(): {
     emissiveIntensity: 0.9
   });
 
-  // 1 & 2. Legs
   const legGeo = new THREE.BoxGeometry(0.24, 0.45, 0.24);
   const legL = new THREE.Mesh(legGeo, bodyMat);
   legL.position.set(0, 0.22, 0.18);
@@ -52,24 +52,20 @@ function buildVoxelDino3D(): {
   legR.position.z = -0.18;
   group.add(legL, legR);
 
-  // 3. Torso
   const torso = new THREE.Mesh(new THREE.BoxGeometry(0.75, 0.65, 0.52), bodyMat);
   torso.position.set(0, 0.68, 0);
   torso.castShadow = true;
   group.add(torso);
 
-  // 4. Belly Plate
   const belly = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.52, 0.54), bellyMat);
   belly.position.set(0.18, 0.66, 0);
   group.add(belly);
 
-  // 5. Tail
   const tail = new THREE.Mesh(new THREE.BoxGeometry(0.65, 0.28, 0.32), bodyMat);
   tail.position.set(-0.58, 0.68, 0);
   tail.rotation.z = 0.22;
   group.add(tail);
 
-  // 6 & 7. Head & Snout Group
   const headGroup = new THREE.Group();
   const skull = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.48, 0.48), bodyMat);
   skull.position.set(0.32, 1.18, 0);
@@ -156,15 +152,19 @@ export default function PixelDinoGame({
     distAcc: 0
   });
 
-  const keysRef = useRef<Record<string, boolean>>({});
+  const lastMultRef = useRef('1.0x');
+  const duckActiveRef = useRef(false);
+  const touchDuckHoldRef = useRef(false);
+  const swipeStartYRef = useRef<number | null>(null);
   const hazardsRef = useRef<DinoObstacle3D[]>([]);
+  const releasePoolsRef = useRef<() => void>(() => {});
 
   const handleStart = useCallback(() => {
-    const stage = stageRef.current;
-    if (stage) {
-      hazardsRef.current.forEach((h) => stage.scene.remove(h.mesh));
-    }
+    releasePoolsRef.current();
     hazardsRef.current = [];
+    duckActiveRef.current = false;
+    touchDuckHoldRef.current = false;
+    lastMultRef.current = '1.0x';
     dinoStateRef.current = {
       y: 0,
       vy: 0,
@@ -184,36 +184,28 @@ export default function PixelDinoGame({
     if (!d.jumping) {
       d.jumping = true;
       d.vy = 12.2;
-      audio.playJump?.();
+      audioController.playJump();
     }
   }, []);
 
   useEffect(() => {
-    const onKeyDown = (e: KeyboardEvent) => {
-      keysRef.current[e.key.toLowerCase()] = true;
-      if (e.key === ' ' || e.key === 'ArrowUp' || e.key.toLowerCase() === 'w') {
-        jump();
-      }
-    };
-    const onKeyUp = (e: KeyboardEvent) => {
-      keysRef.current[e.key.toLowerCase()] = false;
-    };
-    window.addEventListener('keydown', onKeyDown);
-    window.addEventListener('keyup', onKeyUp);
-
     const unsub = inputManager.subscribe({
       onActionDown: (action) => {
-        if (action === 'UP' || action === 'ACTION_PRIMARY') jump();
-        if (action === 'DOWN') keysRef.current['arrowdown'] = true;
+        if (action === 'UP' || action === 'ACTION_PRIMARY' || action === 'PRIMARY') {
+          jump();
+        }
+        if (action === 'DOWN') {
+          duckActiveRef.current = true;
+        }
       },
       onActionUp: (action) => {
-        if (action === 'DOWN') keysRef.current['arrowdown'] = false;
+        if (action === 'DOWN') {
+          duckActiveRef.current = false;
+        }
       }
     });
 
     return () => {
-      window.removeEventListener('keydown', onKeyDown);
-      window.removeEventListener('keyup', onKeyUp);
       unsub();
     };
   }, [jump]);
@@ -263,6 +255,30 @@ export default function PixelDinoGame({
     dino.group.position.set(-4.2, 0, 0);
     stage.scene.add(dino.group);
 
+    const createHazardPool = (type: 'cactus' | 'ptero', max: number) =>
+      new ObjectPool<DinoObstacle3D>(
+        () => {
+          const mesh = buildDinoHazard3D(type);
+          mesh.visible = false;
+          stage.scene.add(mesh);
+          return { mesh, x: 16, type, y: type === 'ptero' ? 1.42 : 0, active: false };
+        },
+        (item) => {
+          item.active = false;
+          item.mesh.visible = false;
+          item.mesh.position.set(16, -99, 0);
+        },
+        max
+      );
+
+    const cactusPool = createHazardPool('cactus', 8);
+    const pteroPool = createHazardPool('ptero', 5);
+
+    releasePoolsRef.current = () => {
+      cactusPool.releaseAll();
+      pteroPool.releaseAll();
+    };
+
     stage.startLoop((dt, elapsed) => {
       if (gameStateRef.current !== 'playing') return;
 
@@ -273,10 +289,14 @@ export default function PixelDinoGame({
         const pts = Math.floor(d.distAcc / 2.2);
         d.distAcc -= pts * 2.2;
         addScore(pts);
-        setSpeedMultiplier(`${(d.speed / 13).toFixed(1)}x`);
+        const multStr = `${(d.speed / 13).toFixed(1)}x`;
+        if (multStr !== lastMultRef.current) {
+          lastMultRef.current = multStr;
+          setSpeedMultiplier(multStr);
+        }
       }
 
-      d.ducking = Boolean(keysRef.current['arrowdown'] || keysRef.current['s']);
+      d.ducking = duckActiveRef.current || touchDuckHoldRef.current;
 
       if (d.jumping) {
         d.y += d.vy * dt;
@@ -295,19 +315,20 @@ export default function PixelDinoGame({
       dino.legL.rotation.z = d.jumping ? 0.3 : stride;
       dino.legR.rotation.z = d.jumping ? -0.3 : -stride;
 
-      // Spawn cacti & pterodactyls
       d.spawnTimer -= dt;
       if (d.spawnTimer <= 0) {
         d.spawnTimer = Math.max(0.45, 1.25 - (d.speed - 13) * 0.04) + Math.random() * 0.35;
         const type: 'cactus' | 'ptero' = d.speed > 15 && Math.random() < 0.32 ? 'ptero' : 'cactus';
-        const mesh = buildDinoHazard3D(type);
+        const hazard = type === 'cactus' ? cactusPool.acquire() : pteroPool.acquire();
         const hy = type === 'ptero' ? 1.42 : 0;
-        mesh.position.set(16, hy, 0);
-        stage.scene.add(mesh);
-        hazardsRef.current.push({ mesh, x: 16, type, y: hy });
+        hazard.x = 16;
+        hazard.y = hy;
+        hazard.active = true;
+        hazard.mesh.position.set(16, hy, 0);
+        hazard.mesh.visible = true;
+        hazardsRef.current.push(hazard);
       }
 
-      // Update hazards
       for (let i = hazardsRef.current.length - 1; i >= 0; i--) {
         const h = hazardsRef.current[i];
         h.x -= d.speed * dt;
@@ -317,44 +338,90 @@ export default function PixelDinoGame({
           const hitCactus = h.type === 'cactus' && d.y < 1.05;
           const hitPtero = h.type === 'ptero' && !d.ducking && d.y < 1.6;
           if (hitCactus || hitPtero) {
-            stage.scene.remove(h.mesh);
+            if (h.type === 'cactus') cactusPool.releaseItem(h);
+            else pteroPool.releaseItem(h);
             hazardsRef.current.splice(i, 1);
             stage.particles.burst(-4.2, d.y + 0.8, 0, 34, 0xef4444, 10);
             stage.triggerTrauma(0.75);
-            audio.playExplosion?.();
+            audioController.playExplosion();
+            audioController.playGameOver();
             triggerGameOver(scoreRef.current);
             return;
           }
         }
 
         if (h.x < -14) {
-          stage.scene.remove(h.mesh);
+          if (h.type === 'cactus') cactusPool.releaseItem(h);
+          else pteroPool.releaseItem(h);
           hazardsRef.current.splice(i, 1);
         }
       }
     });
 
     return () => {
+      releasePoolsRef.current();
+      releasePoolsRef.current = () => {};
+      hazardsRef.current = [];
       stage.dispose();
       stageRef.current = null;
     };
   }, [addScore, scoreRef, triggerGameOver]);
 
   return (
-    <div
-      className="relative w-full h-full min-h-[460px] bg-slate-950 overflow-hidden rounded-2xl border border-amber-500/20"
-      onClick={jump}
-    >
-      <div ref={mountRef} className="absolute inset-0 w-full h-full" />
+    <div className="relative w-full h-full min-h-[280px] sm:min-h-[380px] lg:min-h-[460px] bg-slate-950 overflow-hidden rounded-2xl border border-amber-500/20 touch-none select-none">
+      <div
+        ref={mountRef}
+        className="absolute inset-0 w-full h-full cursor-pointer touch-none"
+        onPointerDown={(e) => {
+          swipeStartYRef.current = e.clientY;
+          jump();
+        }}
+        onPointerMove={(e) => {
+          if (swipeStartYRef.current !== null && e.clientY - swipeStartYRef.current > 24) {
+            touchDuckHoldRef.current = true;
+          }
+        }}
+        onPointerUp={() => {
+          swipeStartYRef.current = null;
+          touchDuckHoldRef.current = false;
+        }}
+        onPointerCancel={() => {
+          swipeStartYRef.current = null;
+          touchDuckHoldRef.current = false;
+        }}
+      />
 
-      <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex flex-wrap items-center justify-between gap-2 p-3.5">
-        <div className="flex items-center gap-3 rounded-xl border border-white/10 bg-slate-950/85 px-3.5 py-2 text-xs text-slate-200 tabular-nums">
+      <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex flex-wrap items-center justify-between gap-2 p-3 sm:p-3.5">
+        <div className="flex items-center gap-2 sm:gap-3 rounded-xl border border-white/10 bg-slate-950/85 px-3 py-1.5 sm:px-3.5 sm:py-2 text-xs text-slate-200 tabular-nums">
           <span className="flex items-center gap-1 font-semibold text-amber-400">
             <Sun className="w-3.5 h-3.5" /> KECEPATAN {speedMultiplier}
           </span>
           <span aria-hidden="true">·</span>
           <span>SKOR: <strong className="text-white">{score}</strong></span>
         </div>
+
+        {gameState === 'playing' && (
+          <button
+            type="button"
+            onPointerDown={(e) => {
+              e.stopPropagation();
+              touchDuckHoldRef.current = true;
+            }}
+            onPointerUp={(e) => {
+              e.stopPropagation();
+              touchDuckHoldRef.current = false;
+            }}
+            onPointerLeave={() => {
+              touchDuckHoldRef.current = false;
+            }}
+            onPointerCancel={() => {
+              touchDuckHoldRef.current = false;
+            }}
+            className="pointer-events-auto sm:hidden min-h-[44px] inline-flex items-center gap-1.5 rounded-xl border border-amber-500/35 bg-slate-950/90 px-3.5 text-xs font-semibold text-amber-300 active:bg-amber-500 active:text-slate-950 whitespace-nowrap"
+          >
+            <ArrowDown className="w-3.5 h-3.5" /> Tunduk
+          </button>
+        )}
       </div>
 
       <ThreeDockOverlay

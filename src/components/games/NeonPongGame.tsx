@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
 import { GameComponentProps } from '../../types';
-import { audio } from '../../utils/audio';
+import { audioController } from '../../sdk';
 import { useGameEngine } from '../../hooks/useGameEngine';
 import { inputManager } from '../../services/inputService';
 import { GameOverlay } from '../gameplay/GameOverlay';
@@ -61,7 +61,7 @@ export default function NeonPongGame({
     aiGoals: 0
   });
 
-  const keysRef = useRef<Record<string, boolean>>({});
+  const moveDirRef = useRef({ left: false, right: false });
 
   const handleStart = useCallback(() => {
     pongRef.current = {
@@ -75,6 +75,7 @@ export default function NeonPongGame({
       playerGoals: 0,
       aiGoals: 0
     };
+    moveDirRef.current = { left: false, right: false };
     setPlayerGoals(0);
     setAiGoals(0);
     setRally(0);
@@ -96,29 +97,18 @@ export default function NeonPongGame({
   }, []);
 
   useEffect(() => {
-    const onKeyDown = (e: KeyboardEvent) => {
-      keysRef.current[e.key.toLowerCase()] = true;
-    };
-    const onKeyUp = (e: KeyboardEvent) => {
-      keysRef.current[e.key.toLowerCase()] = false;
-    };
-    window.addEventListener('keydown', onKeyDown);
-    window.addEventListener('keyup', onKeyUp);
-
     const unsub = inputManager.subscribe({
       onActionDown: (action) => {
-        if (action === 'LEFT') keysRef.current['arrowleft'] = true;
-        if (action === 'RIGHT') keysRef.current['arrowright'] = true;
+        if (action === 'LEFT') moveDirRef.current.left = true;
+        if (action === 'RIGHT') moveDirRef.current.right = true;
       },
       onActionUp: (action) => {
-        if (action === 'LEFT') keysRef.current['arrowleft'] = false;
-        if (action === 'RIGHT') keysRef.current['arrowright'] = false;
+        if (action === 'LEFT') moveDirRef.current.left = false;
+        if (action === 'RIGHT') moveDirRef.current.right = false;
       }
     });
 
     return () => {
-      window.removeEventListener('keydown', onKeyDown);
-      window.removeEventListener('keyup', onKeyUp);
       unsub();
     };
   }, []);
@@ -150,7 +140,6 @@ export default function NeonPongGame({
     stageRef.current = stage;
     setQuality(stage.getQualityLevel());
 
-    // Side Neon Walls & Center Line
     const railMat = new THREE.MeshStandardMaterial({
       color: 0x3b82f6,
       emissive: 0x2563eb,
@@ -167,7 +156,6 @@ export default function NeonPongGame({
     centerLine.position.y = 0.02;
     stage.scene.add(wallL, wallR, centerLine);
 
-    // Player & AI 3D Hover Paddles
     const playerPaddle = new THREE.Mesh(
       new THREE.BoxGeometry(2.3, 0.42, 0.45),
       new THREE.MeshPhysicalMaterial({
@@ -209,7 +197,7 @@ export default function NeonPongGame({
 
     stage.scene.add(playerPaddle, aiPaddle, puck);
 
-    const onPointerMove = (e: PointerEvent) => {
+    const updatePaddleFromPointer = (e: PointerEvent) => {
       if (gameStateRef.current !== 'playing') return;
       const rect = container.getBoundingClientRect();
       if (rect.width <= 0) return;
@@ -220,18 +208,17 @@ export default function NeonPongGame({
         TABLE_HALF_W - 1.15
       );
     };
-    container.addEventListener('pointermove', onPointerMove);
+    container.addEventListener('pointerdown', updatePaddleFromPointer);
+    container.addEventListener('pointermove', updatePaddleFromPointer);
 
     stage.startLoop((dt) => {
       if (gameStateRef.current !== 'playing') return;
 
       const p = pongRef.current;
-      const keys = keysRef.current;
-      if (keys['arrowleft'] || keys['a']) p.playerX -= 12.5 * dt;
-      if (keys['arrowright'] || keys['d']) p.playerX += 12.5 * dt;
+      if (moveDirRef.current.left) p.playerX -= 12.5 * dt;
+      if (moveDirRef.current.right) p.playerX += 12.5 * dt;
       p.playerX = THREE.MathUtils.clamp(p.playerX, -(TABLE_HALF_W - 1.15), TABLE_HALF_W - 1.15);
 
-      // Tactical AI tracking
       const aiSpeed = 8.4;
       if (p.aiX < p.puckX - 0.2) p.aiX += aiSpeed * dt;
       else if (p.aiX > p.puckX + 0.2) p.aiX -= aiSpeed * dt;
@@ -247,14 +234,13 @@ export default function NeonPongGame({
       if (p.puckX < -TABLE_HALF_W + 0.4) {
         p.puckX = -TABLE_HALF_W + 0.4;
         p.vx = Math.abs(p.vx);
-        audio.playClick?.();
+        audioController.playClick();
       } else if (p.puckX > TABLE_HALF_W - 0.4) {
         p.puckX = TABLE_HALF_W - 0.4;
         p.vx = -Math.abs(p.vx);
-        audio.playClick?.();
+        audioController.playClick();
       }
 
-      // Player paddle hit
       const pZ = TABLE_HALF_Z - 0.5;
       if (p.vz > 0 && Math.abs(p.puckZ - pZ) < 0.48 && Math.abs(p.puckX - p.playerX) < 1.38) {
         const offset = (p.puckX - p.playerX) / 1.15;
@@ -265,20 +251,18 @@ export default function NeonPongGame({
         addScore(15 + p.rally * 2);
         stage.particles.burst(p.puckX, 0.3, pZ, 16, 0x22d3ee, 6.5);
         stage.triggerTrauma(0.2);
-        audio.playJump?.();
+        audioController.playReflect();
       }
 
-      // AI paddle hit
       const aZ = -(TABLE_HALF_Z - 0.5);
       if (p.vz < 0 && Math.abs(p.puckZ - aZ) < 0.48 && Math.abs(p.puckX - p.aiX) < 1.38) {
         const offset = (p.puckX - p.aiX) / 1.15;
         p.vz = Math.min(18, Math.abs(p.vz) * 1.04);
         p.vx = offset * 9.5;
         stage.particles.burst(p.puckX, 0.3, aZ, 14, 0xf43f5e, 6);
-        audio.playClick?.();
+        audioController.playReflect();
       }
 
-      // Player scored goal at top (-Z)
       if (p.puckZ < -TABLE_HALF_Z - 0.6) {
         p.playerGoals += 1;
         setPlayerGoals(p.playerGoals);
@@ -286,14 +270,13 @@ export default function NeonPongGame({
         stage.particles.burst(p.puckX, 0.5, -TABLE_HALF_Z, 32, 0x22d3ee, 9);
         stage.triggerTrauma(0.45);
         stage.kickFov(4);
-        audio.playCoin?.();
+        audioController.playWin();
         p.puckX = 0;
         p.puckZ = 0;
         p.vz = 10.5;
         p.vx = (Math.random() - 0.5) * 8;
       }
 
-      // AI scored goal at bottom (+Z)
       if (p.puckZ > TABLE_HALF_Z + 0.6) {
         p.aiGoals += 1;
         setAiGoals(p.aiGoals);
@@ -301,8 +284,9 @@ export default function NeonPongGame({
         setRally(0);
         stage.particles.burst(p.puckX, 0.5, TABLE_HALF_Z, 32, 0xef4444, 9);
         stage.triggerTrauma(0.65);
-        audio.playExplosion?.();
+        audioController.playHit();
         if (p.aiGoals >= 5) {
+          audioController.playGameOver();
           triggerGameOver(scoreRef.current);
           return;
         }
@@ -316,18 +300,19 @@ export default function NeonPongGame({
     });
 
     return () => {
-      container.removeEventListener('pointermove', onPointerMove);
+      container.removeEventListener('pointerdown', updatePaddleFromPointer);
+      container.removeEventListener('pointermove', updatePaddleFromPointer);
       stage.dispose();
       stageRef.current = null;
     };
   }, [addScore, scoreRef, triggerGameOver]);
 
   return (
-    <div className="relative w-full h-full min-h-[460px] bg-slate-950 overflow-hidden rounded-2xl border border-blue-500/20">
-      <div ref={mountRef} className="absolute inset-0 w-full h-full" />
+    <div className="relative w-full h-full min-h-[280px] sm:min-h-[380px] lg:min-h-[460px] bg-slate-950 overflow-hidden rounded-2xl border border-blue-500/20 touch-none select-none">
+      <div ref={mountRef} className="absolute inset-0 w-full h-full touch-none" />
 
-      <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex flex-wrap items-center justify-between gap-2 p-3.5">
-        <div className="flex items-center gap-3 rounded-xl border border-white/10 bg-slate-950/85 px-3.5 py-2 text-xs text-slate-200 tabular-nums">
+      <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex flex-wrap items-center justify-between gap-2 p-3 sm:p-3.5">
+        <div className="flex items-center gap-2 sm:gap-3 rounded-xl border border-white/10 bg-slate-950/85 px-3 py-1.5 sm:px-3.5 sm:py-2 text-xs text-slate-200 tabular-nums">
           <span className="flex items-center gap-1 font-semibold text-cyan-400">
             <Trophy className="w-3.5 h-3.5" /> ANDA {playerGoals} - {aiGoals} AI
           </span>
@@ -335,7 +320,7 @@ export default function NeonPongGame({
           <span>SKOR: <strong className="text-white">{score}</strong></span>
         </div>
 
-        <div className="flex items-center gap-2 rounded-xl border border-white/10 bg-slate-950/85 px-3.5 py-2 text-xs text-amber-400 font-semibold tabular-nums">
+        <div className="flex items-center gap-2 rounded-xl border border-white/10 bg-slate-950/85 px-3 py-1.5 sm:px-3.5 sm:py-2 text-xs text-amber-400 font-semibold tabular-nums">
           RALLY: {rally}x
         </div>
       </div>
@@ -347,7 +332,7 @@ export default function NeonPongGame({
         onCycleQuality={handleCycleQuality}
         extraControls={
           <span className="hidden sm:inline-flex items-center gap-1 text-[11px] text-slate-400 px-2 whitespace-nowrap shrink-0">
-            <Zap className="w-3 h-3 text-blue-400" /> Geser Mouse / Panah Kiri-Kanan untuk Mengendalikan Paddle 3D
+            <Zap className="w-3 h-3 text-blue-400" /> Geser Mouse / Sentuh / Panah Kiri-Kanan untuk Paddle 3D
           </span>
         }
       />

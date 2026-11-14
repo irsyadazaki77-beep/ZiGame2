@@ -240,15 +240,27 @@ function hasValidServiceAccountJson(raw: string | undefined): boolean {
   return false;
 }
 
-function hasValidAdcFile(rawPath: string | undefined): boolean {
+export function hasValidAdcFile(rawPath: string | undefined): boolean {
   if (!rawPath || typeof rawPath !== 'string') return false;
   const trimmed = rawPath.trim();
   if (!trimmed) return false;
   try {
-    return fs.existsSync(trimmed);
+    const stat = fs.statSync(trimmed);
+    if (!stat.isFile()) return false;
+    const raw = fs.readFileSync(trimmed, 'utf-8');
+    const parsed = JSON.parse(raw);
+    return Boolean(parsed && typeof parsed === 'object' && !Array.isArray(parsed));
   } catch {
     return false;
   }
+}
+
+export function sanitizeInvalidAdcEnv(env: NodeJS.ProcessEnv = process.env): string | null {
+  const rawPath = env.GOOGLE_APPLICATION_CREDENTIALS;
+  if (rawPath === undefined) return null;
+  if (hasValidAdcFile(rawPath)) return null;
+  delete env.GOOGLE_APPLICATION_CREDENTIALS;
+  return rawPath;
 }
 
 export function isFirestoreAvailable(): boolean {
@@ -266,6 +278,9 @@ export function isFirestoreAvailable(): boolean {
 }
 
 export function getDb(): Firestore {
+  if (getApps().length === 0) {
+    throw ApiError.serviceUnavailable('Firebase Admin SDK is not initialized.');
+  }
   const localConfig = readLocalAppletConfig();
   const dbId = process.env.FIRESTORE_DATABASE_ID || process.env.VITE_FIRESTORE_DATABASE_ID || localConfig.firestoreDatabaseId;
   const db = dbId && dbId !== '(default)'
@@ -284,9 +299,39 @@ export function getDb(): Firestore {
   return db;
 }
 
+async function runFirestoreProbeWithTimeout(db: Firestore, timeoutMs: number, timeoutCode: string): Promise<void> {
+  let timer: NodeJS.Timeout | null = null;
+  const queryPromise = db.collection('seasons').limit(1).get();
+  // Ensure losing query promise never triggers an unhandled rejection after timeout settles.
+  queryPromise.catch(() => {});
+
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(timeoutCode)), timeoutMs);
+    if (typeof timer.unref === 'function') {
+      timer.unref();
+    }
+  });
+
+  try {
+    await Promise.race([queryPromise, timeoutPromise]);
+  } finally {
+    if (timer) {
+      clearTimeout(timer);
+    }
+  }
+}
+
 export async function probeFirestoreAvailability(timeoutMs: number = 3000): Promise<boolean> {
   if (process.env.NODE_ENV === 'test' || process.env.VITEST) {
     return false;
+  }
+
+  const invalidAdc = sanitizeInvalidAdcEnv(process.env);
+  if (invalidAdc !== null) {
+    serverLogger.warn(
+      'FIREBASE_CONFIG_WARN',
+      `Ignoring invalid GOOGLE_APPLICATION_CREDENTIALS ("${invalidAdc.slice(0, 30)}") before Firestore connectivity probe.`
+    );
   }
 
   if (process.env.NODE_ENV === 'production') {
@@ -297,12 +342,7 @@ export async function probeFirestoreAvailability(timeoutMs: number = 3000): Prom
     }
     try {
       const db = getDb();
-      await Promise.race([
-        db.collection('seasons').limit(1).get(),
-        new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error('FIRESTORE_PROD_PROBE_TIMEOUT')), timeoutMs)
-        )
-      ]);
+      await runFirestoreProbeWithTimeout(db, timeoutMs, 'FIRESTORE_PROD_PROBE_TIMEOUT');
       firestoreProdReachable = true;
       return true;
     } catch (err) {
@@ -327,12 +367,7 @@ export async function probeFirestoreAvailability(timeoutMs: number = 3000): Prom
 
   try {
     const db = getDb();
-    await Promise.race([
-      db.collection('seasons').limit(1).get(),
-      new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('FIRESTORE_PROBE_TIMEOUT')), timeoutMs)
-      )
-    ]);
+    await runFirestoreProbeWithTimeout(db, timeoutMs, 'FIRESTORE_PROBE_TIMEOUT');
     return true;
   } catch (err) {
     firestoreDevDisabled = true;

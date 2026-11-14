@@ -1,4 +1,5 @@
 import { GameQualityTier } from '../types';
+import { CanonicalGameId, toCanonicalGameId } from './canonicalGames';
 
 export interface GameQualityInfo {
   gameId: string;
@@ -12,9 +13,9 @@ export interface GameQualityInfo {
   estimatedDuration: 'quick' | 'standard' | 'deep'; // quick (<3m), standard (3-5m), deep (5m+)
 }
 
-export const GAME_QUALITY_MAP: Record<string, GameQualityInfo> = {
+export const GAME_QUALITY_MAP: Record<CanonicalGameId, GameQualityInfo> = {
   // Flagship Games - Polished to the highest standard
-  snake: {
+  'snake': {
     gameId: 'snake',
     tier: 'flagship',
     targetFps: 60,
@@ -25,8 +26,8 @@ export const GAME_QUALITY_MAP: Record<string, GameQualityInfo> = {
     competitiveSupported: true,
     estimatedDuration: 'standard'
   },
-  brick: {
-    gameId: 'brick',
+  'brick-breaker': {
+    gameId: 'brick-breaker',
     tier: 'flagship',
     targetFps: 60,
     mobileOptimized: true,
@@ -36,8 +37,8 @@ export const GAME_QUALITY_MAP: Record<string, GameQualityInfo> = {
     competitiveSupported: true,
     estimatedDuration: 'standard'
   },
-  space: {
-    gameId: 'space',
+  'space-defender': {
+    gameId: 'space-defender',
     tier: 'flagship',
     targetFps: 60,
     mobileOptimized: true,
@@ -47,8 +48,8 @@ export const GAME_QUALITY_MAP: Record<string, GameQualityInfo> = {
     competitiveSupported: true,
     estimatedDuration: 'standard'
   },
-  runner: {
-    gameId: 'runner',
+  'cyber-runner': {
+    gameId: 'cyber-runner',
     tier: 'flagship',
     targetFps: 60,
     mobileOptimized: true,
@@ -58,8 +59,8 @@ export const GAME_QUALITY_MAP: Record<string, GameQualityInfo> = {
     competitiveSupported: true,
     estimatedDuration: 'quick'
   },
-  racer: {
-    gameId: 'racer',
+  'vaporwave-racer': {
+    gameId: 'vaporwave-racer',
     tier: 'flagship',
     targetFps: 60,
     mobileOptimized: true,
@@ -69,8 +70,8 @@ export const GAME_QUALITY_MAP: Record<string, GameQualityInfo> = {
     competitiveSupported: true,
     estimatedDuration: 'quick'
   },
-  pong: {
-    gameId: 'pong',
+  'neon-pong': {
+    gameId: 'neon-pong',
     tier: 'flagship',
     targetFps: 60,
     mobileOptimized: true,
@@ -80,8 +81,8 @@ export const GAME_QUALITY_MAP: Record<string, GameQualityInfo> = {
     competitiveSupported: true,
     estimatedDuration: 'standard'
   },
-  dinorun: {
-    gameId: 'dinorun',
+  'pixel-dino': {
+    gameId: 'pixel-dino',
     tier: 'flagship',
     targetFps: 60,
     mobileOptimized: true,
@@ -91,8 +92,8 @@ export const GAME_QUALITY_MAP: Record<string, GameQualityInfo> = {
     competitiveSupported: true,
     estimatedDuration: 'quick'
   },
-  tetris: {
-    gameId: 'tetris',
+  'cyber-tetris': {
+    gameId: 'cyber-tetris',
     tier: 'flagship',
     targetFps: 60,
     mobileOptimized: true,
@@ -102,10 +103,8 @@ export const GAME_QUALITY_MAP: Record<string, GameQualityInfo> = {
     competitiveSupported: true,
     estimatedDuration: 'deep'
   },
-
-  // Core Arcade Games
-  flappy: {
-    gameId: 'flappy',
+  'flappy-pixel': {
+    gameId: 'flappy-pixel',
     tier: 'core',
     targetFps: 60,
     mobileOptimized: true,
@@ -115,8 +114,8 @@ export const GAME_QUALITY_MAP: Record<string, GameQualityInfo> = {
     competitiveSupported: false,
     estimatedDuration: 'quick'
   },
-  memory: {
-    gameId: 'memory',
+  'memory-grid': {
+    gameId: 'memory-grid',
     tier: 'core',
     targetFps: 60,
     mobileOptimized: true,
@@ -126,8 +125,8 @@ export const GAME_QUALITY_MAP: Record<string, GameQualityInfo> = {
     competitiveSupported: false,
     estimatedDuration: 'standard'
   },
-  stacker: {
-    gameId: 'stacker',
+  'neon-stacker': {
+    gameId: 'neon-stacker',
     tier: 'flagship',
     targetFps: 60,
     mobileOptimized: true,
@@ -137,8 +136,8 @@ export const GAME_QUALITY_MAP: Record<string, GameQualityInfo> = {
     competitiveSupported: true,
     estimatedDuration: 'quick'
   },
-  sinerider: {
-    gameId: 'sinerider',
+  'sine-rider': {
+    gameId: 'sine-rider',
     tier: 'core',
     targetFps: 60,
     mobileOptimized: true,
@@ -148,8 +147,8 @@ export const GAME_QUALITY_MAP: Record<string, GameQualityInfo> = {
     competitiveSupported: false,
     estimatedDuration: 'standard'
   },
-  cosmicdodge: {
-    gameId: 'cosmicdodge',
+  'cosmic-dodge': {
+    gameId: 'cosmic-dodge',
     tier: 'flagship',
     targetFps: 60,
     mobileOptimized: true,
@@ -159,8 +158,8 @@ export const GAME_QUALITY_MAP: Record<string, GameQualityInfo> = {
     competitiveSupported: true,
     estimatedDuration: 'quick'
   },
-  lasergrid: {
-    gameId: 'lasergrid',
+  'laser-grid': {
+    gameId: 'laser-grid',
     tier: 'core',
     targetFps: 60,
     mobileOptimized: true,
@@ -170,8 +169,8 @@ export const GAME_QUALITY_MAP: Record<string, GameQualityInfo> = {
     competitiveSupported: false,
     estimatedDuration: 'quick'
   },
-  simon: {
-    gameId: 'simon',
+  'cyber-simon': {
+    gameId: 'cyber-simon',
     tier: 'core',
     targetFps: 60,
     mobileOptimized: true,
@@ -181,8 +180,8 @@ export const GAME_QUALITY_MAP: Record<string, GameQualityInfo> = {
     competitiveSupported: false,
     estimatedDuration: 'standard'
   },
-  plinko: {
-    gameId: 'plinko',
+  'plinko-neo': {
+    gameId: 'plinko-neo',
     tier: 'core',
     targetFps: 60,
     mobileOptimized: true,
@@ -192,9 +191,9 @@ export const GAME_QUALITY_MAP: Record<string, GameQualityInfo> = {
     competitiveSupported: false,
     estimatedDuration: 'quick'
   },
-  asteroid: {
-    gameId: 'asteroid',
-    tier: 'core',
+  'cosmic-asteroid': {
+    gameId: 'cosmic-asteroid',
+    tier: 'flagship',
     targetFps: 60,
     mobileOptimized: true,
     gamepadOptimized: true,
@@ -203,8 +202,8 @@ export const GAME_QUALITY_MAP: Record<string, GameQualityInfo> = {
     competitiveSupported: true,
     estimatedDuration: 'standard'
   },
-  slasher: {
-    gameId: 'slasher',
+  'cyber-slasher': {
+    gameId: 'cyber-slasher',
     tier: 'core',
     targetFps: 60,
     mobileOptimized: true,
@@ -214,8 +213,8 @@ export const GAME_QUALITY_MAP: Record<string, GameQualityInfo> = {
     competitiveSupported: false,
     estimatedDuration: 'quick'
   },
-  clicker: {
-    gameId: 'clicker',
+  'cyber-clicker': {
+    gameId: 'cyber-clicker',
     tier: 'core',
     targetFps: 60,
     mobileOptimized: true,
@@ -225,8 +224,8 @@ export const GAME_QUALITY_MAP: Record<string, GameQualityInfo> = {
     competitiveSupported: false,
     estimatedDuration: 'deep'
   },
-  blockmatch: {
-    gameId: 'blockmatch',
+  'block-match': {
+    gameId: 'block-match',
     tier: 'core',
     targetFps: 60,
     mobileOptimized: true,
@@ -236,19 +235,19 @@ export const GAME_QUALITY_MAP: Record<string, GameQualityInfo> = {
     competitiveSupported: false,
     estimatedDuration: 'standard'
   },
-  typer: {
-    gameId: 'typer',
+  'cyber-typer': {
+    gameId: 'cyber-typer',
     tier: 'core',
     targetFps: 60,
-    mobileOptimized: false,
+    mobileOptimized: true,
     gamepadOptimized: false,
     saveStateSupported: false,
     ghostModeSupported: false,
     competitiveSupported: false,
     estimatedDuration: 'standard'
   },
-  maze: {
-    gameId: 'maze',
+  'maze-runner': {
+    gameId: 'maze-runner',
     tier: 'flagship',
     targetFps: 60,
     mobileOptimized: true,
@@ -258,8 +257,8 @@ export const GAME_QUALITY_MAP: Record<string, GameQualityInfo> = {
     competitiveSupported: true,
     estimatedDuration: 'standard'
   },
-  matrixmemory: {
-    gameId: 'matrixmemory',
+  'memory-path': {
+    gameId: 'memory-path',
     tier: 'core',
     targetFps: 60,
     mobileOptimized: true,
@@ -269,8 +268,8 @@ export const GAME_QUALITY_MAP: Record<string, GameQualityInfo> = {
     competitiveSupported: false,
     estimatedDuration: 'standard'
   },
-  rhythm: {
-    gameId: 'rhythm',
+  'rhythm-tap': {
+    gameId: 'rhythm-tap',
     tier: 'core',
     targetFps: 60,
     mobileOptimized: true,
@@ -280,8 +279,8 @@ export const GAME_QUALITY_MAP: Record<string, GameQualityInfo> = {
     competitiveSupported: true,
     estimatedDuration: 'standard'
   },
-  puttgolf: {
-    gameId: 'puttgolf',
+  'pixel-golf': {
+    gameId: 'pixel-golf',
     tier: 'flagship',
     targetFps: 60,
     mobileOptimized: true,
@@ -291,8 +290,8 @@ export const GAME_QUALITY_MAP: Record<string, GameQualityInfo> = {
     competitiveSupported: true,
     estimatedDuration: 'standard'
   },
-  archery: {
-    gameId: 'archery',
+  'archery-neo': {
+    gameId: 'archery-neo',
     tier: 'flagship',
     targetFps: 60,
     mobileOptimized: true,
@@ -302,8 +301,8 @@ export const GAME_QUALITY_MAP: Record<string, GameQualityInfo> = {
     competitiveSupported: true,
     estimatedDuration: 'quick'
   },
-  mines: {
-    gameId: 'mines',
+  'cyber-mines': {
+    gameId: 'cyber-mines',
     tier: 'core',
     targetFps: 60,
     mobileOptimized: true,
@@ -313,8 +312,8 @@ export const GAME_QUALITY_MAP: Record<string, GameQualityInfo> = {
     competitiveSupported: false,
     estimatedDuration: 'deep'
   },
-  '2048': {
-    gameId: '2048',
+  'neon-2048': {
+    gameId: 'neon-2048',
     tier: 'core',
     targetFps: 60,
     mobileOptimized: true,
@@ -324,8 +323,8 @@ export const GAME_QUALITY_MAP: Record<string, GameQualityInfo> = {
     competitiveSupported: true,
     estimatedDuration: 'deep'
   },
-  whack: {
-    gameId: 'whack',
+  'whack-a-drone': {
+    gameId: 'whack-a-drone',
     tier: 'core',
     targetFps: 60,
     mobileOptimized: true,
@@ -335,8 +334,8 @@ export const GAME_QUALITY_MAP: Record<string, GameQualityInfo> = {
     competitiveSupported: false,
     estimatedDuration: 'quick'
   },
-  jumprope: {
-    gameId: 'jumprope',
+  'jump-rope': {
+    gameId: 'jump-rope',
     tier: 'core',
     targetFps: 60,
     mobileOptimized: true,
@@ -346,8 +345,8 @@ export const GAME_QUALITY_MAP: Record<string, GameQualityInfo> = {
     competitiveSupported: false,
     estimatedDuration: 'quick'
   },
-  neondrift: {
-    gameId: 'neondrift',
+  'neon-drift': {
+    gameId: 'neon-drift',
     tier: 'flagship',
     targetFps: 60,
     mobileOptimized: true,
@@ -357,8 +356,8 @@ export const GAME_QUALITY_MAP: Record<string, GameQualityInfo> = {
     competitiveSupported: true,
     estimatedDuration: 'quick'
   },
-  lockbreaker: {
-    gameId: 'lockbreaker',
+  'lock-breaker': {
+    gameId: 'lock-breaker',
     tier: 'core',
     targetFps: 60,
     mobileOptimized: true,
@@ -459,9 +458,10 @@ export const GAME_QUALITY_MAP: Record<string, GameQualityInfo> = {
 };
 
 export const getGameQualityInfo = (gameId: string): GameQualityInfo => {
+  const canonical = toCanonicalGameId(gameId);
   return (
-    GAME_QUALITY_MAP[gameId] || {
-      gameId,
+    GAME_QUALITY_MAP[canonical] || {
+      gameId: canonical,
       tier: 'core',
       targetFps: 60,
       mobileOptimized: true,

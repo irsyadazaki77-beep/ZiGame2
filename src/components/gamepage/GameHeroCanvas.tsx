@@ -70,6 +70,7 @@ interface GameHeroCanvasProps {
   setIsFocusMode: (val: boolean) => void;
   hasExistingSave: boolean;
   setHasExistingSave: (val: boolean) => void;
+  controlsHint?: string;
   onRestart: () => void;
   onGameOver: (score: number) => void;
   onScoreUpdate: (score: number) => void;
@@ -88,6 +89,7 @@ export const GameHeroCanvas: React.FC<GameHeroCanvasProps> = ({
   setIsFocusMode,
   hasExistingSave,
   setHasExistingSave,
+  controlsHint,
   onRestart,
   onGameOver,
   onScoreUpdate
@@ -98,7 +100,7 @@ export const GameHeroCanvas: React.FC<GameHeroCanvasProps> = ({
       {isFocusMode && (
         <div className="w-full max-w-5xl flex items-center justify-between px-3 py-1.5 bg-zinc-950/80 border border-white/[0.08] rounded-xl mb-2 text-xs font-mono">
           <div className="flex items-center gap-2 text-indigo-400 font-bold">
-            <span className="w-2 h-2 rounded-full bg-indigo-500 animate-pulse" />
+            <span className="w-2 h-2 rounded-full bg-indigo-500" />
             <span>FOCUS THEATER MODE AKTIF</span>
           </div>
           <button
@@ -180,6 +182,13 @@ export const GameHeroCanvas: React.FC<GameHeroCanvasProps> = ({
           </div>
         </GameViewportEffects>
       </div>
+
+      {/* 1-Line Controls Hint Strip */}
+      {controlsHint && (
+        <div className="w-full max-w-5xl px-3 py-1 text-center text-[11px] text-zinc-400 truncate select-none">
+          <span className="text-indigo-400 font-semibold">Kontrol:</span> {controlsHint}
+        </div>
+      )}
     </>
   );
 };

@@ -1,6 +1,6 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut as fbSignOut, onAuthStateChanged, User } from 'firebase/auth';
-import { initializeFirestore, getFirestore, doc, getDoc, getDocFromServer, setDoc, updateDoc } from 'firebase/firestore';
+import { initializeFirestore, getFirestore, setLogLevel, doc, getDoc, getDocFromServer, setDoc, updateDoc } from 'firebase/firestore';
 import { logger } from '../utils/logger';
 
 export enum OperationType {

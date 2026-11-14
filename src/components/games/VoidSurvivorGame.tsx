@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
 import { GameComponentProps } from '../../types';
-import { audio } from '../../utils/audio';
+import { audioController } from '../../sdk/audioController';
+import { ObjectPool } from '../../sdk/objectPool';
 import { useGameEngine } from '../../hooks/useGameEngine';
 import { inputManager } from '../../services/inputService';
 import { GameOverlay } from '../gameplay/GameOverlay';
@@ -140,9 +141,9 @@ export default function VoidSurvivorGame({
   });
 
   const keysRef = useRef<Record<string, boolean>>({});
-  const monstersRef = useRef<VoidMonster3D[]>([]);
-  const boltsRef = useRef<VoidBolt3D[]>([]);
-  const gemsRef = useRef<XpGem3D[]>([]);
+  const monsterPoolsRef = useRef<Record<VoidMonster3D['type'], ObjectPool<VoidMonster3D>> | null>(null);
+  const boltPoolRef = useRef<ObjectPool<VoidBolt3D> | null>(null);
+  const gemPoolRef = useRef<ObjectPool<XpGem3D> | null>(null);
   const bladesGroupRef = useRef<THREE.Group | null>(null);
 
   const rebuildOrbitBlades = useCallback((count: number) => {
@@ -168,15 +169,13 @@ export default function VoidSurvivorGame({
   }, []);
 
   const handleStart = useCallback(() => {
-    const stage = stageRef.current;
-    if (stage) {
-      monstersRef.current.forEach((m) => stage.scene.remove(m.mesh));
-      boltsRef.current.forEach((b) => stage.scene.remove(b.mesh));
-      gemsRef.current.forEach((gm) => stage.scene.remove(gm.mesh));
+    if (monsterPoolsRef.current) {
+      monsterPoolsRef.current.swarmer.releaseAll();
+      monsterPoolsRef.current.brute.releaseAll();
+      monsterPoolsRef.current.voidlord.releaseAll();
     }
-    monstersRef.current = [];
-    boltsRef.current = [];
-    gemsRef.current = [];
+    boltPoolRef.current?.releaseAll();
+    gemPoolRef.current?.releaseAll();
 
     heroStateRef.current = {
       x: 0,
@@ -299,6 +298,66 @@ export default function VoidSurvivorGame({
       emissiveIntensity: 0.85
     });
 
+    const boltPool = new ObjectPool<VoidBolt3D>(
+      () => {
+        const mesh = new THREE.Mesh(boltGeo, boltMat);
+        mesh.visible = false;
+        stage.scene.add(mesh);
+        return { mesh, x: 0, z: 0, vx: 0, vz: 0, damage: 1 };
+      },
+      (b) => {
+        b.mesh.visible = false;
+      },
+      24
+    );
+    boltPoolRef.current = boltPool;
+
+    const gemPool = new ObjectPool<XpGem3D>(
+      () => {
+        const mesh = new THREE.Mesh(gemGeo, gemMat);
+        mesh.visible = false;
+        stage.scene.add(mesh);
+        return { mesh, x: 0, z: 0, value: 8 };
+      },
+      (gm) => {
+        gm.mesh.visible = false;
+      },
+      24
+    );
+    gemPoolRef.current = gemPool;
+
+    const createMonsterPool = (type: VoidMonster3D['type'], prewarm: number) =>
+      new ObjectPool<VoidMonster3D>(
+        () => {
+          const mesh = buildVoidMonsterMesh(type);
+          mesh.visible = false;
+          stage.scene.add(mesh);
+          return {
+            mesh,
+            x: 0,
+            z: 0,
+            hp: 1,
+            maxHp: 1,
+            speed: 3.6,
+            type,
+            radius: type === 'voidlord' ? 0.95 : type === 'brute' ? 0.72 : 0.52,
+            xpValue: type === 'voidlord' ? 30 : type === 'brute' ? 15 : 8
+          };
+        },
+        (m) => {
+          m.mesh.visible = false;
+        },
+        prewarm
+      );
+
+    const monsterPools: Record<VoidMonster3D['type'], ObjectPool<VoidMonster3D>> = {
+      swarmer: createMonsterPool('swarmer', 16),
+      brute: createMonsterPool('brute', 8),
+      voidlord: createMonsterPool('voidlord', 4)
+    };
+    monsterPoolsRef.current = monsterPools;
+    const monsterPoolTypes: VoidMonster3D['type'][] = ['swarmer', 'brute', 'voidlord'];
+
     stage.startLoop((dt, elapsed) => {
       if (gameStateRef.current !== 'playing') return;
 
@@ -337,16 +396,23 @@ export default function VoidSurvivorGame({
 
       if (hs.invuln > 0) hs.invuln -= dt;
 
+      const totalActiveMonsters =
+        monsterPools.swarmer.activeCount +
+        monsterPools.brute.activeCount +
+        monsterPools.voidlord.activeCount;
+
       // Auto-fire arcane bolt at nearest monster
       hs.boltCooldown -= dt;
-      if (hs.boltCooldown <= 0 && monstersRef.current.length > 0) {
+      if (hs.boltCooldown <= 0 && totalActiveMonsters > 0) {
         let nearest: VoidMonster3D | null = null;
         let minDist = Infinity;
-        for (const m of monstersRef.current) {
-          const d = Math.hypot(m.x - hs.x, m.z - hs.z);
-          if (d < minDist) {
-            minDist = d;
-            nearest = m;
+        for (const t of monsterPoolTypes) {
+          for (const m of monsterPools[t].getActiveItems()) {
+            const d = Math.hypot(m.x - hs.x, m.z - hs.z);
+            if (d < minDist) {
+              minDist = d;
+              nearest = m;
+            }
           }
         }
         if (nearest && minDist < 16) {
@@ -354,24 +420,21 @@ export default function VoidSurvivorGame({
           const dx = nearest.x - hs.x;
           const dz = nearest.z - hs.z;
           const dist = Math.max(0.01, Math.hypot(dx, dz));
-          const mesh = new THREE.Mesh(boltGeo, boltMat);
-          mesh.position.set(hs.x, 0.75, hs.z);
-          stage.scene.add(mesh);
-          boltsRef.current.push({
-            mesh,
-            x: hs.x,
-            z: hs.z,
-            vx: (dx / dist) * 16,
-            vz: (dz / dist) * 16,
-            damage: hs.damage
-          });
-          audio.playLaser?.();
+          const b = boltPool.acquire();
+          b.x = hs.x;
+          b.z = hs.z;
+          b.vx = (dx / dist) * 16;
+          b.vz = (dz / dist) * 16;
+          b.damage = hs.damage;
+          b.mesh.position.set(hs.x, 0.75, hs.z);
+          b.mesh.visible = true;
+          audioController.playLaser();
         }
       }
 
       // Spawn Void Monsters around perimeter
       hs.spawnTimer -= dt;
-      if (hs.spawnTimer <= 0 && monstersRef.current.length < 36) {
+      if (hs.spawnTimer <= 0 && totalActiveMonsters < 36) {
         hs.spawnTimer = Math.max(0.32, 1.15 - hs.level * 0.06);
         const angle = Math.random() * Math.PI * 2;
         const dist = 11 + Math.random() * 4;
@@ -382,96 +445,100 @@ export default function VoidSurvivorGame({
         const type: VoidMonster3D['type'] =
           hs.level >= 3 && r < 0.12 ? 'voidlord' : hs.level >= 2 && r < 0.35 ? 'brute' : 'swarmer';
 
-        const mesh = buildVoidMonsterMesh(type);
-        mesh.position.set(sx, 0, sz);
-        stage.scene.add(mesh);
-
-        monstersRef.current.push({
-          mesh,
-          x: sx,
-          z: sz,
-          hp: type === 'voidlord' ? 6 + hs.level : type === 'brute' ? 3 : 1,
-          maxHp: type === 'voidlord' ? 6 + hs.level : type === 'brute' ? 3 : 1,
-          speed: type === 'swarmer' ? 3.6 : type === 'brute' ? 2.5 : 2.1,
-          type,
-          radius: type === 'voidlord' ? 0.95 : type === 'brute' ? 0.72 : 0.52,
-          xpValue: type === 'voidlord' ? 30 : type === 'brute' ? 15 : 8
-        });
+        const m = monsterPools[type].acquire();
+        m.x = sx;
+        m.z = sz;
+        m.hp = type === 'voidlord' ? 6 + hs.level : type === 'brute' ? 3 : 1;
+        m.maxHp = m.hp;
+        m.speed = type === 'swarmer' ? 3.6 : type === 'brute' ? 2.5 : 2.1;
+        m.mesh.position.set(sx, 0, sz);
+        m.mesh.visible = true;
       }
 
       // Update Bolts
-      for (let i = boltsRef.current.length - 1; i >= 0; i--) {
-        const b = boltsRef.current[i];
+      const activeBolts = boltPool.getActiveItems();
+      for (let i = activeBolts.length - 1; i >= 0; i--) {
+        const b = activeBolts[i];
         b.x += b.vx * dt;
         b.z += b.vz * dt;
         b.mesh.position.set(b.x, 0.75, b.z);
         if (Math.abs(b.x) > ARENA_BOUND + 4 || Math.abs(b.z) > ARENA_BOUND + 4) {
-          stage.scene.remove(b.mesh);
-          boltsRef.current.splice(i, 1);
+          boltPool.release(i);
         }
       }
 
       // Update Monsters & Collisions
-      for (let i = monstersRef.current.length - 1; i >= 0; i--) {
-        const m = monstersRef.current[i];
-        const dx = hs.x - m.x;
-        const dz = hs.z - m.z;
-        const dist = Math.max(0.01, Math.hypot(dx, dz));
-        m.x += (dx / dist) * m.speed * dt;
-        m.z += (dz / dist) * m.speed * dt;
-        m.mesh.position.set(m.x, Math.abs(Math.sin(elapsed * 6 + i)) * 0.15, m.z);
-        m.mesh.lookAt(hs.x, 0.5, hs.z);
+      for (const t of monsterPoolTypes) {
+        const pool = monsterPools[t];
+        const activeList = pool.getActiveItems();
+        for (let i = activeList.length - 1; i >= 0; i--) {
+          const m = activeList[i];
+          const dx = hs.x - m.x;
+          const dz = hs.z - m.z;
+          const dist = Math.max(0.01, Math.hypot(dx, dz));
+          m.x += (dx / dist) * m.speed * dt;
+          m.z += (dz / dist) * m.speed * dt;
+          m.mesh.position.set(m.x, Math.abs(Math.sin(elapsed * 6 + i)) * 0.15, m.z);
+          m.mesh.lookAt(hs.x, 0.5, hs.z);
 
-        // Orbiting blades damage check
-        if (Math.abs(dist - 2.2) < m.radius + 0.35) {
-          m.hp -= dt * 4.5;
-          stage.particles.burst(m.x, 0.65, m.z, 2, 0x22d3ee, 4);
-        }
-
-        // Bolt hits
-        for (let j = boltsRef.current.length - 1; j >= 0; j--) {
-          const b = boltsRef.current[j];
-          if (Math.hypot(b.x - m.x, b.z - m.z) < m.radius + 0.25) {
-            m.hp -= b.damage;
-            stage.scene.remove(b.mesh);
-            boltsRef.current.splice(j, 1);
-            stage.particles.burst(m.x, 0.65, m.z, 7, 0xa855f7, 5.5);
-            if (m.hp <= 0) break;
+          // Orbiting blades damage check
+          if (Math.abs(dist - 2.2) < m.radius + 0.35) {
+            m.hp -= dt * 4.5;
+            stage.particles.burst(m.x, 0.65, m.z, 2, 0x22d3ee, 4);
           }
-        }
 
-        if (m.hp <= 0) {
-          stage.scene.remove(m.mesh);
-          monstersRef.current.splice(i, 1);
-          addScore(m.xpValue * 2);
-          stage.particles.burst(m.x, 0.65, m.z, m.type === 'voidlord' ? 32 : 14, 0xc084fc, 7.5);
-          stage.triggerTrauma(m.type === 'voidlord' ? 0.45 : 0.16);
-          audio.playExplosion?.();
+          // Bolt hits
+          for (let j = activeBolts.length - 1; j >= 0; j--) {
+            const b = activeBolts[j];
+            if (Math.hypot(b.x - m.x, b.z - m.z) < m.radius + 0.25) {
+              m.hp -= b.damage;
+              boltPool.release(j);
+              stage.particles.burst(m.x, 0.65, m.z, 7, 0xa855f7, 5.5);
+              if (m.hp <= 0) break;
+            }
+          }
 
-          const gem = new THREE.Mesh(gemGeo, gemMat);
-          gem.position.set(m.x, 0.35, m.z);
-          stage.scene.add(gem);
-          gemsRef.current.push({ mesh: gem, x: m.x, z: m.z, value: m.xpValue });
-          continue;
-        }
+          if (m.hp <= 0) {
+            const mxPos = m.x;
+            const mzPos = m.z;
+            const xpVal = m.xpValue;
+            const isLord = m.type === 'voidlord';
+            pool.release(i);
+            addScore(xpVal * 2);
+            stage.particles.burst(mxPos, 0.65, mzPos, isLord ? 32 : 14, 0xc084fc, 7.5);
+            stage.triggerTrauma(isLord ? 0.45 : 0.16);
+            audioController.playExplosion();
 
-        // Hero contact damage
-        if (dist < m.radius + 0.48 && hs.invuln <= 0) {
-          hs.hp = Math.max(0, hs.hp - (m.type === 'voidlord' ? 20 : 12));
-          setHp(hs.hp);
-          hs.invuln = 0.65;
-          stage.triggerTrauma(0.5);
-          stage.particles.burst(hs.x, 0.8, hs.z, 20, 0xef4444, 7);
-          if (hs.hp <= 0) {
-            triggerGameOver(scoreRef.current);
-            return;
+            const gem = gemPool.acquire();
+            gem.x = mxPos;
+            gem.z = mzPos;
+            gem.value = xpVal;
+            gem.mesh.position.set(mxPos, 0.35, mzPos);
+            gem.mesh.visible = true;
+            continue;
+          }
+
+          // Hero contact damage
+          if (dist < m.radius + 0.48 && hs.invuln <= 0) {
+            hs.hp = Math.max(0, hs.hp - (m.type === 'voidlord' ? 20 : 12));
+            setHp(hs.hp);
+            hs.invuln = 0.65;
+            stage.triggerTrauma(0.5);
+            stage.particles.burst(hs.x, 0.8, hs.z, 20, 0xef4444, 7);
+            if (hs.hp <= 0) {
+              audioController.playGameOver();
+              triggerGameOver(scoreRef.current);
+              return;
+            }
+            audioController.playHit();
           }
         }
       }
 
       // Collect XP Gems
-      for (let i = gemsRef.current.length - 1; i >= 0; i--) {
-        const gm = gemsRef.current[i];
+      const activeGems = gemPool.getActiveItems();
+      for (let i = activeGems.length - 1; i >= 0; i--) {
+        const gm = activeGems[i];
         gm.mesh.rotation.y += dt * 3;
         const d = Math.hypot(hs.x - gm.x, hs.z - gm.z);
         if (d < 3.5) {
@@ -480,11 +547,11 @@ export default function VoidSurvivorGame({
           gm.mesh.position.set(gm.x, 0.35, gm.z);
         }
         if (d < 0.75) {
-          stage.scene.remove(gm.mesh);
-          gemsRef.current.splice(i, 1);
-          hs.xp += gm.value;
-          addScore(gm.value);
-          audio.playCoin?.();
+          const val = gm.value;
+          gemPool.release(i);
+          hs.xp += val;
+          addScore(val);
+          audioController.playScore();
           if (hs.xp >= hs.nextXp) {
             hs.xp -= hs.nextXp;
             hs.level += 1;
@@ -498,19 +565,28 @@ export default function VoidSurvivorGame({
             rebuildOrbitBlades(hs.bladeCount);
             stage.particles.burst(hs.x, 1.0, hs.z, 36, 0x22d3ee, 9);
             stage.kickFov(5);
+            audioController.playPowerup();
           }
         }
       }
     });
 
     return () => {
+      monsterPools.swarmer.releaseAll();
+      monsterPools.brute.releaseAll();
+      monsterPools.voidlord.releaseAll();
+      boltPool.releaseAll();
+      gemPool.releaseAll();
+      monsterPoolsRef.current = null;
+      boltPoolRef.current = null;
+      gemPoolRef.current = null;
       stage.dispose();
       stageRef.current = null;
     };
   }, [addScore, rebuildOrbitBlades, scoreRef, triggerGameOver]);
 
   return (
-    <div className="relative w-full h-full min-h-[460px] bg-slate-950 overflow-hidden rounded-2xl border border-purple-500/20">
+    <div className="relative w-full h-full min-h-[260px] sm:min-h-[380px] lg:min-h-[460px] bg-slate-950 overflow-hidden rounded-2xl border border-purple-500/20">
       <div ref={mountRef} className="absolute inset-0 w-full h-full" />
 
       <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex flex-wrap items-center justify-between gap-2 p-3.5">

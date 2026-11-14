@@ -42,13 +42,13 @@ export const ThreeDockOverlay: React.FC<ThreeDockOverlayProps> = ({
 
   return (
     <div
-      className="pointer-events-none absolute inset-x-0 bottom-3 z-20 flex flex-col items-center px-3"
+      className="pointer-events-none absolute inset-x-0 bottom-3 pb-[env(safe-area-inset-bottom)] z-20 flex flex-col items-center px-3"
       aria-label="Kontrol Kamera dan Visual 3D"
     >
       <button
         type="button"
         onClick={() => setCollapsed((c) => !c)}
-        className="pointer-events-auto mb-1 flex items-center gap-1.5 rounded-t-lg border border-white/10 bg-slate-950/90 px-3 py-1 text-[11px] font-medium text-slate-300 transition-colors hover:bg-slate-900 hover:text-white whitespace-nowrap shrink-0"
+        className="pointer-events-auto mb-1 min-h-[44px] sm:min-h-0 flex items-center gap-1.5 rounded-t-lg border border-white/10 bg-slate-950/90 px-3 py-1 text-[11px] font-medium text-slate-300 transition-colors hover:bg-slate-900 hover:text-white whitespace-nowrap shrink-0"
         title="Sembunyikan atau tampilkan dock kontrol 3D (Shortcut: H)"
       >
         {collapsed ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
@@ -57,7 +57,7 @@ export const ThreeDockOverlay: React.FC<ThreeDockOverlayProps> = ({
 
       {!collapsed && (
         <div className="pointer-events-auto flex flex-wrap items-center justify-center gap-2 rounded-xl border border-white/10 bg-slate-950/90 px-3.5 py-2 shadow-xl max-w-[94vw]">
-          <div className="flex items-center gap-1 rounded-lg bg-slate-900 p-1">
+          <div className="flex flex-wrap items-center gap-1 rounded-lg bg-slate-900 p-1">
             <span className="flex items-center gap-1 px-2 text-[11px] font-medium text-slate-400 whitespace-nowrap shrink-0">
               <Eye className="h-3.5 w-3.5 text-cyan-400" />
               Kamera
@@ -69,7 +69,7 @@ export const ThreeDockOverlay: React.FC<ThreeDockOverlayProps> = ({
                   key={preset}
                   type="button"
                   onClick={() => onSelectPreset(preset)}
-                  className={`rounded-md px-2.5 py-1 text-xs font-medium transition-colors whitespace-nowrap shrink-0 ${
+                  className={`min-h-[44px] sm:min-h-0 rounded-md px-2.5 py-1 text-xs font-medium transition-colors whitespace-nowrap shrink-0 ${
                     active
                       ? 'bg-cyan-500 text-slate-950 shadow-sm font-semibold'
                       : 'text-slate-300 hover:bg-slate-800 hover:text-white'
@@ -85,7 +85,7 @@ export const ThreeDockOverlay: React.FC<ThreeDockOverlayProps> = ({
             <button
               type="button"
               onClick={onCycleQuality}
-              className="flex items-center gap-1.5 rounded-lg border border-white/10 bg-slate-900 px-2.5 py-1.5 text-xs font-medium text-slate-200 transition-colors hover:bg-slate-800 whitespace-nowrap shrink-0"
+              className="min-h-[44px] sm:min-h-0 flex items-center gap-1.5 rounded-lg border border-white/10 bg-slate-900 px-2.5 py-1.5 text-xs font-medium text-slate-200 transition-colors hover:bg-slate-800 whitespace-nowrap shrink-0"
               title="Ubah tingkat kualitas grafis 3D"
             >
               <Sparkles className="h-3.5 w-3.5 text-amber-400" />

@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
 import { GameComponentProps } from '../../types';
-import { audio } from '../../utils/audio';
+import { audioController } from '../../sdk/audioController';
 import { useGameEngine } from '../../hooks/useGameEngine';
 import { inputManager } from '../../services/inputService';
 import { GameOverlay } from '../gameplay/GameOverlay';
@@ -163,11 +163,11 @@ export default function Neon2048Game({
         syncBoard3DRef.current();
         if (gained > 0) {
           addScore(gained);
-          audio.playCoin?.();
+          audioController.playScore();
           stageRef.current?.particles.burst(0, 0.8, 0, 20, 0xf43f5e, 6.5);
           stageRef.current?.triggerTrauma(0.2);
         } else {
-          audio.playClick?.();
+          audioController.playClick();
         }
 
         const highest = Math.max(...b.flat());
@@ -175,7 +175,8 @@ export default function Neon2048Game({
 
         if (!canMove(b)) {
           stageRef.current?.triggerTrauma(0.7);
-          audio.playExplosion?.();
+          audioController.playExplosion();
+          audioController.playGameOver();
           triggerGameOver(scoreRef.current + gained);
         }
       }
@@ -199,15 +200,6 @@ export default function Neon2048Game({
   }, [addRandomTile, startWithCountdown]);
 
   useEffect(() => {
-    const onKeyDown = (e: KeyboardEvent) => {
-      const k = e.key.toLowerCase();
-      if (k === 'arrowleft' || k === 'a') slideBoard('left');
-      else if (k === 'arrowright' || k === 'd') slideBoard('right');
-      else if (k === 'arrowup' || k === 'w') slideBoard('up');
-      else if (k === 'arrowdown' || k === 's') slideBoard('down');
-    };
-    window.addEventListener('keydown', onKeyDown);
-
     const unsub = inputManager.subscribe({
       onActionDown: (action) => {
         if (action === 'LEFT') slideBoard('left');
@@ -218,7 +210,6 @@ export default function Neon2048Game({
     });
 
     return () => {
-      window.removeEventListener('keydown', onKeyDown);
       unsub();
     };
   }, [slideBoard]);
@@ -331,18 +322,41 @@ export default function Neon2048Game({
     };
     syncBoard3DRef.current();
 
+    const swipeStart = { x: 0, y: 0, active: false };
+    const onPointerDown = (e: PointerEvent) => {
+      swipeStart.x = e.clientX;
+      swipeStart.y = e.clientY;
+      swipeStart.active = true;
+    };
+    const onPointerUp = (e: PointerEvent) => {
+      if (!swipeStart.active) return;
+      swipeStart.active = false;
+      const dx = e.clientX - swipeStart.x;
+      const dy = e.clientY - swipeStart.y;
+      if (Math.max(Math.abs(dx), Math.abs(dy)) < 24) return;
+      if (Math.abs(dx) > Math.abs(dy)) {
+        slideBoard(dx > 0 ? 'right' : 'left');
+      } else {
+        slideBoard(dy > 0 ? 'down' : 'up');
+      }
+    };
+    container.addEventListener('pointerdown', onPointerDown);
+    container.addEventListener('pointerup', onPointerUp);
+
     stage.startLoop(() => {});
 
     return () => {
+      container.removeEventListener('pointerdown', onPointerDown);
+      container.removeEventListener('pointerup', onPointerUp);
       texCache.forEach((t) => t.dispose());
       stage.dispose();
       stageRef.current = null;
     };
-  }, []);
+  }, [slideBoard]);
 
   return (
-    <div className="relative w-full h-full min-h-[460px] bg-slate-950 overflow-hidden rounded-2xl border border-rose-500/20">
-      <div ref={mountRef} className="absolute inset-0 w-full h-full" />
+    <div className="relative w-full h-full min-h-[280px] sm:min-h-[380px] lg:min-h-[460px] bg-slate-950 overflow-hidden rounded-2xl border border-rose-500/20 select-none">
+      <div ref={mountRef} className="absolute inset-0 w-full h-full touch-none" />
 
       <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex flex-wrap items-center justify-between gap-2 p-3.5">
         <div className="flex items-center gap-3 rounded-xl border border-white/10 bg-slate-950/85 px-3.5 py-2 text-xs text-slate-200 tabular-nums">

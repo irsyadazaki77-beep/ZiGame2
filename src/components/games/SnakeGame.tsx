@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
 import { GameComponentProps } from '../../types';
-import { audio } from '../../utils/audio';
+import { audioController } from '../../sdk/audioController';
 import { useGameEngine } from '../../hooks/useGameEngine';
 import { inputManager } from '../../services/inputService';
 import { GameOverlay } from '../gameplay/GameOverlay';
@@ -68,6 +68,7 @@ export default function SnakeGame({
   });
 
   const resetSnakeRef = useRef<() => void>(() => {});
+  const swipeStartRef = useRef<{ x: number; y: number } | null>(null);
 
   const handleStart = useCallback(() => {
     resetSnakeRef.current();
@@ -310,7 +311,7 @@ export default function SnakeGame({
       if (hitWall || hitSelf) {
         stage.particles.burst(st.segments[0].x, 0.5, st.segments[0].z, 36, 0xef4444, 9);
         stage.triggerTrauma(0.75);
-        audio.playExplosion?.();
+        audioController.playGameOver();
         triggerGameOver(scoreRef.current);
         return;
       }
@@ -323,11 +324,16 @@ export default function SnakeGame({
         st.stepInterval = Math.max(0.085, st.stepInterval * 0.985);
         stage.particles.burst(newHead.x, 0.6, newHead.z, 22, 0x22c55e, 7);
         stage.triggerTrauma(0.2);
-        audio.playCoin?.();
+        if (st.turboTimer > 0) {
+          audioController.playCombo(2);
+        } else {
+          audioController.playScore();
+        }
         if (st.segments.length % 5 === 0) {
           st.turboTimer = 5.0;
           setTurboActive(true);
           stage.kickFov(4);
+          audioController.playPowerup();
         }
         st.apple = pickFreeCoord(st.segments);
       } else {
@@ -345,7 +351,27 @@ export default function SnakeGame({
   }, [addScore, scoreRef, triggerGameOver]);
 
   return (
-    <div className="relative w-full h-full min-h-[460px] bg-slate-950 overflow-hidden rounded-2xl border border-emerald-500/20">
+    <div
+      className="relative w-full h-full min-h-[260px] sm:min-h-[380px] lg:min-h-[460px] bg-slate-950 overflow-hidden rounded-2xl border border-emerald-500/20 touch-none"
+      onPointerDown={(e) => {
+        swipeStartRef.current = { x: e.clientX, y: e.clientY };
+      }}
+      onPointerUp={(e) => {
+        if (!swipeStartRef.current || gameStateRef.current !== 'playing') {
+          swipeStartRef.current = null;
+          return;
+        }
+        const dx = e.clientX - swipeStartRef.current.x;
+        const dy = e.clientY - swipeStartRef.current.y;
+        swipeStartRef.current = null;
+        if (Math.hypot(dx, dy) < 20) return;
+        if (Math.abs(dx) > Math.abs(dy)) {
+          setDirection(dx > 0 ? 1 : -1, 0);
+        } else {
+          setDirection(0, dy > 0 ? 1 : -1);
+        }
+      }}
+    >
       <div ref={mountRef} className="absolute inset-0 w-full h-full" />
 
       <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex flex-wrap items-center justify-between gap-2 p-3.5">

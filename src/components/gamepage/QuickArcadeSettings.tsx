@@ -18,7 +18,7 @@ import {
   Cpu
 } from 'lucide-react';
 import { GameStats } from '../../types';
-import { audio } from '../../utils/audio';
+import { audioController } from '../../sdk/audioController';
 import { screenShake } from '../../utils/screenShake';
 import { haptics } from '../../utils/haptics';
 import { performanceService } from '../../services/performanceService';
@@ -80,9 +80,19 @@ export const QuickArcadeSettings: React.FC<QuickArcadeSettingsProps> = React.mem
   const [isShakeEnabled, setIsShakeEnabled] = React.useState(() => screenShake.getEnabled());
   const [isHapticEnabled, setIsHapticEnabled] = React.useState(() => haptics.isEnabled());
   const [perfSettings, setPerfSettings] = React.useState(() => performanceService.getFastSettings());
+  const [masterVol, setMasterVol] = React.useState(() => audioController.getMasterVolume());
+  const [sfxVol, setSfxVol] = React.useState(() => audioController.getSfxVolume());
 
   React.useEffect(() => {
-    return performanceService.subscribe((s) => setPerfSettings(s));
+    const unsubPerf = performanceService.subscribe((s) => setPerfSettings(s));
+    const unsubAudio = audioController.subscribe(() => {
+      setMasterVol(audioController.getMasterVolume());
+      setSfxVol(audioController.getSfxVolume());
+    });
+    return () => {
+      unsubPerf();
+      unsubAudio();
+    };
   }, []);
 
   if (!isOpen) return null;
@@ -125,7 +135,7 @@ export const QuickArcadeSettings: React.FC<QuickArcadeSettingsProps> = React.mem
             <div className="grid grid-cols-2 gap-2">
               <button
                 onClick={() => {
-                  audio.playCoin();
+                  audioController.playClick();
                   onToggleMute();
                 }}
                 aria-label={isMuted ? "Aktifkan Suara Audio" : "Bisukan Suara Audio"}
@@ -142,7 +152,7 @@ export const QuickArcadeSettings: React.FC<QuickArcadeSettingsProps> = React.mem
 
               <button
                 onClick={() => {
-                  audio.playCoin();
+                  audioController.playClick();
                   setIsBgmOn(!isBgmOn);
                 }}
                 aria-label="Toggle Musik Latar BGM"
@@ -153,9 +163,51 @@ export const QuickArcadeSettings: React.FC<QuickArcadeSettingsProps> = React.mem
                     : 'bg-white/[0.03] border-white/[0.08] text-zinc-400 hover:bg-white/[0.06]'
                 }`}
               >
-                <Music size={18} className={isBgmOn ? 'animate-pulse' : ''} />
+                <Music size={18} />
                 <span className="text-xs font-medium">BGM {isBgmOn ? 'Aktif' : 'Mati'}</span>
               </button>
+            </div>
+            <div className="p-3 bg-white/[0.02] border border-white/[0.06] rounded-xl space-y-2.5">
+              <div className="space-y-1">
+                <div className="flex items-center justify-between text-[11px] font-mono text-zinc-300">
+                  <span>Volume Master</span>
+                  <span className="text-zinc-400">{Math.round(masterVol * 100)}%</span>
+                </div>
+                <input
+                  type="range"
+                  min="0"
+                  max="1"
+                  step="0.05"
+                  value={masterVol}
+                  onChange={(e) => {
+                    const next = parseFloat(e.target.value);
+                    setMasterVol(next);
+                    audioController.setMasterVolume(next);
+                  }}
+                  aria-label="Volume Master"
+                  className="w-full h-1.5 bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-cyan-500"
+                />
+              </div>
+              <div className="space-y-1">
+                <div className="flex items-center justify-between text-[11px] font-mono text-zinc-300">
+                  <span>Efek Suara (SFX)</span>
+                  <span className="text-zinc-400">{Math.round(sfxVol * 100)}%</span>
+                </div>
+                <input
+                  type="range"
+                  min="0"
+                  max="1"
+                  step="0.05"
+                  value={sfxVol}
+                  onChange={(e) => {
+                    const next = parseFloat(e.target.value);
+                    setSfxVol(next);
+                    audioController.setSfxVolume(next);
+                  }}
+                  aria-label="Efek Suara SFX"
+                  className="w-full h-1.5 bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-emerald-500"
+                />
+              </div>
             </div>
           </div>
 
@@ -178,7 +230,7 @@ export const QuickArcadeSettings: React.FC<QuickArcadeSettingsProps> = React.mem
                 <div className="grid grid-cols-4 gap-1 pt-1">
                   <button
                     onClick={() => {
-                      audio.playCoin();
+                      audioController.playCoin();
                       performanceService.updateCustomSetting({ autoDetect: true });
                     }}
                     className={`py-1.5 rounded-lg text-[10px] font-mono font-bold uppercase transition cursor-pointer ${
@@ -191,7 +243,7 @@ export const QuickArcadeSettings: React.FC<QuickArcadeSettingsProps> = React.mem
                   </button>
                   <button
                     onClick={() => {
-                      audio.playCoin();
+                      audioController.playCoin();
                       performanceService.setTier('low', false);
                     }}
                     className={`py-1.5 rounded-lg text-[10px] font-mono font-bold uppercase transition cursor-pointer ${
@@ -204,7 +256,7 @@ export const QuickArcadeSettings: React.FC<QuickArcadeSettingsProps> = React.mem
                   </button>
                   <button
                     onClick={() => {
-                      audio.playCoin();
+                      audioController.playCoin();
                       performanceService.setTier('medium', false);
                     }}
                     className={`py-1.5 rounded-lg text-[10px] font-mono font-bold uppercase transition cursor-pointer ${
@@ -217,7 +269,7 @@ export const QuickArcadeSettings: React.FC<QuickArcadeSettingsProps> = React.mem
                   </button>
                   <button
                     onClick={() => {
-                      audio.playCoin();
+                      audioController.playCoin();
                       performanceService.setTier('high', false);
                     }}
                     className={`py-1.5 rounded-lg text-[10px] font-mono font-bold uppercase transition cursor-pointer ${
@@ -242,7 +294,7 @@ export const QuickArcadeSettings: React.FC<QuickArcadeSettingsProps> = React.mem
                 </div>
                 <button
                   onClick={() => {
-                    audio.playCoin();
+                    audioController.playCoin();
                     setIsCrtFilter(!isCrtFilter);
                   }}
                   aria-label="Toggle filter CRT retro"
@@ -270,7 +322,7 @@ export const QuickArcadeSettings: React.FC<QuickArcadeSettingsProps> = React.mem
                 </div>
                 <button
                   onClick={() => {
-                    audio.playCoin();
+                    audioController.playCoin();
                     const next = !isShakeEnabled;
                     setIsShakeEnabled(next);
                     screenShake.setEnabled(next);
@@ -301,7 +353,7 @@ export const QuickArcadeSettings: React.FC<QuickArcadeSettingsProps> = React.mem
                 </div>
                 <button
                   onClick={() => {
-                    audio.playCoin();
+                    audioController.playCoin();
                     const next = !isHapticEnabled;
                     setIsHapticEnabled(next);
                     haptics.setEnabled(next);
@@ -332,7 +384,7 @@ export const QuickArcadeSettings: React.FC<QuickArcadeSettingsProps> = React.mem
                 </div>
                 <button
                   onClick={() => {
-                    audio.playCoin();
+                    audioController.playCoin();
                     setIsFocusMode(!isFocusMode);
                   }}
                   aria-label="Toggle Mode Fokus Viewport"
@@ -360,7 +412,7 @@ export const QuickArcadeSettings: React.FC<QuickArcadeSettingsProps> = React.mem
                 </div>
                 <button
                   onClick={() => {
-                    audio.playCoin();
+                    audioController.playCoin();
                     toggleFullscreen();
                   }}
                   aria-label={isFullscreen ? "Keluar dari Layar Penuh" : "Masuk Layar Penuh"}
@@ -382,7 +434,7 @@ export const QuickArcadeSettings: React.FC<QuickArcadeSettingsProps> = React.mem
                     <button
                       key={amb.id}
                       onClick={() => {
-                        audio.playCoin();
+                        audioController.playCoin();
                         setBgAmbient(amb.id);
                       }}
                       className={`w-7 h-7 rounded-full flex items-center justify-center border transition-all cursor-pointer ${
@@ -407,7 +459,7 @@ export const QuickArcadeSettings: React.FC<QuickArcadeSettingsProps> = React.mem
               <h3 className="text-[10px] font-bold font-mono text-zinc-500 uppercase tracking-widest">KOMPETISI TEMAN</h3>
               <button
                 onClick={() => {
-                  audio.playCoin();
+                  audioController.playCoin();
                   onClose();
                   onOpenChallengeModal();
                 }}
@@ -424,7 +476,7 @@ export const QuickArcadeSettings: React.FC<QuickArcadeSettingsProps> = React.mem
             <h3 className="text-[10px] font-bold font-mono text-zinc-500 uppercase tracking-widest">PANDUAN</h3>
             <button
               onClick={() => {
-                audio.playCoin();
+                audioController.playCoin();
                 onOpenTutorial();
                 onClose();
               }}
@@ -445,7 +497,7 @@ export const QuickArcadeSettings: React.FC<QuickArcadeSettingsProps> = React.mem
                 <button
                   key={g.id}
                   onClick={() => {
-                    audio.playCoin();
+                    audioController.playCoin();
                     onSelectGame(g.id);
                     onClose();
                   }}

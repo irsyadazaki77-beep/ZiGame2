@@ -41,7 +41,9 @@ test.describe('ZiGame Automated Game Registry Smoke Loop', () => {
       await expect(viewport).toBeVisible({ timeout: 15000 });
 
       // Wait for either a game <canvas> or the game ready/root container to finish mounting
-      const canvasOrStage = viewport.locator('canvas, button:has-text("Mulai")').first();
+      const canvasOrStage = viewport
+        .locator('canvas, button:has-text("Mulai"), button:has-text("Reset"), button:has-text("Ulang")')
+        .first();
       await expect(canvasOrStage).toBeVisible({ timeout: 15000 });
 
       // Verify neither AppErrorBoundary nor GameErrorBoundary nor GameNotFound rendered
@@ -53,3 +55,82 @@ test.describe('ZiGame Automated Game Registry Smoke Loop', () => {
     });
   }
 });
+
+test.describe('ZiGame Mobile Portrait (390x844, hasTouch) UX & Audio Guard Smoke', () => {
+  test.use({ viewport: { width: 390, height: 844 }, hasTouch: true });
+
+  test('should render Home & Games catalog with Featured / Top Picks and zero horizontal overflow on mobile', async ({ page }) => {
+    const pageErrors: string[] = [];
+    const audioWarnings: string[] = [];
+
+    page.on('pageerror', (err) => pageErrors.push(err.message || String(err)));
+    page.on('console', (msg) => {
+      if (msg.text().includes('AudioContext was not allowed to start')) {
+        audioWarnings.push(msg.text());
+      }
+    });
+
+    await page.goto('/', { waitUntil: 'domcontentloaded' });
+    await expect(page.getByText(/Pilihan Unggulan/i).first()).toBeVisible({ timeout: 15000 });
+
+    const homeOverflow = await page.evaluate(
+      () => document.documentElement.scrollWidth <= window.innerWidth + 1
+    );
+    expect(homeOverflow).toBe(true);
+
+    await page.goto('/games', { waitUntil: 'domcontentloaded' });
+    await expect(page.getByText(/Featured \/ Top Picks/i).first()).toBeVisible({ timeout: 15000 });
+
+    const catalogOverflow = await page.evaluate(
+      () => document.documentElement.scrollWidth <= window.innerWidth + 1
+    );
+    expect(catalogOverflow).toBe(true);
+
+    expect(pageErrors).toEqual([]);
+    expect(audioWarnings).toEqual([]);
+  });
+
+  const mobileRepresentativeGames = [
+    'wizard-chess',
+    'desk-racer',
+    'world-box',
+    'cyber-tetris',
+    'neon-2048',
+  ];
+
+  for (const gameId of mobileRepresentativeGames) {
+    test(`should render and start /game/${gameId} on mobile 390x844 without overflow or audio autoplay warning`, async ({ page }) => {
+      const pageErrors: string[] = [];
+      const audioWarnings: string[] = [];
+
+      page.on('pageerror', (err) => pageErrors.push(err.message || String(err)));
+      page.on('console', (msg) => {
+        if (msg.text().includes('AudioContext was not allowed to start')) {
+          audioWarnings.push(msg.text());
+        }
+      });
+
+      await page.goto(`/game/${gameId}`, { waitUntil: 'domcontentloaded' });
+      const viewport = page.locator('#center-game-viewport');
+      await expect(viewport).toBeVisible({ timeout: 15000 });
+
+      const canvasOrStage = viewport
+        .locator('canvas, button:has-text("Mulai"), button:has-text("Reset"), button:has-text("Ulang")')
+        .first();
+      await expect(canvasOrStage).toBeVisible({ timeout: 15000 });
+
+      const startBtn = viewport.locator('button:has-text("Mulai")').first();
+      if (await startBtn.isVisible()) {
+        await startBtn.tap();
+      }
+
+      const noOverflow = await page.evaluate(
+        () => document.documentElement.scrollWidth <= window.innerWidth + 1
+      );
+      expect(noOverflow, `Horizontal overflow detected on mobile /game/${gameId}`).toBe(true);
+      expect(pageErrors, `Uncaught pageerror(s) on mobile /game/${gameId}`).toEqual([]);
+      expect(audioWarnings, `AudioContext autoplay warning on /game/${gameId}`).toEqual([]);
+    });
+  }
+});
+

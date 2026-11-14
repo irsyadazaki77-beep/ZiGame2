@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Volume2, VolumeX, Music, SlidersHorizontal, Check } from 'lucide-react';
-import { audio } from '../../utils/audio';
+import { Volume2, VolumeX, Music, SlidersHorizontal, Check, Volume1 } from 'lucide-react';
+import { audioController } from '../../sdk/audioController';
 
 interface AudioSettingsPopoverProps {
   isMuted: boolean;
@@ -26,9 +26,18 @@ export const AudioSettingsPopover: React.FC<AudioSettingsPopoverProps> = ({
   backgroundAmbients,
 }) => {
   const [isOpen, setIsOpen] = useState(false);
-  const [musicVol, setMusicVol] = useState(() => audio.getMusicVolume());
-  const [sfxVol, setSfxVol] = useState(() => audio.getSfxVolume());
+  const [masterVol, setMasterVol] = useState(() => audioController.getMasterVolume());
+  const [musicVol, setMusicVol] = useState(() => audioController.getMusicVolume());
+  const [sfxVol, setSfxVol] = useState(() => audioController.getSfxVolume());
   const popoverRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    return audioController.subscribe(() => {
+      setMasterVol(audioController.getMasterVolume());
+      setMusicVol(audioController.getMusicVolume());
+      setSfxVol(audioController.getSfxVolume());
+    });
+  }, []);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -44,9 +53,17 @@ export const AudioSettingsPopover: React.FC<AudioSettingsPopoverProps> = ({
     };
   }, [isOpen]);
 
+  const handleMasterVolChange = (val: number) => {
+    setMasterVol(val);
+    audioController.setMasterVolume(val);
+    if (val > 0 && isMuted) {
+      audioController.setMuted(false);
+    }
+  };
+
   const handleMusicVolChange = (val: number) => {
     setMusicVol(val);
-    audio.setMusicVolume(val);
+    audioController.setMusicVolume(val);
     if (val === 0) {
       setIsBgmOn(false);
     } else if (!isBgmOn) {
@@ -56,13 +73,13 @@ export const AudioSettingsPopover: React.FC<AudioSettingsPopoverProps> = ({
 
   const handleSfxVolChange = (val: number) => {
     setSfxVol(val);
-    audio.setSfxVolume(val);
+    audioController.setSfxVolume(val);
   };
 
   return (
     <div className="relative" ref={popoverRef}>
       <button
-        onClick={() => { audio.playCoin(); setIsOpen(prev => !prev); }}
+        onClick={() => { audioController.playClick(); setIsOpen(prev => !prev); }}
         className={`w-9 h-9 rounded-xl border transition-all duration-200 flex items-center justify-center cursor-pointer ${
           isMuted
             ? 'bg-rose-500/10 border-rose-500/30 text-rose-400'
@@ -86,12 +103,32 @@ export const AudioSettingsPopover: React.FC<AudioSettingsPopoverProps> = ({
             </div>
             <button
               onClick={onToggleMute}
-              className={`px-2.5 py-1 rounded-lg text-[10px] font-mono font-bold uppercase transition ${
+              className={`px-2.5 py-1 rounded-lg text-[10px] font-mono font-bold uppercase transition cursor-pointer ${
                 isMuted ? 'bg-rose-500 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-white'
               }`}
             >
               {isMuted ? 'UNMUTE' : 'MUTE SEMUA'}
             </button>
+          </div>
+
+          {/* Master Volume */}
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between text-xs text-zinc-300">
+              <span className="flex items-center gap-1.5 font-mono text-[11px]">
+                <Volume1 size={13} className="text-cyan-400" /> Volume Master
+              </span>
+              <span className="font-mono text-[10px] text-zinc-500">{Math.round(masterVol * 100)}%</span>
+            </div>
+            <input
+              type="range"
+              min="0"
+              max="1"
+              step="0.05"
+              value={masterVol}
+              onChange={(e) => handleMasterVolChange(parseFloat(e.target.value))}
+              aria-label="Volume Master"
+              className="w-full h-1.5 bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-cyan-500"
+            />
           </div>
 
           {/* Music Volume */}
@@ -109,6 +146,7 @@ export const AudioSettingsPopover: React.FC<AudioSettingsPopoverProps> = ({
               step="0.05"
               value={musicVol}
               onChange={(e) => handleMusicVolChange(parseFloat(e.target.value))}
+              aria-label="Volume Musik BGM"
               className="w-full h-1.5 bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-indigo-500"
             />
           </div>
@@ -128,6 +166,7 @@ export const AudioSettingsPopover: React.FC<AudioSettingsPopoverProps> = ({
               step="0.05"
               value={sfxVol}
               onChange={(e) => handleSfxVolChange(parseFloat(e.target.value))}
+              aria-label="Volume Efek Suara SFX"
               className="w-full h-1.5 bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-emerald-500"
             />
           </div>
@@ -154,7 +193,7 @@ export const AudioSettingsPopover: React.FC<AudioSettingsPopoverProps> = ({
                 {backgroundAmbients.map((b) => (
                   <button
                     key={b.id}
-                    onClick={() => { audio.playCoin(); setBgAmbient(b.id); }}
+                    onClick={() => { audioController.playCoin(); setBgAmbient(b.id); }}
                     className={`w-6 h-6 rounded-full border-2 flex items-center justify-center transition-transform cursor-pointer ${
                       bgAmbient === b.id ? 'border-white scale-110' : 'border-transparent opacity-60 hover:opacity-100'
                     }`}

@@ -17,6 +17,9 @@ export const INITIAL_GAMES: GameStats[] = CANONICAL_GAME_IDS.map((id) => {
     genre: game.genre,
     difficulty: game.difficulty,
     controls: game.controls,
+    controlsHint: game.controlsHint,
+    featured: game.featured,
+    tier: game.tier,
     avgDuration: game.avgDuration
   };
 });

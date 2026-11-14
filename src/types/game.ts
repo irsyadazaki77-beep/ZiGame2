@@ -65,6 +65,9 @@ export interface GameStats {
   genre?: string;
   difficulty?: 'Easy' | 'Medium' | 'Hard';
   controls?: string;
+  controlsHint?: string;
+  featured?: boolean;
+  tier?: 'flagship' | 'arcade' | 'classic';
   avgDuration?: string;
   completionRate?: number;
   restartCount?: number;

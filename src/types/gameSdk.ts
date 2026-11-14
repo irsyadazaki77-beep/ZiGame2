@@ -38,6 +38,7 @@ export interface IInputController {
 }
 
 export interface IAudioController {
+  playClick(): void;
   playCoin(): void;
   playJump(): void;
   playLaser(): void;
@@ -49,6 +50,7 @@ export interface IAudioController {
   playHitStop(): void;
   playCountdown(step?: number): void;
   playCountdownGo(): void;
+  playWin(): void;
   playGameOver(): void;
   playHit(): void;
   playPowerup(): void;
@@ -58,7 +60,16 @@ export interface IAudioController {
   stopBgm(): void;
   isBgmPlaying(): boolean;
   toggleMute(): boolean;
+  setMuted(muted: boolean): boolean;
   isMuted(): boolean;
+  getMasterVolume(): number;
+  setMasterVolume(vol: number): void;
+  getSfxVolume(): number;
+  setSfxVolume(vol: number): void;
+  getMusicVolume(): number;
+  setMusicVolume(vol: number): void;
+  subscribe(listener: () => void): () => void;
+  unlockAudio(): void;
   stopAll(): void;
 }
 

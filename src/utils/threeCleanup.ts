@@ -102,3 +102,24 @@ export function disposeThreeScene(
     }
   }
 }
+
+/**
+ * Recursively disposes geometries and materials of an Object3D subtree.
+ */
+export function disposeObject3D(root: THREE.Object3D | null | undefined): void {
+  if (!root) return;
+  root.traverse((object: THREE.Object3D) => {
+    const mesh = object as THREE.Mesh;
+    if (mesh.geometry && typeof mesh.geometry.dispose === 'function') {
+      try {
+        mesh.geometry.dispose();
+      } catch {
+        // Ignore already disposed geometry errors
+      }
+    }
+    if (mesh.material) {
+      disposeMaterial(mesh.material);
+    }
+  });
+}
+

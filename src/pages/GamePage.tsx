@@ -12,7 +12,7 @@ import { useGameAudio } from '../hooks/useGameAudio';
 import { useGameDisplayMode } from '../hooks/useGameDisplayMode';
 import { useGameSession } from '../hooks/useGameSession';
 import { useToast } from '../utils/ToastContext';
-import { audio } from '../utils/audio';
+import { audioController } from '../sdk/audioController';
 import { screenShake } from '../utils/screenShake';
 import { haptics } from '../utils/haptics';
 
@@ -95,7 +95,7 @@ export default function GamePage({ games, profile, dailyMissions, onScoreUpdate,
 
     if (activeChallenge && score >= activeChallenge.targetScore && !targetBeatenRef.current) {
       targetBeatenRef.current = true;
-      audio.playPowerup();
+      audioController.playPowerup();
       screenShake.trigger('subtle');
       haptics.trigger('success');
       showToast('🎯 Target Terlewati!', `Kamu berhasil mengalahkan target skor ${activeChallenge.targetScore.toLocaleString()}!`, 'success', '🏆');
@@ -315,6 +315,7 @@ export default function GamePage({ games, profile, dailyMissions, onScoreUpdate,
             setIsFocusMode={setIsFocusMode}
             hasExistingSave={hasExistingSave}
             setHasExistingSave={setHasExistingSave}
+            controlsHint={activeGame.controlsHint || registryItem?.controlsHint}
             onRestart={handleRestart}
             onGameOver={handleWrappedGameOver}
             onScoreUpdate={handleScoreUpdate}

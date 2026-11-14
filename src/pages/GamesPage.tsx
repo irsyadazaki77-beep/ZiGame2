@@ -4,8 +4,8 @@ import { GameStats } from '../types';
 import { Search, Gamepad2, SlidersHorizontal, Star, Flame, Trophy, Award, Smartphone, Zap, Clock, Shield, Sparkles, Filter, X } from 'lucide-react';
 import GameCard from '../components/GameCard';
 import { Button, SearchInput, Select, EmptyState } from '../components/UI';
-import { audio } from '../utils/audio';
-import { GAME_QUALITY_MAP } from '../config/qualityTiers';
+import { audioController } from '../sdk/audioController';
+import { getGameQualityInfo } from '../config/qualityTiers';
 
 interface GamesPageProps {
   games: GameStats[];
@@ -68,7 +68,7 @@ export default function GamesPage({ games, onSelectGame }: GamesPageProps) {
 
   const toggleFavorite = (e: React.MouseEvent, gameId: string) => {
     e.stopPropagation();
-    audio.playCoin();
+    audioController.playCoin();
     const updated = favorites.includes(gameId)
       ? favorites.filter(id => id !== gameId)
       : [...favorites, gameId];
@@ -97,22 +97,26 @@ export default function GamesPage({ games, onSelectGame }: GamesPageProps) {
     return tokens.every(token => cleanTitle.includes(token) || cleanDesc.includes(token));
   };
 
+  const featuredGames = useMemo(() => {
+    return games.filter(g => g.featured).slice(0, 4);
+  }, [games]);
+
   const filteredGames = useMemo(() => {
     const list = games.filter(g => {
       const matchesSearch = isFuzzyMatch(g.title, g.description, searchQuery);
       const isFav = favorites.includes(g.id);
-      const quality = GAME_QUALITY_MAP[g.id];
+      const quality = getGameQualityInfo(g.id);
 
       if (categoryTab === 'fav' && !isFav) return false;
       if (categoryTab !== 'all' && categoryTab !== 'fav' && getCategoryFromGenre(g.genre) !== categoryTab) return false;
       if (difficultyFilter !== 'all' && g.difficulty !== difficultyFilter) return false;
 
-      if (inputFilter === 'gamepad' && !quality?.gamepadOptimized) return false;
-      if (inputFilter === 'mobile' && !quality?.mobileOptimized) return false;
+      if (inputFilter === 'gamepad' && !quality.gamepadOptimized) return false;
+      if (inputFilter === 'mobile' && !quality.mobileOptimized) return false;
 
-      if (durationFilter !== 'all' && quality?.estimatedDuration !== durationFilter) return false;
-      if (tierFilter === 'flagship' && quality?.tier !== 'flagship') return false;
-      if (tierFilter === 'competitive' && !quality?.competitiveSupported) return false;
+      if (durationFilter !== 'all' && quality.estimatedDuration !== durationFilter) return false;
+      if (tierFilter === 'flagship' && quality.tier !== 'flagship') return false;
+      if (tierFilter === 'competitive' && !quality.competitiveSupported) return false;
 
       return matchesSearch;
     });
@@ -122,11 +126,22 @@ export default function GamesPage({ games, onSelectGame }: GamesPageProps) {
       if (sortOption === 'highScore') return b.highScore - a.highScore;
       if (sortOption === 'title') return a.title.localeCompare(b.title);
       if (sortOption === 'newest') {
-        const newIds = ['neondrift', 'jumprope', 'whack', 'mines', '2048', 'tetris'];
+        const newIds = [
+          'world-box',
+          'desk-racer',
+          'wizard-chess',
+          'neon-drift',
+          'jump-rope',
+          'whack-a-drone',
+          'cyber-mines',
+          'neon-2048',
+          'cyber-tetris'
+        ];
         const aIndex = newIds.indexOf(a.id);
         const bIndex = newIds.indexOf(b.id);
         if (aIndex !== -1 && bIndex === -1) return -1;
         if (aIndex === -1 && bIndex !== -1) return 1;
+        if (aIndex !== -1 && bIndex !== -1) return aIndex - bIndex;
         return 0;
       }
       return 0;
@@ -157,7 +172,7 @@ export default function GamesPage({ games, onSelectGame }: GamesPageProps) {
   const hasActiveCustomFilters = activeFilterCount > 0;
 
   const resetAllFilters = () => {
-    audio.playCoin();
+    audioController.playCoin();
     setSearchQuery('');
     setCategoryTab('all');
     setDifficultyFilter('all');
@@ -183,7 +198,7 @@ export default function GamesPage({ games, onSelectGame }: GamesPageProps) {
             Eksplorasi Arkade
           </h1>
           <p className="text-xs text-text-muted mt-1 uppercase tracking-widest font-mono">
-            {games.length} Koleksi Permainan Cyber Siap Main • Filter &amp; Discovery Cerdas
+            {games.length} Koleksi Permainan Cyber Siap Main · Filter &amp; Discovery Cerdas
           </p>
         </div>
 
@@ -191,10 +206,10 @@ export default function GamesPage({ games, onSelectGame }: GamesPageProps) {
         <div className="flex flex-wrap items-center gap-1.5">
           <button
             onClick={() => {
-              audio.playHit();
+              audioController.playHit();
               setDurationFilter(durationFilter === 'quick' ? 'all' : 'quick');
             }}
-            className={`px-3 py-1 rounded-full text-[11px] font-mono font-bold flex items-center gap-1 transition cursor-pointer border ${
+            className={`min-h-[36px] px-3 py-1 rounded-lg text-[11px] font-mono font-bold flex items-center gap-1 transition cursor-pointer border ${
               durationFilter === 'quick'
                 ? 'bg-amber-500/20 border-amber-500/50 text-amber-500 dark:text-amber-300'
                 : 'bg-surface-subtle border-border-subtle text-text-secondary hover:text-text-primary'
@@ -206,10 +221,10 @@ export default function GamesPage({ games, onSelectGame }: GamesPageProps) {
 
           <button
             onClick={() => {
-              audio.playHit();
+              audioController.playHit();
               setInputFilter(inputFilter === 'gamepad' ? 'all' : 'gamepad');
             }}
-            className={`px-3 py-1 rounded-full text-[11px] font-mono font-bold flex items-center gap-1 transition cursor-pointer border ${
+            className={`min-h-[36px] px-3 py-1 rounded-lg text-[11px] font-mono font-bold flex items-center gap-1 transition cursor-pointer border ${
               inputFilter === 'gamepad'
                 ? 'bg-indigo-500/20 border-indigo-500/50 text-indigo-600 dark:text-indigo-300'
                 : 'bg-surface-subtle border-border-subtle text-text-secondary hover:text-text-primary'
@@ -221,10 +236,10 @@ export default function GamesPage({ games, onSelectGame }: GamesPageProps) {
 
           <button
             onClick={() => {
-              audio.playHit();
+              audioController.playHit();
               setTierFilter(tierFilter === 'flagship' ? 'all' : 'flagship');
             }}
-            className={`px-3 py-1 rounded-full text-[11px] font-mono font-bold flex items-center gap-1 transition cursor-pointer border ${
+            className={`min-h-[36px] px-3 py-1 rounded-lg text-[11px] font-mono font-bold flex items-center gap-1 transition cursor-pointer border ${
               tierFilter === 'flagship'
                 ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-600 dark:text-emerald-300'
                 : 'bg-surface-subtle border-border-subtle text-text-secondary hover:text-text-primary'
@@ -255,15 +270,15 @@ export default function GamesPage({ games, onSelectGame }: GamesPageProps) {
           <Button
             variant={showFilters || hasActiveCustomFilters ? "primary" : "secondary"}
             size="sm"
-            onClick={() => { audio.playCoin(); setShowFilters(!showFilters); }}
-            className="flex items-center gap-2 !min-h-[38px] px-3.5 rounded-full relative cursor-pointer"
+            onClick={() => { audioController.playCoin(); setShowFilters(!showFilters); }}
+            className="flex items-center gap-2 !min-h-[40px] px-3.5 rounded-xl relative cursor-pointer"
           >
             <SlidersHorizontal size={14} />
             <span className="hidden sm:inline text-xs font-mono">
               Filter {activeFilterCount > 0 ? `(${activeFilterCount})` : 'Lanjutan'}
             </span>
             {hasActiveCustomFilters && (
-              <span className="w-4 h-4 rounded-full bg-amber-400 text-zinc-950 font-bold text-[9px] font-mono flex items-center justify-center animate-pulse">
+              <span className="w-4 h-4 rounded-full bg-amber-400 text-zinc-950 font-bold text-[9px] font-mono flex items-center justify-center tabular-nums">
                 {activeFilterCount}
               </span>
             )}
@@ -273,7 +288,7 @@ export default function GamesPage({ games, onSelectGame }: GamesPageProps) {
               variant="outline"
               size="sm"
               onClick={resetAllFilters}
-              className="!min-h-[38px] px-3 rounded-full text-xs font-mono text-rose-400 border-rose-500/30 hover:bg-rose-500/10 cursor-pointer"
+              className="!min-h-[40px] px-3 rounded-xl text-xs font-mono text-rose-400 border-rose-500/30 hover:bg-rose-500/10 cursor-pointer"
             >
               <X size={12} className="mr-1 inline" /> Reset
             </Button>
@@ -282,14 +297,14 @@ export default function GamesPage({ games, onSelectGame }: GamesPageProps) {
 
         {/* Categories Tab Row */}
         <div className="flex items-center justify-between gap-2">
-          <div className="flex gap-1 overflow-x-auto pb-1.5 scrollbar-thin scrollbar-thumb-zinc-800 scrollbar-track-transparent">
+          <div className="flex gap-1.5 overflow-x-auto pb-1.5 scrollbar-thin scrollbar-thumb-zinc-800 scrollbar-track-transparent">
             {categories.map((cat) => {
               const isActive = categoryTab === cat.value;
               return (
                 <button
                   key={cat.value}
-                  onClick={() => { audio.playHit(); setCategoryTab(cat.value as any); }}
-                  className={`px-3.5 py-1.5 rounded-full text-xs font-mono font-bold uppercase transition-all duration-200 shrink-0 border cursor-pointer select-none ${
+                  onClick={() => { audioController.playHit(); setCategoryTab(cat.value as any); }}
+                  className={`min-h-[38px] px-3.5 py-1.5 rounded-xl text-xs font-mono font-bold uppercase transition-all duration-200 shrink-0 border cursor-pointer select-none ${
                     isActive
                       ? 'bg-indigo-600/15 border-indigo-500/40 text-indigo-600 dark:text-indigo-400 shadow-xs'
                       : 'bg-surface-subtle border-border-subtle text-text-secondary hover:text-text-primary hover:border-border-medium'
@@ -366,19 +381,51 @@ export default function GamesPage({ games, onSelectGame }: GamesPageProps) {
         )}
       </div>
 
+      {/* Curated Featured / Top Picks Shelf when not filtering */}
+      {!hasActiveCustomFilters && featuredGames.length > 0 && (
+        <section className="space-y-3" aria-label="Featured Top Picks">
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm sm:text-base font-bold text-text-primary flex items-center gap-2">
+              <Trophy size={15} className="text-amber-500 shrink-0" />
+              <span>Featured / Top Picks</span>
+            </h2>
+            <span className="text-[11px] font-mono text-text-muted tabular-nums">
+              {featuredGames.length} Unggulan
+            </span>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+            {featuredGames.map((game) => (
+              <GameCard
+                key={`featured-${game.id}`}
+                game={game}
+                onClick={() => onSelectGame(game.id)}
+                isFavorite={favorites.includes(game.id)}
+                onToggleFavorite={(e) => toggleFavorite(e, game.id)}
+              />
+            ))}
+          </div>
+        </section>
+      )}
+
       {/* Game Grid Container */}
-      <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-3 sm:gap-4 pt-1">
-        {filteredGames.length > 0 ? (
-          filteredGames.map((game) => (
-            <GameCard
-              key={game.id}
-              game={game}
-              onClick={() => onSelectGame(game.id)}
-              isFavorite={favorites.includes(game.id)}
-              onToggleFavorite={(e) => toggleFavorite(e, game.id)}
-            />
-          ))
-        ) : (
+      <div className="space-y-3">
+        {!hasActiveCustomFilters && featuredGames.length > 0 && (
+          <h2 className="text-sm sm:text-base font-bold text-text-primary">
+            Semua Koleksi ({filteredGames.length})
+          </h2>
+        )}
+        <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-3 sm:gap-4 pt-1">
+          {filteredGames.length > 0 ? (
+            filteredGames.map((game) => (
+              <GameCard
+                key={game.id}
+                game={game}
+                onClick={() => onSelectGame(game.id)}
+                isFavorite={favorites.includes(game.id)}
+                onToggleFavorite={(e) => toggleFavorite(e, game.id)}
+              />
+            ))
+          ) : (
           <div className="col-span-full py-8">
             <EmptyState
               icon={<Search size={32} className="text-zinc-600" />}
@@ -397,6 +444,7 @@ export default function GamesPage({ games, onSelectGame }: GamesPageProps) {
             />
           </div>
         )}
+        </div>
       </div>
     </motion.div>
   );

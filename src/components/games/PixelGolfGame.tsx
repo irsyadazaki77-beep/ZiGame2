@@ -1,9 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import * as THREE from 'three';
-import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import { audio } from '../../utils/audio';
-import { useGameEngine } from '../../sdk';
-import { disposeThreeScene } from '../../utils/threeCleanup';
+import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
+import { audioController, useGameEngine } from '../../sdk';
+import { ThreeStageController, followDirectionalShadow } from '../../utils/threeStage';
 import { screenShake } from '../../utils/screenShake';
 import { GameOverlay } from '../gameplay/GameOverlay';
 import { Flag, Eye, Clock, RotateCcw, ChevronDown, ChevronUp } from 'lucide-react';
@@ -43,13 +42,25 @@ interface HoleLayout {
   boostPad?: { x: number; z: number; w: number; d: number; dirZ: number };
 }
 
+interface TrailSlot {
+  active: boolean;
+  x: number;
+  z: number;
+  life: number;
+  maxLife: number;
+}
+
 const COURSE_W = 8.4;
 const COURSE_D = 14.0;
 const BALL_RADIUS = 0.26;
 const CUP_RADIUS = 0.48;
+const BALL_TRAIL_CAPACITY = 64;
 
-const _camPos = new THREE.Vector3();
-const _camLook = new THREE.Vector3();
+const _camTargetPos = new THREE.Vector3(0, 9.5, 11.5);
+const _camSmoothPos = new THREE.Vector3(0, 9.5, 11.5);
+const _camLook = new THREE.Vector3(0, 0, 0);
+const _trailDummy = new THREE.Object3D();
+const _lampOffset = new THREE.Vector3(8, 16, 10);
 
 function buildHoleLayout(level: number): HoleLayout {
   const idx = (level - 1) % 5;
@@ -172,8 +183,6 @@ export default function PixelGolfGame({ onGameOver, onScoreUpdate, highScore }: 
     startWithCountdown,
     resumeGame,
     countdown,
-    startLoop,
-    stopLoop,
     gameStateRef,
     scoreRef
   } = useGameEngine({
@@ -195,6 +204,10 @@ export default function PixelGolfGame({ onGameOver, onScoreUpdate, highScore }: 
   const camModeRef = useRef<GolfCamMode>('follow');
   const strokesRef = useRef(0);
   const holeNumRef = useRef(1);
+  const timeLeftRef = useRef(75);
+  const lastTimeShownRef = useRef(75);
+  const lastPowerPctRef = useRef(0);
+  const bannerTimerRef = useRef<number | null>(null);
 
   const golfStateRef = useRef<{
     layout: HoleLayout;
@@ -232,10 +245,23 @@ export default function PixelGolfGame({ onGameOver, onScoreUpdate, highScore }: 
     camModeRef.current = camMode;
   }, [camMode]);
 
+  useEffect(() => {
+    return () => {
+      if (bannerTimerRef.current !== null) {
+        clearTimeout(bannerTimerRef.current);
+      }
+    };
+  }, []);
+
   const showBanner = useCallback((msg: string) => {
     setBannerMsg(msg);
-    const t = window.setTimeout(() => setBannerMsg(null), 1400);
-    return () => clearTimeout(t);
+    if (bannerTimerRef.current !== null) {
+      clearTimeout(bannerTimerRef.current);
+    }
+    bannerTimerRef.current = window.setTimeout(() => {
+      setBannerMsg(null);
+      bannerTimerRef.current = null;
+    }, 1400);
   }, []);
 
   const loadHole = useCallback((lvl: number) => {
@@ -251,6 +277,7 @@ export default function PixelGolfGame({ onGameOver, onScoreUpdate, highScore }: 
     strokesRef.current = 0;
     setStrokes(0);
     setPar(layout.par);
+    lastPowerPctRef.current = 0;
     setPowerPct(0);
   }, []);
 
@@ -258,11 +285,13 @@ export default function PixelGolfGame({ onGameOver, onScoreUpdate, highScore }: 
     updateScore(0);
     holeNumRef.current = 1;
     setHoleNum(1);
+    timeLeftRef.current = 75;
+    lastTimeShownRef.current = 75;
     setTimeLeft(75);
     loadHole(1);
 
     startWithCountdown(() => {
-      audio.playClick();
+      audioController.playClick();
     });
   }, [loadHole, startWithCountdown, updateScore]);
 
@@ -274,25 +303,9 @@ export default function PixelGolfGame({ onGameOver, onScoreUpdate, highScore }: 
     st.vx = 0;
     st.vz = 0;
     st.isMoving = false;
-    audio.playHit();
+    audioController.playHit();
   }, [gameStateRef]);
 
-  // Countdown timer
-  useEffect(() => {
-    if (gameState !== 'playing') return;
-    const timer = window.setInterval(() => {
-      setTimeLeft((prev) => {
-        if (prev <= 1) {
-          triggerGameOver(scoreRef.current);
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-    return () => clearInterval(timer);
-  }, [gameState, scoreRef, triggerGameOver]);
-
-  // Pointer aiming handlers
   const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     if (gameStateRef.current !== 'playing') return;
     const st = golfStateRef.current;
@@ -317,10 +330,17 @@ export default function PixelGolfGame({ onGameOver, onScoreUpdate, highScore }: 
       st.aimDx = dx / rawLen;
       st.aimDz = dz / rawLen;
       st.aimPower = clamped;
-      setPowerPct(Math.round((clamped / maxPull) * 100));
+      const nextPct = Math.round((clamped / maxPull) * 100);
+      if (nextPct !== lastPowerPctRef.current) {
+        lastPowerPctRef.current = nextPct;
+        setPowerPct(nextPct);
+      }
     } else {
       st.aimPower = 0;
-      setPowerPct(0);
+      if (lastPowerPctRef.current !== 0) {
+        lastPowerPctRef.current = 0;
+        setPowerPct(0);
+      }
     }
   };
 
@@ -335,80 +355,55 @@ export default function PixelGolfGame({ onGameOver, onScoreUpdate, highScore }: 
       st.isMoving = true;
       strokesRef.current += 1;
       setStrokes(strokesRef.current);
+      lastPowerPctRef.current = 0;
       setPowerPct(0);
-      audio.playJump();
-    } else {
+      audioController.playJump();
+    } else if (lastPowerPctRef.current !== 0) {
+      lastPowerPctRef.current = 0;
       setPowerPct(0);
     }
   };
 
-  // Three.js WebGL Mini-Golf Course
+  // Unified ThreeStageController WebGL Mini-Golf Course
   useEffect(() => {
     const mount = canvasMountRef.current;
     if (!mount) return;
 
-    const isSoftwareGl = (() => {
-      const gl = document.createElement('canvas').getContext('webgl2');
-      if (!gl) return true;
-      const ext = gl.getExtension('WEBGL_debug_renderer_info');
-      const param = ext ? ext.UNMASKED_RENDERER_WEBGL : gl.RENDERER;
-      const gpu = String(gl.getParameter(param));
-      gl.getExtension('WEBGL_lose_context')?.loseContext();
-      return /SwiftShader|llvmpipe|softpipe|Software|Basic Render/i.test(gpu);
-    })();
+    let stage: ThreeStageController;
+    try {
+      stage = new ThreeStageController({
+        container: mount,
+        backgroundColor: 0x050b14,
+        fogColor: 0x050b14,
+        fogDensity: 0.024,
+        fov: 50,
+        near: 0.1,
+        far: 120,
+        manualCamera: true,
+        enableGridFloor: false,
+        shadowBounds: 10,
+        toneMappingExposure: 1.12,
+        bloom: {
+          enabled: true,
+          strength: 0.48,
+          radius: 0.36,
+          threshold: 0.82
+        }
+      });
+    } catch {
+      return;
+    }
 
-    const width = mount.clientWidth || 640;
-    const height = mount.clientHeight || 500;
-
-    const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x050b14);
-    scene.fog = new THREE.FogExp2(0x050b14, 0.025);
-
-    const camera = new THREE.PerspectiveCamera(50, width / height, 0.1, 120);
+    const { scene, camera, renderer } = stage;
     camera.position.set(0, 9.5, 11.5);
+    stage.hemiLight.color.setHex(0x6ee7b7);
+    stage.rimLight.color.setHex(0x38bdf8);
+    stage.rimLight.position.set(-10, 9, -10);
 
-    const renderer = new THREE.WebGLRenderer({
-      antialias: !isSoftwareGl,
-      powerPreference: 'high-performance'
-    });
-    renderer.outputColorSpace = THREE.SRGBColorSpace;
-    renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.12;
-    renderer.setPixelRatio(isSoftwareGl ? 1 : Math.min(window.devicePixelRatio, 2));
-    renderer.setSize(width, height);
-    renderer.shadowMap.enabled = !isSoftwareGl;
-    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-    mount.appendChild(renderer.domElement);
-
-    const pmremGenerator = new THREE.PMREMGenerator(renderer);
-    scene.environment = pmremGenerator.fromScene(new RoomEnvironment(), 0.04).texture;
-    pmremGenerator.dispose();
-
-    // Lighting
-    const hemiLight = new THREE.HemisphereLight(0x6ee7b7, 0x090d16, 0.8);
-    scene.add(hemiLight);
-
-    const keyLight = new THREE.DirectionalLight(0xfffbeb, 1.6);
-    keyLight.position.set(8, 16, 10);
-    keyLight.castShadow = !isSoftwareGl;
-    keyLight.shadow.mapSize.set(1024, 1024);
-    const d = 11;
-    keyLight.shadow.camera.left = -d;
-    keyLight.shadow.camera.right = d;
-    keyLight.shadow.camera.top = d;
-    keyLight.shadow.camera.bottom = -d;
-    keyLight.shadow.bias = -0.0005;
-    keyLight.shadow.normalBias = 0.02;
-    scene.add(keyLight);
-
-    const rimLight = new THREE.DirectionalLight(0x38bdf8, 0.75);
-    rimLight.position.set(-10, 9, -10);
-    scene.add(rimLight);
-
-    const maxAniso = renderer.capabilities.getMaxAnisotropy();
+    const maxAniso = Math.min(8, renderer.capabilities.getMaxAnisotropy() || 1);
     const turfTex = createTurfTexture(maxAniso);
 
-    // Fairway Base & Rails
+    // Fairway Base & Sculpted Rounded Rails
     const courseGroup = new THREE.Group();
     scene.add(courseGroup);
 
@@ -417,7 +412,7 @@ export default function PixelGolfGame({ onGameOver, onScoreUpdate, highScore }: 
       new THREE.MeshStandardMaterial({ map: turfTex, roughness: 0.65, metalness: 0.1 })
     );
     turfMesh.position.y = -0.2;
-    turfMesh.receiveShadow = !isSoftwareGl;
+    turfMesh.receiveShadow = !stage.isSoftwareGl;
     courseGroup.add(turfMesh);
 
     const railMat = new THREE.MeshPhysicalMaterial({
@@ -426,26 +421,25 @@ export default function PixelGolfGame({ onGameOver, onScoreUpdate, highScore }: 
       roughness: 0.25,
       clearcoat: 0.6
     });
-    const sideRailGeo = new THREE.BoxGeometry(0.4, 0.55, COURSE_D + 0.8);
+    const sideRailGeo = new RoundedBoxGeometry(0.4, 0.55, COURSE_D + 0.8, 2, 0.06);
     const leftRail = new THREE.Mesh(sideRailGeo, railMat);
     leftRail.position.set(-COURSE_W / 2 - 0.2, 0.18, 0);
-    leftRail.castShadow = !isSoftwareGl;
+    leftRail.castShadow = !stage.isSoftwareGl;
     const rightRail = leftRail.clone();
     rightRail.position.x = COURSE_W / 2 + 0.2;
 
-    const endRailGeo = new THREE.BoxGeometry(COURSE_W, 0.55, 0.4);
+    const endRailGeo = new RoundedBoxGeometry(COURSE_W, 0.55, 0.4, 2, 0.06);
     const topRail = new THREE.Mesh(endRailGeo, railMat);
     topRail.position.set(0, 0.18, -COURSE_D / 2 - 0.2);
-    topRail.castShadow = !isSoftwareGl;
+    topRail.castShadow = !stage.isSoftwareGl;
     const bottomRail = topRail.clone();
     bottomRail.position.z = COURSE_D / 2 + 0.2;
     courseGroup.add(leftRail, rightRail, topRail, bottomRail);
 
-    // Dynamic Obstacles Group
     const dynamicPropsGroup = new THREE.Group();
     scene.add(dynamicPropsGroup);
 
-    // Composite Flagstick & Cup (4 parts)
+    // Composite Flagstick & Glowing Cup
     const flagGroup = new THREE.Group();
     const cupMesh = new THREE.Mesh(
       new THREE.CylinderGeometry(CUP_RADIUS, CUP_RADIUS, 0.05, 24),
@@ -453,8 +447,13 @@ export default function PixelGolfGame({ onGameOver, onScoreUpdate, highScore }: 
     );
     cupMesh.position.y = 0.01;
     const cupRim = new THREE.Mesh(
-      new THREE.TorusGeometry(CUP_RADIUS, 0.04, 10, 28),
-      new THREE.MeshBasicMaterial({ color: 0xa855f7 })
+      new THREE.TorusGeometry(CUP_RADIUS, 0.042, 10, 28),
+      new THREE.MeshStandardMaterial({
+        color: 0xc084fc,
+        emissive: 0xa855f7,
+        emissiveIntensity: 1.95,
+        roughness: 0.15
+      })
     );
     cupRim.rotation.x = Math.PI / 2;
     cupRim.position.y = 0.02;
@@ -466,9 +465,9 @@ export default function PixelGolfGame({ onGameOver, onScoreUpdate, highScore }: 
     const pennant = new THREE.Mesh(
       new THREE.ConeGeometry(0.35, 0.75, 3),
       new THREE.MeshStandardMaterial({
-        color: 0xf43f5e,
-        emissive: 0xe11d48,
-        emissiveIntensity: 0.4
+        color: 0xfb7185,
+        emissive: 0xf43f5e,
+        emissiveIntensity: 1.15
       })
     );
     pennant.rotation.z = -Math.PI / 2;
@@ -486,13 +485,60 @@ export default function PixelGolfGame({ onGameOver, onScoreUpdate, highScore }: 
         clearcoat: 1.0
       })
     );
-    ballMesh.castShadow = !isSoftwareGl;
+    ballMesh.castShadow = !stage.isSoftwareGl;
     scene.add(ballMesh);
 
-    // 3D Trajectory Guide Line
+    // Instanced Rolling Ball Trail Pool
+    const trailInst = new THREE.InstancedMesh(
+      new THREE.SphereGeometry(0.11, 8, 8),
+      new THREE.MeshStandardMaterial({
+        color: 0x6ee7b7,
+        emissive: 0x10b981,
+        emissiveIntensity: 1.75,
+        roughness: 0.15
+      }),
+      BALL_TRAIL_CAPACITY
+    );
+    trailInst.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    trailInst.frustumCulled = false;
+    const trailSlots: TrailSlot[] = Array.from({ length: BALL_TRAIL_CAPACITY }, () => ({
+      active: false,
+      x: 0,
+      z: 0,
+      life: 0,
+      maxLife: 0.45
+    }));
+    let trailCursor = 0;
+
+    _trailDummy.position.set(0, -99, 0);
+    _trailDummy.scale.setScalar(0);
+    _trailDummy.updateMatrix();
+    for (let i = 0; i < BALL_TRAIL_CAPACITY; i++) {
+      trailInst.setMatrixAt(i, _trailDummy.matrix);
+    }
+    trailInst.instanceMatrix.needsUpdate = true;
+    scene.add(trailInst);
+
+    const spawnBallTrail = (x: number, z: number) => {
+      const s = trailSlots[trailCursor];
+      trailCursor = (trailCursor + 1) % BALL_TRAIL_CAPACITY;
+      s.active = true;
+      s.x = x;
+      s.z = z;
+      s.maxLife = 0.42;
+      s.life = s.maxLife;
+    };
+
+    // 3D HDR Aiming Guide Line
+    const aimDotMat = new THREE.MeshStandardMaterial({
+      color: 0xfde047,
+      emissive: 0xfbbf24,
+      emissiveIntensity: 1.85,
+      roughness: 0.15
+    });
     const aimPoints = Array.from({ length: 12 }, () => new THREE.Mesh(
       new THREE.SphereGeometry(0.08, 8, 8),
-      new THREE.MeshBasicMaterial({ color: 0xfbbf24 })
+      aimDotMat
     ));
     aimPoints.forEach((pt) => {
       pt.visible = false;
@@ -512,7 +558,6 @@ export default function PixelGolfGame({ onGameOver, onScoreUpdate, highScore }: 
 
       flagGroup.position.set(lay.holeX, 0, lay.holeZ);
 
-      // Bumpers
       for (const b of lay.bumpers) {
         const bGroup = new THREE.Group();
         const cyl = new THREE.Mesh(
@@ -525,10 +570,15 @@ export default function PixelGolfGame({ onGameOver, onScoreUpdate, highScore }: 
           })
         );
         cyl.position.y = 0.25;
-        cyl.castShadow = !isSoftwareGl;
+        cyl.castShadow = !stage.isSoftwareGl;
         const ring = new THREE.Mesh(
-          new THREE.TorusGeometry(b.radius + 0.03, 0.05, 10, 24),
-          new THREE.MeshBasicMaterial({ color: 0xfef08a })
+          new THREE.TorusGeometry(b.radius + 0.03, 0.052, 10, 24),
+          new THREE.MeshStandardMaterial({
+            color: 0xfef08a,
+            emissive: 0xfacc15,
+            emissiveIntensity: 1.85,
+            roughness: 0.15
+          })
         );
         ring.rotation.x = Math.PI / 2;
         ring.position.y = 0.35;
@@ -537,30 +587,33 @@ export default function PixelGolfGame({ onGameOver, onScoreUpdate, highScore }: 
         dynamicPropsGroup.add(bGroup);
       }
 
-      // Internal Walls
       for (const w of lay.walls) {
         const wMesh = new THREE.Mesh(
-          new THREE.BoxGeometry(w.w, 0.55, w.d),
+          new RoundedBoxGeometry(w.w, 0.55, w.d, 2, 0.06),
           new THREE.MeshStandardMaterial({ color: 0x475569, metalness: 0.6, roughness: 0.3 })
         );
         wMesh.position.set(w.x, 0.275, w.z);
-        wMesh.castShadow = !isSoftwareGl;
+        wMesh.castShadow = !stage.isSoftwareGl;
         dynamicPropsGroup.add(wMesh);
       }
 
-      // Boost Pad
       if (lay.boostPad) {
         const bp = lay.boostPad;
         const pad = new THREE.Mesh(
           new THREE.PlaneGeometry(bp.w, bp.d),
-          new THREE.MeshBasicMaterial({ color: 0x10b981, transparent: true, opacity: 0.55 })
+          new THREE.MeshStandardMaterial({
+            color: 0x34d399,
+            emissive: 0x10b981,
+            emissiveIntensity: 1.55,
+            transparent: true,
+            opacity: 0.68
+          })
         );
         pad.rotation.x = -Math.PI / 2;
         pad.position.set(bp.x, 0.02, bp.z);
         dynamicPropsGroup.add(pad);
       }
 
-      // Windmill Hazard
       if (lay.hasWindmill) {
         const wmGroup = new THREE.Group();
         const tower = new THREE.Mesh(
@@ -568,16 +621,16 @@ export default function PixelGolfGame({ onGameOver, onScoreUpdate, highScore }: 
           new THREE.MeshStandardMaterial({ color: 0x7c3aed, roughness: 0.35, metalness: 0.4 })
         );
         tower.position.y = 1.2;
-        tower.castShadow = !isSoftwareGl;
+        tower.castShadow = !stage.isSoftwareGl;
         wmGroup.add(tower);
 
         const blades = new THREE.Group();
         blades.position.set(0, 1.35, 0.65);
-        const bladeGeo = new THREE.BoxGeometry(3.2, 0.28, 0.08);
+        const bladeGeo = new RoundedBoxGeometry(3.2, 0.28, 0.08, 2, 0.02);
         const bladeMat = new THREE.MeshStandardMaterial({
           color: 0xf59e0b,
           emissive: 0xd97706,
-          emissiveIntensity: 0.3
+          emissiveIntensity: 0.9
         });
         const b1 = new THREE.Mesh(bladeGeo, bladeMat);
         const b2 = new THREE.Mesh(bladeGeo, bladeMat);
@@ -594,24 +647,26 @@ export default function PixelGolfGame({ onGameOver, onScoreUpdate, highScore }: 
 
     rebuildHoleProps();
 
-    const handleResize = () => {
-      if (!mount) return;
-      const w = mount.clientWidth || 640;
-      const h = mount.clientHeight || 500;
-      camera.aspect = w / h;
-      camera.updateProjectionMatrix();
-      renderer.setSize(w, h);
-    };
-    const resizeObserver = new ResizeObserver(handleResize);
-    resizeObserver.observe(mount);
-    window.addEventListener('resize', handleResize);
+    let trailTimer = 0;
+    _camSmoothPos.set(0, 9.5, 11.5);
 
-    let swRenderAcc = 0;
-    let hasRenderedInitial = false;
-
-    startLoop((_timestamp, deltaTimeMs) => {
-      const delta = Math.min(deltaTimeMs / 1000, 0.05);
+    stage.startLoop((dt) => {
+      const delta = Math.min(dt, 0.05);
       const st = golfStateRef.current;
+
+      if (gameStateRef.current === 'playing') {
+        timeLeftRef.current = Math.max(0, timeLeftRef.current - delta);
+        const sec = Math.ceil(timeLeftRef.current);
+        if (sec !== lastTimeShownRef.current) {
+          lastTimeShownRef.current = sec;
+          setTimeLeft(sec);
+        }
+        if (timeLeftRef.current <= 0) {
+          audioController.playGameOver();
+          triggerGameOver(scoreRef.current);
+          return;
+        }
+      }
 
       if (st.rebuildRequested) {
         rebuildHoleProps();
@@ -623,52 +678,58 @@ export default function PixelGolfGame({ onGameOver, onScoreUpdate, highScore }: 
       }
 
       if (gameStateRef.current === 'playing' && st.isMoving) {
+        trailTimer += delta;
+        if (trailTimer >= 0.025) {
+          trailTimer = 0;
+          spawnBallTrail(st.ballX, st.ballZ);
+        }
+
         const subSteps = 3;
-        const dt = delta / subSteps;
+        const stepDt = delta / subSteps;
 
         for (let s = 0; s < subSteps; s++) {
-          st.ballX += st.vx * dt;
-          st.ballZ += st.vz * dt;
+          st.ballX += st.vx * stepDt;
+          st.ballZ += st.vz * stepDt;
 
-          // Turf friction
-          const damping = Math.exp(-1.55 * dt);
+          const damping = Math.exp(-1.55 * stepDt);
           st.vx *= damping;
           st.vz *= damping;
 
-          // Boost Pad acceleration
           if (st.layout.boostPad) {
             const bp = st.layout.boostPad;
             if (
               Math.abs(st.ballX - bp.x) < bp.w / 2 &&
               Math.abs(st.ballZ - bp.z) < bp.d / 2
             ) {
-              st.vz += bp.dirZ * 14 * dt;
+              st.vz += bp.dirZ * 14 * stepDt;
             }
           }
 
-          // Outer rail collisions
           const halfW = COURSE_W / 2 - BALL_RADIUS;
           const halfD = COURSE_D / 2 - BALL_RADIUS;
           if (st.ballX < -halfW) {
             st.ballX = -halfW;
             st.vx = Math.abs(st.vx) * 0.82;
-            audio.playHit();
+            audioController.playHit();
+            stage.cameraRig.addTrauma(0.14);
           } else if (st.ballX > halfW) {
             st.ballX = halfW;
             st.vx = -Math.abs(st.vx) * 0.82;
-            audio.playHit();
+            audioController.playHit();
+            stage.cameraRig.addTrauma(0.14);
           }
           if (st.ballZ < -halfD) {
             st.ballZ = -halfD;
             st.vz = Math.abs(st.vz) * 0.82;
-            audio.playHit();
+            audioController.playHit();
+            stage.cameraRig.addTrauma(0.14);
           } else if (st.ballZ > halfD) {
             st.ballZ = halfD;
             st.vz = -Math.abs(st.vz) * 0.82;
-            audio.playHit();
+            audioController.playHit();
+            stage.cameraRig.addTrauma(0.14);
           }
 
-          // Bumper collisions
           for (const b of st.layout.bumpers) {
             const dx = st.ballX - b.x;
             const dz = st.ballZ - b.z;
@@ -682,12 +743,13 @@ export default function PixelGolfGame({ onGameOver, onScoreUpdate, highScore }: 
               const dot = st.vx * nx + st.vz * nz;
               st.vx = (st.vx - 2 * dot * nx) * 1.05;
               st.vz = (st.vz - 2 * dot * nz) * 1.05;
-              audio.playScore();
+              audioController.playScore();
               screenShake.trigger('light');
+              stage.cameraRig.addTrauma(0.32);
+              stage.particles.burst(st.ballX, 0.35, st.ballZ, 12, 0xfacc15, 5.5);
             }
           }
 
-          // Internal Wall collisions
           for (const w of st.layout.walls) {
             const halfWW = w.w / 2 + BALL_RADIUS;
             const halfWD = w.d / 2 + BALL_RADIUS;
@@ -701,16 +763,19 @@ export default function PixelGolfGame({ onGameOver, onScoreUpdate, highScore }: 
                 st.ballZ = w.z + Math.sign(dz) * halfWD;
                 st.vz *= -0.8;
               }
-              audio.playHit();
+              audioController.playHit();
+              stage.cameraRig.addTrauma(0.16);
             }
           }
 
-          // Cup capture check
           const distCup = Math.hypot(st.ballX - st.layout.holeX, st.ballZ - st.layout.holeZ);
           const speed = Math.hypot(st.vx, st.vz);
           if (distCup < CUP_RADIUS && speed < 10.5) {
-            audio.playLevelUp();
+            audioController.playWin();
             screenShake.trigger('medium');
+            stage.cameraRig.addTrauma(0.45);
+            stage.cameraRig.kickFov(4);
+            stage.particles.burst(st.layout.holeX, 0.35, st.layout.holeZ, 30, 0xa855f7, 8);
             const diff = strokesRef.current - st.layout.par;
             const label =
               strokesRef.current === 1
@@ -723,7 +788,10 @@ export default function PixelGolfGame({ onGameOver, onScoreUpdate, highScore }: 
             const pts =
               strokesRef.current === 1 ? 300 : diff < 0 ? 200 : diff === 0 ? 140 : 90;
             addScore(pts);
-            setTimeLeft((prev) => Math.min(90, prev + 10));
+            timeLeftRef.current = Math.min(90, timeLeftRef.current + 10);
+            const nextSec = Math.ceil(timeLeftRef.current);
+            lastTimeShownRef.current = nextSec;
+            setTimeLeft(nextSec);
             showBanner(label);
 
             const nextHole = holeNumRef.current + 1;
@@ -743,7 +811,34 @@ export default function PixelGolfGame({ onGameOver, onScoreUpdate, highScore }: 
 
       ballMesh.position.set(st.ballX, BALL_RADIUS, st.ballZ);
 
-      // Update Aiming Guide Dots
+      // Update Instanced Ball Trail
+      let trailDirty = false;
+      for (let i = 0; i < BALL_TRAIL_CAPACITY; i++) {
+        const ts = trailSlots[i];
+        if (!ts.active) continue;
+        trailDirty = true;
+        ts.life -= delta;
+        if (ts.life <= 0) {
+          ts.active = false;
+          _trailDummy.position.set(0, -99, 0);
+          _trailDummy.scale.setScalar(0);
+          _trailDummy.updateMatrix();
+          trailInst.setMatrixAt(i, _trailDummy.matrix);
+        } else {
+          const s = ts.life / ts.maxLife;
+          _trailDummy.position.set(ts.x, 0.12, ts.z);
+          _trailDummy.scale.setScalar(s);
+          _trailDummy.updateMatrix();
+          trailInst.setMatrixAt(i, _trailDummy.matrix);
+        }
+      }
+      if (trailDirty) {
+        trailInst.instanceMatrix.needsUpdate = true;
+      }
+
+      // Tight dynamic directional shadow around ball
+      followDirectionalShadow(stage.keyLight, ballMesh.position, 10, true, _lampOffset);
+
       if (st.isAiming && st.aimPower > 0.5) {
         for (let i = 0; i < aimPoints.length; i++) {
           const pt = aimPoints[i];
@@ -759,44 +854,32 @@ export default function PixelGolfGame({ onGameOver, onScoreUpdate, highScore }: 
         for (const pt of aimPoints) pt.visible = false;
       }
 
-      // Camera Choreography
       const mode = camModeRef.current;
       if (mode === 'follow') {
-        _camPos.set(st.ballX * 0.6, 7.2, st.ballZ + 6.4);
+        _camTargetPos.set(st.ballX * 0.6, 7.2, st.ballZ + 6.4);
         _camLook.set(st.ballX * 0.4, 0, st.ballZ - 2.2);
       } else if (mode === 'overhead') {
-        _camPos.set(0, 16.5, 0.01);
+        _camTargetPos.set(0, 16.5, 0.01);
         _camLook.set(0, 0, 0);
       } else {
-        _camPos.set(st.layout.holeX, 4.5, st.layout.holeZ + 4.8);
+        _camTargetPos.set(st.layout.holeX, 4.5, st.layout.holeZ + 4.8);
         _camLook.set(st.layout.holeX, 0.3, st.layout.holeZ);
       }
 
-      camera.position.x = THREE.MathUtils.damp(camera.position.x, _camPos.x, 7, delta);
-      camera.position.y = THREE.MathUtils.damp(camera.position.y, _camPos.y, 7, delta);
-      camera.position.z = THREE.MathUtils.damp(camera.position.z, _camPos.z, 7, delta);
-      camera.lookAt(_camLook);
+      _camSmoothPos.x = THREE.MathUtils.damp(_camSmoothPos.x, _camTargetPos.x, 7, delta);
+      _camSmoothPos.y = THREE.MathUtils.damp(_camSmoothPos.y, _camTargetPos.y, 7, delta);
+      _camSmoothPos.z = THREE.MathUtils.damp(_camSmoothPos.z, _camTargetPos.z, 7, delta);
 
-      if (!isSoftwareGl) {
-        renderer.render(scene, camera);
-      } else {
-        swRenderAcc += delta;
-        if (!hasRenderedInitial || swRenderAcc >= 0.06) {
-          hasRenderedInitial = true;
-          swRenderAcc = 0;
-          renderer.render(scene, camera);
-        }
-      }
+      stage.cameraRig.stepFovRecovery(camera, 50, delta);
+      stage.cameraRig.applyTraumaToCamera(camera, _camSmoothPos, delta, 0.3);
+      camera.lookAt(_camLook);
     });
 
     return () => {
-      stopLoop();
-      resizeObserver.disconnect();
-      window.removeEventListener('resize', handleResize);
       turfTex.dispose();
-      disposeThreeScene(scene, renderer);
+      stage.dispose();
     };
-  }, [addScore, gameStateRef, loadHole, showBanner, startLoop, stopLoop]);
+  }, [addScore, gameStateRef, loadHole, scoreRef, showBanner, triggerGameOver]);
 
   return (
     <div
@@ -804,20 +887,20 @@ export default function PixelGolfGame({ onGameOver, onScoreUpdate, highScore }: 
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
       onPointerCancel={handlePointerUp}
-      className="relative w-full h-full min-h-[480px] flex flex-col items-center justify-center bg-[#050b14] overflow-hidden select-none cursor-crosshair touch-none"
+      className="relative w-full h-full min-h-[280px] sm:min-h-[380px] lg:min-h-[480px] flex flex-col items-center justify-center bg-[#050b14] overflow-hidden select-none cursor-crosshair touch-none"
     >
       {/* Dedicated WebGL Mount */}
       <div ref={canvasMountRef} className="absolute inset-0 w-full h-full" />
 
       {/* Top HUD */}
-      <div className="absolute top-3 left-4 right-4 flex items-center justify-between pointer-events-none z-10">
-        <div className="flex items-center gap-3 bg-slate-950/90 border border-white/10 px-3.5 py-2 rounded-xl text-xs font-mono tabular-nums">
+      <div className="absolute top-2.5 inset-x-3 flex flex-wrap items-center justify-between gap-2 pointer-events-none z-10">
+        <div className="flex flex-wrap items-center gap-2 sm:gap-3 bg-slate-950/90 border border-white/10 px-3 py-1.5 sm:py-2 rounded-xl text-[11px] sm:text-xs font-mono tabular-nums">
           <span className="text-emerald-400 font-semibold flex items-center gap-1">
             <Flag className="w-3.5 h-3.5" />
             HOLE {holeNum} (PAR {par})
           </span>
           <span aria-hidden="true" className="text-slate-600">·</span>
-          <span className="text-slate-200">PUKULAN {strokes}</span>
+          <span className="text-slate-200">PUKUL {strokes}</span>
           <span aria-hidden="true" className="text-slate-600">·</span>
           <span className={timeLeft <= 10 ? 'text-red-400 font-bold' : 'text-amber-400'}>
             <Clock className="inline w-3.5 h-3.5 mr-1 -mt-0.5" />
@@ -825,15 +908,15 @@ export default function PixelGolfGame({ onGameOver, onScoreUpdate, highScore }: 
           </span>
         </div>
 
-        <div className="bg-slate-950/90 border border-white/10 px-4 py-2 rounded-xl text-xs font-mono tabular-nums">
-          <span className="text-slate-400 mr-2">SKOR</span>
-          <span className="text-white font-bold text-base">{score.toLocaleString()}</span>
+        <div className="bg-slate-950/90 border border-white/10 px-3 sm:px-4 py-1.5 sm:py-2 rounded-xl text-[11px] sm:text-xs font-mono tabular-nums">
+          <span className="text-slate-400 mr-1.5 sm:mr-2">SKOR</span>
+          <span className="text-white font-bold text-sm sm:text-base">{score.toLocaleString()}</span>
         </div>
       </div>
 
       {/* Shot Result Banner */}
       {bannerMsg && (
-        <div className="absolute top-16 left-1/2 -translate-x-1/2 z-20 pointer-events-none bg-slate-950/95 border border-emerald-500/40 px-4 py-1.5 rounded-lg text-xs font-mono font-bold text-emerald-300 tracking-wide shadow-lg">
+        <div className="absolute top-16 left-1/2 -translate-x-1/2 z-20 pointer-events-none bg-slate-950/95 border border-emerald-500/40 px-4 py-1.5 rounded-lg text-xs font-mono font-bold text-emerald-300 tracking-wide shadow-lg whitespace-nowrap">
           {bannerMsg}
         </div>
       )}
@@ -841,27 +924,30 @@ export default function PixelGolfGame({ onGameOver, onScoreUpdate, highScore }: 
       {/* Unified Collapsible Bottom Control Dock */}
       <div
         onPointerDown={(e) => e.stopPropagation()}
-        className="absolute bottom-3 left-1/2 -translate-x-1/2 z-10 w-[94%] max-w-[640px] transition-transform duration-200 pointer-events-auto"
+        className="absolute bottom-3 left-1/2 -translate-x-1/2 z-10 w-[94%] max-w-[640px] transition-transform duration-200 pointer-events-auto pb-[env(safe-area-inset-bottom)]"
         style={{ transform: `translate(-50%, ${dockCollapsed ? 'calc(100% - 28px)' : '0px'})` }}
       >
         <div className="flex justify-center mb-1">
           <button
             onClick={() => setDockCollapsed((prev) => !prev)}
-            className="px-3 py-1 rounded-t-lg bg-slate-950/90 border border-b-0 border-white/10 text-[11px] font-mono text-slate-300 hover:text-white flex items-center gap-1 whitespace-nowrap"
+            className="px-3 min-h-[36px] sm:min-h-0 py-1 rounded-t-lg bg-slate-950/90 border border-b-0 border-white/10 text-[11px] font-mono text-slate-300 hover:text-white flex items-center gap-1 whitespace-nowrap"
           >
             {dockCollapsed ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
             {dockCollapsed ? 'Tampilkan Kontrol' : 'Sembunyikan Kontrol'}
           </button>
         </div>
 
-        <div className="bg-slate-950/95 border border-white/10 rounded-xl px-4 py-2.5 flex flex-wrap items-center justify-between gap-3 text-xs">
-          <div className="flex items-center gap-2">
+        <div className="bg-slate-950/95 border border-white/10 rounded-xl px-3 sm:px-4 py-2 sm:py-2.5 flex flex-wrap items-center justify-between gap-2 text-xs">
+          <div className="flex items-center gap-1.5 sm:gap-2">
             <Eye className="w-4 h-4 text-emerald-400 shrink-0" />
             {(['follow', 'overhead', 'hole'] as GolfCamMode[]).map((m) => (
               <button
                 key={m}
-                onClick={() => setCamMode(m)}
-                className={`px-2.5 py-1 rounded-md font-medium capitalize transition-colors whitespace-nowrap ${
+                onClick={() => {
+                  audioController.playClick();
+                  setCamMode(m);
+                }}
+                className={`px-2.5 min-h-[44px] sm:min-h-0 py-1 rounded-md font-medium capitalize transition-colors whitespace-nowrap ${
                   camMode === m
                     ? 'bg-emerald-500 text-slate-950 font-semibold'
                     : 'bg-slate-900 text-slate-300 hover:text-white'
@@ -872,10 +958,10 @@ export default function PixelGolfGame({ onGameOver, onScoreUpdate, highScore }: 
             ))}
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 sm:gap-3">
             <div className="flex items-center gap-2 font-mono">
               <span className="text-slate-400">POWER</span>
-              <div className="w-20 h-2 bg-slate-800 rounded-full overflow-hidden">
+              <div className="w-16 sm:w-20 h-2 bg-slate-800 rounded-full overflow-hidden">
                 <div
                   className="h-full bg-gradient-to-r from-emerald-400 via-amber-400 to-red-500"
                   style={{ width: `${powerPct}%` }}
@@ -886,7 +972,7 @@ export default function PixelGolfGame({ onGameOver, onScoreUpdate, highScore }: 
 
             <button
               onClick={resetBallToTee}
-              className="px-2.5 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white flex items-center gap-1 whitespace-nowrap"
+              className="px-2.5 min-h-[44px] sm:min-h-0 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white flex items-center gap-1 whitespace-nowrap"
             >
               <RotateCcw className="w-3.5 h-3.5" />
               <span>Reset Tee</span>

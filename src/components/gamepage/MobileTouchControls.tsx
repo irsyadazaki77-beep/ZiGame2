@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Play, CircleDot, Disc3, Grid2X2 } from 'lucide-react';
-import { audio } from '../../utils/audio';
+import { audioController } from '../../sdk/audioController';
 import { inputManager } from '../../services/inputService';
 import { InputAction } from '../../types';
 import { haptics } from '../../utils/haptics';
@@ -24,9 +24,10 @@ export const MobileTouchControls: React.FC<MobileTouchControlsProps> = ({ visibl
 
   const showDPad = controlType === 'directional' || controlType === 'directional-action' || controlType === 'dpad' || controlType === 'dpad-action' || controlType === 'joystick' || controlType === 'joystick-action';
   const showHorizontalOnly = controlType === 'horizontal' || controlType === 'leftright';
-  const showAction = controlType === 'action' || controlType === 'directional-action' || controlType === 'dpad-action' || controlType === 'joystick-action';
+  const showVerticalOnly = controlType === 'vertical' || controlType === 'updown';
+  const showAction = controlType === 'action' || controlType === 'actiononly' || controlType === 'action-only' || controlType === 'directional-action' || controlType === 'dpad-action' || controlType === 'joystick-action';
 
-  if (!showDPad && !showHorizontalOnly && !showAction) return null;
+  if (!showDPad && !showHorizontalOnly && !showVerticalOnly && !showAction) return null;
 
   const toggleStickMode = () => {
     const next = stickMode === 'dpad' ? 'joystick' : 'dpad';
@@ -39,7 +40,7 @@ export const MobileTouchControls: React.FC<MobileTouchControlsProps> = ({ visibl
 
   const handleTouchStart = (action: InputAction, e: React.TouchEvent | React.MouseEvent) => {
     if (e.cancelable) e.preventDefault();
-    audio.playClick();
+    audioController.playClick();
     haptics.trigger('light');
     inputManager.dispatchAction(action, true, 'touch');
   };
@@ -121,11 +122,11 @@ export const MobileTouchControls: React.FC<MobileTouchControlsProps> = ({ visibl
             {/* Quick Switcher between D-Pad & Joystick */}
             <button
               onClick={toggleStickMode}
-              className="w-8 h-8 rounded-lg bg-zinc-900 border border-white/[0.08] text-zinc-400 hover:text-white flex items-center justify-center transition-colors active:scale-95"
+              className="w-11 h-11 rounded-xl bg-zinc-900 border border-white/[0.08] text-zinc-400 hover:text-white flex items-center justify-center transition-colors active:scale-95"
               title={stickMode === 'dpad' ? 'Ganti ke Analog Joystick' : 'Ganti ke D-Pad'}
               aria-label="Toggle D-Pad / Joystick"
             >
-              {stickMode === 'dpad' ? <Disc3 size={15} className="text-indigo-400" /> : <Grid2X2 size={15} className="text-emerald-400" />}
+              {stickMode === 'dpad' ? <Disc3 size={16} className="text-indigo-400" /> : <Grid2X2 size={16} className="text-emerald-400" />}
             </button>
           </div>
         ) : showHorizontalOnly ? (
@@ -149,6 +150,29 @@ export const MobileTouchControls: React.FC<MobileTouchControlsProps> = ({ visibl
               aria-label="Kanan"
             >
               <ArrowRight size={20} />
+            </button>
+          </div>
+        ) : showVerticalOnly ? (
+          <div className="flex items-center gap-3 touch-none select-none">
+            <button
+              onTouchStart={(e) => handleTouchStart('UP', e)}
+              onTouchEnd={(e) => handleTouchEnd('UP', e)}
+              onMouseDown={(e) => handleTouchStart('UP', e)}
+              onMouseUp={(e) => handleTouchEnd('UP', e)}
+              className="w-14 h-14 bg-zinc-900/90 active:bg-indigo-600 focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:outline-hidden rounded-xl flex items-center justify-center text-zinc-200 border border-white/[0.06] active:scale-95 transition-all duration-150 ease-out touch-none select-none shadow-md backdrop-blur-md"
+              aria-label="Atas"
+            >
+              <ArrowUp size={20} />
+            </button>
+            <button
+              onTouchStart={(e) => handleTouchStart('DOWN', e)}
+              onTouchEnd={(e) => handleTouchEnd('DOWN', e)}
+              onMouseDown={(e) => handleTouchStart('DOWN', e)}
+              onMouseUp={(e) => handleTouchEnd('DOWN', e)}
+              className="w-14 h-14 bg-zinc-900/90 active:bg-indigo-600 focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:outline-hidden rounded-xl flex items-center justify-center text-zinc-200 border border-white/[0.06] active:scale-95 transition-all duration-150 ease-out touch-none select-none shadow-md backdrop-blur-md"
+              aria-label="Bawah"
+            >
+              <ArrowDown size={20} />
             </button>
           </div>
         ) : <div />}
@@ -220,10 +244,11 @@ export const MobileTouchControls: React.FC<MobileTouchControlsProps> = ({ visibl
             )}
             <button
               onClick={toggleStickMode}
-              className="w-7 h-7 rounded-md bg-zinc-900/90 border border-white/[0.08] text-zinc-400 hover:text-white flex items-center justify-center transition-colors active:scale-95"
+              className="w-11 h-11 rounded-xl bg-zinc-900/90 border border-white/[0.08] text-zinc-400 hover:text-white flex items-center justify-center transition-colors active:scale-95"
               title="Toggle Joystick"
+              aria-label="Toggle D-Pad / Joystick"
             >
-              {stickMode === 'dpad' ? <Disc3 size={14} className="text-indigo-400" /> : <Grid2X2 size={14} className="text-emerald-400" />}
+              {stickMode === 'dpad' ? <Disc3 size={16} className="text-indigo-400" /> : <Grid2X2 size={16} className="text-emerald-400" />}
             </button>
           </div>
         )}
@@ -246,6 +271,28 @@ export const MobileTouchControls: React.FC<MobileTouchControlsProps> = ({ visibl
               aria-label="Kanan"
             >
               <ArrowRight size={18} />
+            </button>
+          </div>
+        )}
+
+        {/* Floating Left Overlay: Vertical-Only */}
+        {showVerticalOnly && (
+          <div className="pointer-events-auto absolute bottom-4 left-4 flex items-center gap-3 select-none touch-none">
+            <button
+              onTouchStart={(e) => handleTouchStart('UP', e)}
+              onTouchEnd={(e) => handleTouchEnd('UP', e)}
+              className="w-12 h-12 bg-zinc-900/90 backdrop-blur-md active:bg-indigo-600 rounded-xl flex items-center justify-center text-white border border-white/[0.06] active:scale-95 transition-all duration-150 ease-out touch-none select-none shadow-md opacity-80 hover:opacity-100"
+              aria-label="Atas"
+            >
+              <ArrowUp size={18} />
+            </button>
+            <button
+              onTouchStart={(e) => handleTouchStart('DOWN', e)}
+              onTouchEnd={(e) => handleTouchEnd('DOWN', e)}
+              className="w-12 h-12 bg-zinc-900/90 backdrop-blur-md active:bg-indigo-600 rounded-xl flex items-center justify-center text-white border border-white/[0.06] active:scale-95 transition-all duration-150 ease-out touch-none select-none shadow-md opacity-80 hover:opacity-100"
+              aria-label="Bawah"
+            >
+              <ArrowDown size={18} />
             </button>
           </div>
         )}

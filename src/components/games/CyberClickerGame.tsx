@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
 import { GameComponentProps } from '../../types';
-import { audio } from '../../utils/audio';
+import { audioController } from '../../sdk';
 import { useGameEngine } from '../../hooks/useGameEngine';
 import { GameOverlay } from '../gameplay/GameOverlay';
 import { ThreeDockOverlay } from '../gameplay/ThreeDockOverlay';
@@ -62,7 +62,7 @@ export default function CyberClickerGame({
     r.spinBoost = 6.0;
     setEnergyCredits(r.credits);
     addScore(r.clickPower);
-    audio.playCoin?.();
+    audioController.playCoin();
     const stage = stageRef.current;
     if (stage) {
       stage.particles.burst(0, 1.5, 0, 16, 0x6366f1, 7.5);
@@ -83,7 +83,8 @@ export default function CyberClickerGame({
       setEnergyCredits(r.credits);
       setAutoSatellites(r.satellites);
       setClickPower(r.clickPower);
-      audio.playPowerUp?.();
+      audioController.playPowerup();
+      audioController.playLevelUp();
       stageRef.current?.particles.burst(0, 1.5, 0, 32, 0x22d3ee, 9);
       stageRef.current?.kickFov(4);
     },
@@ -146,7 +147,6 @@ export default function CyberClickerGame({
     stageRef.current = stage;
     setQuality(stage.getQualityLevel());
 
-    // Build 9-Part Quantum Gyroscope Reactor Core
     const reactorGroup = new THREE.Group();
     reactorGroup.position.y = 1.65;
 
@@ -184,7 +184,6 @@ export default function CyberClickerGame({
     reactorGroup.add(coreCrystal, ring1, ring2);
     stage.scene.add(reactorGroup);
 
-    // Orbiting Auto-Miner Satellites InstancedMesh
     const maxSats = 16;
     const satGeo = new THREE.OctahedronGeometry(0.28, 0);
     const satMat = new THREE.MeshStandardMaterial({
@@ -208,7 +207,6 @@ export default function CyberClickerGame({
       ring1.rotation.x += 1.1 * dt;
       ring2.rotation.y -= (1.8 + r.spinBoost * 0.5) * dt;
 
-      // Update orbiting satellites
       const satCount = Math.min(maxSats, r.satellites);
       for (let i = 0; i < maxSats; i++) {
         if (i < satCount) {
@@ -246,14 +244,15 @@ export default function CyberClickerGame({
   }, [addScore]);
 
   return (
-    <div
-      className="relative w-full h-full min-h-[460px] bg-slate-950 overflow-hidden rounded-2xl border border-indigo-500/20"
-      onClick={pulseCore}
-    >
-      <div ref={mountRef} className="absolute inset-0 w-full h-full cursor-pointer" />
+    <div className="relative w-full h-full min-h-[280px] sm:min-h-[380px] lg:min-h-[460px] bg-slate-950 overflow-hidden rounded-2xl border border-indigo-500/20 touch-none select-none">
+      <div
+        ref={mountRef}
+        className="absolute inset-0 w-full h-full cursor-pointer touch-none"
+        onPointerDown={pulseCore}
+      />
 
-      <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex flex-wrap items-center justify-between gap-2 p-3.5">
-        <div className="flex items-center gap-3 rounded-xl border border-white/10 bg-slate-950/85 px-3.5 py-2 text-xs text-slate-200 tabular-nums">
+      <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex flex-wrap items-center justify-between gap-2 p-3 sm:p-3.5">
+        <div className="flex flex-wrap items-center gap-2 sm:gap-3 rounded-xl border border-white/10 bg-slate-950/85 px-3 py-1.5 sm:px-3.5 sm:py-2 text-xs text-slate-200 tabular-nums">
           <span className="flex items-center gap-1 font-semibold text-indigo-400">
             <Cpu className="w-3.5 h-3.5" /> ENERGI: {energyCredits}
           </span>
@@ -265,12 +264,12 @@ export default function CyberClickerGame({
           </span>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
             onClick={buySatellite}
             disabled={energyCredits < 35 * autoSatellites}
-            className="pointer-events-auto flex items-center gap-1.5 rounded-xl bg-indigo-500 px-3 py-2 text-xs font-semibold text-white transition-colors hover:bg-indigo-400 disabled:opacity-40 whitespace-nowrap shrink-0"
+            className="pointer-events-auto min-h-[44px] flex items-center gap-1.5 rounded-xl bg-indigo-500 px-3 py-2 text-xs font-semibold text-white transition-colors hover:bg-indigo-400 disabled:opacity-40 whitespace-nowrap shrink-0 tabular-nums"
           >
             <PlusCircle className="w-3.5 h-3.5" /> Satelit Orbit ({35 * autoSatellites} Energi)
           </button>
@@ -278,9 +277,10 @@ export default function CyberClickerGame({
             type="button"
             onClick={(e) => {
               e.stopPropagation();
+              audioController.playWin();
               triggerGameOver(scoreRef.current);
             }}
-            className="pointer-events-auto rounded-xl border border-white/15 bg-slate-900/90 px-3 py-2 text-xs font-semibold text-slate-200 hover:bg-slate-800 whitespace-nowrap shrink-0"
+            className="pointer-events-auto min-h-[44px] rounded-xl border border-white/15 bg-slate-900/90 px-3 py-2 text-xs font-semibold text-slate-200 hover:bg-slate-800 whitespace-nowrap shrink-0"
           >
             Simpan & Selesai
           </button>
@@ -294,7 +294,7 @@ export default function CyberClickerGame({
         onCycleQuality={handleCycleQuality}
         extraControls={
           <span className="hidden sm:inline-flex items-center gap-1 text-[11px] text-slate-400 px-2 whitespace-nowrap shrink-0">
-            <Zap className="w-3 h-3 text-indigo-400" /> Klik Reaktor Kuantum 3D (+{clickPower} Energi/Klik)
+            <Zap className="w-3 h-3 text-indigo-400" /> Ketuk Reaktor Kuantum 3D (+{clickPower} Energi/Ketuk)
           </span>
         }
       />

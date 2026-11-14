@@ -7,7 +7,12 @@ import { apiRouter } from "./src/server/apiRouter";
 import { serverLogger } from "./src/server/logger";
 import { requestCorrelationMiddleware, handleServerException } from "./src/server/requestContext";
 import { securityHeadersMiddleware, sanitizePayloadMiddleware } from "./src/server/securityMiddleware";
-import { probeFirestoreAvailability, isFirestoreAvailable } from "./src/server/persistence/db";
+import {
+  probeFirestoreAvailability,
+  isFirestoreAvailable,
+  hasValidAdcFile,
+  sanitizeInvalidAdcEnv
+} from "./src/server/persistence/db";
 import { APP_VERSION } from "./src/config/version";
 import { FatalError } from "./src/server/errors";
 
@@ -77,15 +82,23 @@ export function validateEnvironment(
   if (env.NODE_ENV === 'production') {
     const rawServiceAccount = env.FIREBASE_SERVICE_ACCOUNT?.trim();
     const parsedServiceAccount = parseServiceAccountCredentials(rawServiceAccount);
-    const hasAdcPath = Boolean(env.GOOGLE_APPLICATION_CREDENTIALS && env.GOOGLE_APPLICATION_CREDENTIALS.trim().length > 0);
+    const rawAdcPath = env.GOOGLE_APPLICATION_CREDENTIALS?.trim();
+    const hasAdcPath = hasValidAdcFile(rawAdcPath);
     const hasCloudRunIdentity = Boolean(
       (env.K_SERVICE || env.CLOUD_RUN_JOB || env.PORT) &&
       (env.FIREBASE_PROJECT_ID || activeProjectId)
     );
 
     if (!parsedServiceAccount && !hasAdcPath && !hasCloudRunIdentity) {
-      const detail = rawServiceAccount
-        ? `Malformed FIREBASE_SERVICE_ACCOUNT: "${rawServiceAccount.slice(0, 30)}" is not valid service account JSON.`
+      const detailParts: string[] = [];
+      if (rawServiceAccount) {
+        detailParts.push(`Malformed FIREBASE_SERVICE_ACCOUNT: "${rawServiceAccount.slice(0, 30)}" is not valid service account JSON.`);
+      }
+      if (rawAdcPath) {
+        detailParts.push(`Invalid GOOGLE_APPLICATION_CREDENTIALS: "${rawAdcPath.slice(0, 30)}" does not point to a valid JSON credential file.`);
+      }
+      const detail = detailParts.length > 0
+        ? detailParts.join(' ')
         : 'Missing FIREBASE_SERVICE_ACCOUNT or GOOGLE_APPLICATION_CREDENTIALS.';
       const fatalMsg =
         `FATAL_CONFIG_ERROR: Running in NODE_ENV=production without Firebase Admin credentials (${detail}). Silent fallback to in-memory persistence is strictly forbidden in production.`;
@@ -100,6 +113,13 @@ export function validateEnvironment(
       serverLogger.warn(
         'FIREBASE_CONFIG_WARN',
         `FIREBASE_SERVICE_ACCOUNT does not contain valid service account JSON (received: "${rawServiceAccount.slice(0, 30)}..."). Safely falling back to Cloud Run Application Default Credentials (project: ${activeProjectId}).`
+      );
+    }
+
+    if (rawAdcPath && !hasAdcPath && (hasCloudRunIdentity || parsedServiceAccount)) {
+      serverLogger.warn(
+        'FIREBASE_CONFIG_WARN',
+        `GOOGLE_APPLICATION_CREDENTIALS does not point to a valid credential JSON file (received: "${rawAdcPath.slice(0, 30)}"). Ignoring invalid path so Cloud Run Application Default Credentials or service account can be used cleanly.`
       );
     }
   }
@@ -123,13 +143,18 @@ try {
 try {
   if (getApps().length === 0) {
     const serviceAccount = parseServiceAccountCredentials(process.env.FIREBASE_SERVICE_ACCOUNT);
-    const gacPath = process.env.GOOGLE_APPLICATION_CREDENTIALS?.trim();
-    const hasValidGacFile = Boolean(gacPath && fs.existsSync(gacPath));
+    const isTestRuntime = Boolean(process.env.VITEST || process.env.NODE_ENV === 'test');
+    const removedInvalidGac = !isTestRuntime ? sanitizeInvalidAdcEnv(process.env) : null;
 
-    if (gacPath && !hasValidGacFile && process.env.NODE_ENV !== 'production') {
-      serverLogger.warn('FIREBASE_CONFIG_WARN', 'GOOGLE_APPLICATION_CREDENTIALS path does not exist on disk; ignoring invalid path in development.');
-      delete process.env.GOOGLE_APPLICATION_CREDENTIALS;
+    if (removedInvalidGac !== null) {
+      serverLogger.warn(
+        'FIREBASE_CONFIG_WARN',
+        `GOOGLE_APPLICATION_CREDENTIALS ("${removedInvalidGac.slice(0, 30)}") does not exist or is not valid JSON; ignoring invalid path so Application Default Credentials can fall back safely.`
+      );
     }
+
+    const gacPath = process.env.GOOGLE_APPLICATION_CREDENTIALS?.trim();
+    const hasValidGacFile = hasValidAdcFile(gacPath);
 
     if (serviceAccount) {
       initializeApp({
@@ -200,6 +225,12 @@ export async function createExpressApp() {
 }
 
 async function startServer() {
+  // Prevent third-party gRPC/Firestore SDK background promise rejections from crashing the
+  // production HTTP server process when operating in degraded or transient network conditions.
+  process.on('unhandledRejection', (reason: unknown) => {
+    serverLogger.error('UNHANDLED_PROMISE_REJECTION', 'Unhandled promise rejection captured in server runtime', reason);
+  });
+
   // Verify Firestore connectivity at startup:
   // - In production: never fall back to memoryStore; if Firestore is unconfigured or unreachable,
   //   keep HTTP server alive so Cloud Run health/SPA/Offline Guest Mode serve cleanly while all
@@ -239,5 +270,8 @@ async function startServer() {
 
 // Only start dev/prod server when run directly as main entry (not in vitest runner)
 if (!process.env.VITEST && process.env.NODE_ENV !== 'test') {
-  startServer();
+  startServer().catch((err) => {
+    serverLogger.fatal('SERVER_BOOT_FAILURE', 'Fatal error while starting Express server', err);
+    process.exit(1);
+  });
 }

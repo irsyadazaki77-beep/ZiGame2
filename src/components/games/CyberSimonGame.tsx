@@ -1,8 +1,9 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
 import { GameComponentProps } from '../../types';
-import { audio } from '../../utils/audio';
+import { audioController } from '../../sdk';
 import { useGameEngine } from '../../hooks/useGameEngine';
+import { inputManager } from '../../services/inputService';
 import { GameOverlay } from '../gameplay/GameOverlay';
 import { ThreeDockOverlay } from '../gameplay/ThreeDockOverlay';
 import {
@@ -70,7 +71,7 @@ export default function CyberSimonGame({
 
       st.litPad = padIdx;
       st.litTimer = 0.28;
-      audio.playClick?.();
+      audioController.playCombo(padIdx + 1);
 
       const stage = stageRef.current;
       const [px, pz] = PAD_POSITIONS[padIdx];
@@ -81,7 +82,7 @@ export default function CyberSimonGame({
         addScore(20);
         if (st.playerStep >= st.sequence.length) {
           addScore(50);
-          audio.playCoin?.();
+          audioController.playScore();
           stage?.kickFov(3.5);
           st.sequence.push(Math.floor(Math.random() * 4));
           setSeqLength(st.sequence.length);
@@ -94,7 +95,8 @@ export default function CyberSimonGame({
       } else {
         stage?.particles.burst(0, 0.8, 0, 36, 0xef4444, 9.5);
         stage?.triggerTrauma(0.75);
-        audio.playExplosion?.();
+        audioController.playExplosion();
+        audioController.playGameOver();
         triggerGameOver(scoreRef.current);
       }
     },
@@ -118,13 +120,26 @@ export default function CyberSimonGame({
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === '1' || e.key === 'q' || e.key === 'ArrowUp') handlePadInput(0);
-      else if (e.key === '2' || e.key === 'w' || e.key === 'ArrowRight') handlePadInput(1);
-      else if (e.key === '3' || e.key === 'a' || e.key === 'ArrowLeft') handlePadInput(2);
-      else if (e.key === '4' || e.key === 's' || e.key === 'ArrowDown') handlePadInput(3);
+      if (e.key === '1' || e.key.toLowerCase() === 'q') handlePadInput(0);
+      else if (e.key === '2') handlePadInput(1);
+      else if (e.key === '3') handlePadInput(2);
+      else if (e.key === '4') handlePadInput(3);
     };
     window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
+
+    const unsub = inputManager.subscribe({
+      onActionDown: (action) => {
+        if (action === 'UP') handlePadInput(0);
+        else if (action === 'RIGHT') handlePadInput(1);
+        else if (action === 'LEFT') handlePadInput(2);
+        else if (action === 'DOWN') handlePadInput(3);
+      }
+    });
+
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      unsub();
+    };
   }, [handlePadInput]);
 
   const handleSelectPreset = useCallback((preset: CameraPreset3D) => {
@@ -238,7 +253,7 @@ export default function CyberSimonGame({
               st.litTimer = 0.38;
               st.showIdx += 1;
               st.showTimer = 0.58;
-              audio.playClick?.();
+              audioController.playCombo(pIdx + 1);
             } else {
               st.showingSeq = false;
               setStatusText('GILIRAN ANDA!');
@@ -269,11 +284,11 @@ export default function CyberSimonGame({
   }, [handlePadInput]);
 
   return (
-    <div className="relative w-full h-full min-h-[460px] bg-slate-950 overflow-hidden rounded-2xl border border-purple-500/20">
-      <div ref={mountRef} className="absolute inset-0 w-full h-full cursor-pointer" />
+    <div className="relative w-full h-full min-h-[280px] sm:min-h-[380px] lg:min-h-[460px] bg-slate-950 overflow-hidden rounded-2xl border border-purple-500/20 touch-none select-none">
+      <div ref={mountRef} className="absolute inset-0 w-full h-full cursor-pointer touch-none" />
 
-      <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex flex-wrap items-center justify-between gap-2 p-3.5">
-        <div className="flex items-center gap-3 rounded-xl border border-white/10 bg-slate-950/85 px-3.5 py-2 text-xs text-slate-200 tabular-nums">
+      <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex flex-wrap items-center justify-between gap-2 p-3 sm:p-3.5">
+        <div className="flex items-center gap-2 sm:gap-3 rounded-xl border border-white/10 bg-slate-950/85 px-3 py-1.5 sm:px-3.5 sm:py-2 text-xs text-slate-200 tabular-nums">
           <span className="flex items-center gap-1 font-semibold text-purple-400">
             <Brain className="w-3.5 h-3.5" /> PANJANG NADA: {seqLength}
           </span>
@@ -281,7 +296,7 @@ export default function CyberSimonGame({
           <span>SKOR: <strong className="text-white">{score}</strong></span>
         </div>
 
-        <div className="flex items-center gap-1.5 rounded-xl border border-white/10 bg-slate-950/85 px-3.5 py-2 text-xs font-semibold text-amber-400">
+        <div className="flex items-center gap-1.5 rounded-xl border border-white/10 bg-slate-950/85 px-3 py-1.5 sm:px-3.5 sm:py-2 text-xs font-semibold text-amber-400">
           <Sparkles className="w-3.5 h-3.5" /> {statusText}
         </div>
       </div>

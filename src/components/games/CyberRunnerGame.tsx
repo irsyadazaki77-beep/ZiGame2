@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
 import { GameComponentProps } from '../../types';
-import { audio } from '../../utils/audio';
+import { audioController } from '../../sdk/audioController';
+import { ObjectPool } from '../../sdk/objectPool';
 import { useGameEngine } from '../../hooks/useGameEngine';
 import { inputManager } from '../../services/inputService';
 import { GameOverlay } from '../gameplay/GameOverlay';
@@ -132,14 +133,17 @@ export default function CyberRunnerGame({
     distanceAcc: 0
   });
 
-  const obstaclesRef = useRef<RunnerObstacle3D[]>([]);
+  const obstaclePoolsRef = useRef<Record<RunnerObstacle3D['type'], ObjectPool<RunnerObstacle3D>> | null>(null);
+  const lastSpeedKmhRef = useRef(120);
+  const swipeStartRef = useRef<{ x: number; y: number } | null>(null);
 
   const handleStart = useCallback(() => {
-    const stage = stageRef.current;
-    if (stage) {
-      obstaclesRef.current.forEach((o) => stage.scene.remove(o.mesh));
+    if (obstaclePoolsRef.current) {
+      obstaclePoolsRef.current.hurdle.releaseAll();
+      obstaclePoolsRef.current.drone.releaseAll();
+      obstaclePoolsRef.current.coin.releaseAll();
+      obstaclePoolsRef.current.boost.releaseAll();
     }
-    obstaclesRef.current = [];
     runnerRef.current = {
       lane: 0,
       x: 0,
@@ -153,6 +157,7 @@ export default function CyberRunnerGame({
       spawnTimer: 0.4,
       distanceAcc: 0
     };
+    lastSpeedKmhRef.current = 120;
     setSpeedKmh(120);
     setHasShield(false);
     startWithCountdown();
@@ -171,7 +176,7 @@ export default function CyberRunnerGame({
       r.isJumping = true;
       r.isSliding = false;
       r.vy = 11.5;
-      audio.playJump?.();
+      audioController.playJump();
     }
   }, []);
 
@@ -183,6 +188,7 @@ export default function CyberRunnerGame({
     if (r.isJumping) {
       r.vy = -14;
     }
+    audioController.playClick();
   }, []);
 
   useEffect(() => {
@@ -199,7 +205,7 @@ export default function CyberRunnerGame({
       onActionDown: (action) => {
         if (action === 'LEFT') shiftLane(-1);
         if (action === 'RIGHT') shiftLane(1);
-        if (action === 'UP' || action === 'ACTION_PRIMARY') triggerJump();
+        if (action === 'UP' || action === 'PRIMARY' || action === 'ACTION_PRIMARY') triggerJump();
         if (action === 'DOWN') triggerSlide();
       }
     });
@@ -269,6 +275,29 @@ export default function CyberRunnerGame({
     hero.group.position.set(0, 0, 2.5);
     stage.scene.add(hero.group);
 
+    const createObstaclePool = (type: RunnerObstacle3D['type'], prewarm: number) =>
+      new ObjectPool<RunnerObstacle3D>(
+        () => {
+          const mesh = buildObstacleMesh3D(type);
+          mesh.visible = false;
+          stage.scene.add(mesh);
+          return { mesh, lane: 0, z: -34, type, passed: false };
+        },
+        (o) => {
+          o.mesh.visible = false;
+        },
+        prewarm
+      );
+
+    const obstaclePools: Record<RunnerObstacle3D['type'], ObjectPool<RunnerObstacle3D>> = {
+      hurdle: createObstaclePool('hurdle', 10),
+      drone: createObstaclePool('drone', 8),
+      coin: createObstaclePool('coin', 8),
+      boost: createObstaclePool('boost', 4)
+    };
+    obstaclePoolsRef.current = obstaclePools;
+    const obstacleTypes: RunnerObstacle3D['type'][] = ['hurdle', 'drone', 'coin', 'boost'];
+
     stage.startLoop((dt, elapsed) => {
       if (gameStateRef.current !== 'playing') return;
 
@@ -279,7 +308,11 @@ export default function CyberRunnerGame({
         const pts = Math.floor(r.distanceAcc / 3);
         r.distanceAcc -= pts * 3;
         addScore(pts);
-        setSpeedKmh(Math.round(r.speed * 8.5));
+        const kmh = Math.round(r.speed * 8.5);
+        if (kmh !== lastSpeedKmhRef.current) {
+          lastSpeedKmhRef.current = kmh;
+          setSpeedKmh(kmh);
+        }
       }
 
       // Smooth lateral lane transition
@@ -327,81 +360,114 @@ export default function CyberRunnerGame({
         const type: RunnerObstacle3D['type'] =
           roll < 0.42 ? 'hurdle' : roll < 0.72 ? 'drone' : roll < 0.92 ? 'coin' : 'boost';
 
-        const mesh = buildObstacleMesh3D(type);
-        mesh.position.set(lane * LANE_WIDTH, 0, -34);
-        stage.scene.add(mesh);
-        obstaclesRef.current.push({ mesh, lane, z: -34, type, passed: false });
+        const obs = obstaclePools[type].acquire();
+        obs.lane = lane;
+        obs.z = -34;
+        obs.passed = false;
+        obs.mesh.position.set(lane * LANE_WIDTH, 0, -34);
+        obs.mesh.visible = true;
       }
 
       // Update obstacles
-      for (let i = obstaclesRef.current.length - 1; i >= 0; i--) {
-        const o = obstaclesRef.current[i];
-        o.z += r.speed * dt;
-        o.mesh.position.z = o.z;
-        if (o.type === 'coin' || o.type === 'boost') {
-          o.mesh.rotation.y += dt * 4;
-        }
-
-        // Collision check around z = 2.5
-        if (Math.abs(o.z - 2.5) < 0.72 && Math.abs(o.lane * LANE_WIDTH - r.x) < 0.85) {
-          if (o.type === 'coin') {
-            stage.scene.remove(o.mesh);
-            obstaclesRef.current.splice(i, 1);
-            addScore(25);
-            audio.playCoin?.();
-            stage.particles.burst(r.x, r.y + 0.9, 2.5, 16, 0xfacc15, 6);
-            continue;
-          }
-          if (o.type === 'boost') {
-            stage.scene.remove(o.mesh);
-            obstaclesRef.current.splice(i, 1);
-            r.shield = true;
-            setHasShield(true);
-            addScore(40);
-            audio.playPowerUp?.();
-            stage.particles.burst(r.x, r.y + 0.9, 2.5, 22, 0x22d3ee, 8);
-            stage.kickFov(6);
-            continue;
+      for (const oType of obstacleTypes) {
+        const pool = obstaclePools[oType];
+        const activeList = pool.getActiveItems();
+        for (let i = activeList.length - 1; i >= 0; i--) {
+          const o = activeList[i];
+          o.z += r.speed * dt;
+          o.mesh.position.z = o.z;
+          if (o.type === 'coin' || o.type === 'boost') {
+            o.mesh.rotation.y += dt * 4;
           }
 
-          // Hurdle requires jumping (y > 0.75); Drone requires sliding (isSliding)
-          const hitHurdle = o.type === 'hurdle' && r.y < 0.72;
-          const hitDrone = o.type === 'drone' && !r.isSliding;
-
-          if (hitHurdle || hitDrone) {
-            stage.scene.remove(o.mesh);
-            obstaclesRef.current.splice(i, 1);
-            if (r.shield) {
-              r.shield = false;
-              setHasShield(false);
-              stage.particles.burst(r.x, r.y + 0.8, 2.5, 28, 0x22d3ee, 9);
-              stage.triggerTrauma(0.45);
-            } else {
-              stage.particles.burst(r.x, r.y + 0.8, 2.5, 38, 0xef4444, 11);
-              stage.triggerTrauma(0.75);
-              audio.playExplosion?.();
-              triggerGameOver(scoreRef.current);
-              return;
+          // Collision check around z = 2.5
+          if (Math.abs(o.z - 2.5) < 0.72 && Math.abs(o.lane * LANE_WIDTH - r.x) < 0.85) {
+            if (o.type === 'coin') {
+              pool.release(i);
+              addScore(25);
+              audioController.playScore();
+              stage.particles.burst(r.x, r.y + 0.9, 2.5, 16, 0xfacc15, 6);
+              continue;
             }
-            continue;
-          }
-        }
+            if (o.type === 'boost') {
+              pool.release(i);
+              r.shield = true;
+              setHasShield(true);
+              addScore(40);
+              audioController.playPowerup();
+              stage.particles.burst(r.x, r.y + 0.9, 2.5, 22, 0x22d3ee, 8);
+              stage.kickFov(6);
+              continue;
+            }
 
-        if (o.z > 8) {
-          stage.scene.remove(o.mesh);
-          obstaclesRef.current.splice(i, 1);
+            // Hurdle requires jumping (y > 0.72); Drone requires sliding (isSliding)
+            const hitHurdle = o.type === 'hurdle' && r.y < 0.72;
+            const hitDrone = o.type === 'drone' && !r.isSliding;
+
+            if (hitHurdle || hitDrone) {
+              pool.release(i);
+              if (r.shield) {
+                r.shield = false;
+                setHasShield(false);
+                stage.particles.burst(r.x, r.y + 0.8, 2.5, 28, 0x22d3ee, 9);
+                stage.triggerTrauma(0.45);
+                audioController.playShield();
+              } else {
+                stage.particles.burst(r.x, r.y + 0.8, 2.5, 38, 0xef4444, 11);
+                stage.triggerTrauma(0.75);
+                audioController.playGameOver();
+                triggerGameOver(scoreRef.current);
+                return;
+              }
+              continue;
+            }
+          }
+
+          if (o.z > 8) {
+            pool.release(i);
+          }
         }
       }
     });
 
     return () => {
+      obstaclePools.hurdle.releaseAll();
+      obstaclePools.drone.releaseAll();
+      obstaclePools.coin.releaseAll();
+      obstaclePools.boost.releaseAll();
+      obstaclePoolsRef.current = null;
       stage.dispose();
       stageRef.current = null;
     };
   }, [addScore, scoreRef, triggerGameOver]);
 
   return (
-    <div className="relative w-full h-full min-h-[460px] bg-slate-950 overflow-hidden rounded-2xl border border-orange-500/20">
+    <div
+      className="relative w-full h-full min-h-[260px] sm:min-h-[380px] lg:min-h-[460px] bg-slate-950 overflow-hidden rounded-2xl border border-orange-500/20 touch-none"
+      onPointerDown={(e) => {
+        swipeStartRef.current = { x: e.clientX, y: e.clientY };
+      }}
+      onPointerUp={(e) => {
+        if (!swipeStartRef.current || gameStateRef.current !== 'playing') {
+          swipeStartRef.current = null;
+          return;
+        }
+        const dx = e.clientX - swipeStartRef.current.x;
+        const dy = e.clientY - swipeStartRef.current.y;
+        swipeStartRef.current = null;
+        if (Math.hypot(dx, dy) < 18) {
+          triggerJump();
+          return;
+        }
+        if (Math.abs(dx) > Math.abs(dy)) {
+          shiftLane(dx > 0 ? 1 : -1);
+        } else if (dy < 0) {
+          triggerJump();
+        } else {
+          triggerSlide();
+        }
+      }}
+    >
       <div ref={mountRef} className="absolute inset-0 w-full h-full" />
 
       <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex flex-wrap items-center justify-between gap-2 p-3.5">

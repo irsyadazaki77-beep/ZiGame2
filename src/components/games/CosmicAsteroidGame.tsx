@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
 import { GameComponentProps } from '../../types';
-import { audio } from '../../utils/audio';
+import { audioController } from '../../sdk/audioController';
+import { ObjectPool } from '../../sdk/objectPool';
 import { useGameEngine } from '../../hooks/useGameEngine';
 import { inputManager } from '../../services/inputService';
 import { GameOverlay } from '../gameplay/GameOverlay';
@@ -46,9 +47,12 @@ function buildAsteroidGroup3D(sizeTier: 3 | 2 | 1): THREE.Group {
     metalness: 0.22,
     flatShading: true
   });
-  const veinMat = new THREE.MeshBasicMaterial({
-    color: 0x06b6d4,
-    wireframe: true
+  const veinMat = new THREE.MeshStandardMaterial({
+    color: 0x22d3ee,
+    emissive: 0x06b6d4,
+    emissiveIntensity: 1.75,
+    wireframe: true,
+    roughness: 0.2
   });
 
   // 1. Primary Cratered Core
@@ -113,18 +117,17 @@ export default function CosmicAsteroidGame({
   });
 
   const keysRef = useRef<Record<string, boolean>>({});
-  const asteroidsRef = useRef<Asteroid3D[]>([]);
-  const shotsRef = useRef<PlasmaShot3D[]>([]);
+  const asteroidPoolsRef = useRef<Record<1 | 2 | 3, ObjectPool<Asteroid3D>> | null>(null);
+  const shotPoolRef = useRef<ObjectPool<PlasmaShot3D> | null>(null);
   const spawnSectorRef = useRef<(sec: number) => void>(() => {});
 
   const handleStart = useCallback(() => {
-    const stage = stageRef.current;
-    if (stage) {
-      asteroidsRef.current.forEach((a) => stage.scene.remove(a.mesh));
-      shotsRef.current.forEach((s) => stage.scene.remove(s.mesh));
+    if (asteroidPoolsRef.current) {
+      asteroidPoolsRef.current[1].releaseAll();
+      asteroidPoolsRef.current[2].releaseAll();
+      asteroidPoolsRef.current[3].releaseAll();
     }
-    asteroidsRef.current = [];
-    shotsRef.current = [];
+    shotPoolRef.current?.releaseAll();
     shipStateRef.current = {
       x: 0,
       z: 0,
@@ -173,13 +176,13 @@ export default function CosmicAsteroidGame({
         if (action === 'LEFT') keysRef.current['arrowleft'] = true;
         if (action === 'RIGHT') keysRef.current['arrowright'] = true;
         if (action === 'UP') keysRef.current['arrowup'] = true;
-        if (action === 'ACTION_PRIMARY') keysRef.current['Space'] = true;
+        if (action === 'PRIMARY' || action === 'ACTION_PRIMARY') keysRef.current['Space'] = true;
       },
       onActionUp: (action) => {
         if (action === 'LEFT') keysRef.current['arrowleft'] = false;
         if (action === 'RIGHT') keysRef.current['arrowright'] = false;
         if (action === 'UP') keysRef.current['arrowup'] = false;
-        if (action === 'ACTION_PRIMARY') keysRef.current['Space'] = false;
+        if (action === 'PRIMARY' || action === 'ACTION_PRIMARY') keysRef.current['Space'] = false;
       }
     });
 
@@ -204,6 +207,12 @@ export default function CosmicAsteroidGame({
         initialPreset: 'diorama',
         gridPrimaryColor: '#06b6d4',
         gridSecondaryColor: '#070c18',
+        bloom: {
+          enabled: true,
+          strength: 0.56,
+          radius: 0.42,
+          threshold: 0.78
+        },
         cameraPresets: {
           diorama: { position: [0, 19.5, 2.2], lookAt: [0, 0, 0], fov: 48 },
           isometric: { position: [10.5, 14.5, 10.5], lookAt: [0, 0, 0], fov: 46 },
@@ -217,30 +226,113 @@ export default function CosmicAsteroidGame({
     stageRef.current = stage;
     setQuality(stage.getQualityLevel());
 
+    // Deep-space InstancedMesh starfield beneath cyber plane
+    const starCount = 150;
+    const starInst = new THREE.InstancedMesh(
+      new THREE.OctahedronGeometry(0.09, 0),
+      new THREE.MeshStandardMaterial({
+        color: 0xbae6fd,
+        emissive: 0x38bdf8,
+        emissiveIntensity: 1.7,
+        roughness: 0.2
+      }),
+      starCount
+    );
+    const starDummy = new THREE.Object3D();
+    for (let i = 0; i < starCount; i++) {
+      starDummy.position.set(
+        (Math.random() - 0.5) * 44,
+        -1.5 - Math.random() * 8,
+        (Math.random() - 0.5) * 34
+      );
+      starDummy.scale.setScalar(0.6 + Math.random() * 1.1);
+      starDummy.updateMatrix();
+      starInst.setMatrixAt(i, starDummy.matrix);
+    }
+    starInst.instanceMatrix.needsUpdate = true;
+    stage.scene.add(starInst);
+
     const ship = buildStarfighter3D(0x06b6d4, 0xf59e0b, stage.isSoftwareGl);
+    // HDR glowing engine core for bloom thruster flare
+    const flameMat = new THREE.MeshStandardMaterial({
+      color: 0xfef08a,
+      emissive: 0xf59e0b,
+      emissiveIntensity: 2.35,
+      roughness: 0.1
+    });
+    ship.thrusterL.material = flameMat;
+    ship.thrusterR.material = flameMat;
     ship.group.position.set(0, 0.7, 0);
     stage.scene.add(ship.group);
 
+    const shotGeo = new THREE.SphereGeometry(0.16, 10, 10);
+    const shotMat = new THREE.MeshStandardMaterial({
+      color: 0x67e8f9,
+      emissive: 0x06b6d4,
+      emissiveIntensity: 2.35,
+      roughness: 0.1
+    });
+
+    const shotPool = new ObjectPool<PlasmaShot3D>(
+      () => {
+        const mesh = new THREE.Mesh(shotGeo, shotMat);
+        mesh.visible = false;
+        stage.scene.add(mesh);
+        return { mesh, x: 0, z: 0, vx: 0, vz: 0, life: 1.1 };
+      },
+      (sh) => {
+        sh.mesh.visible = false;
+      },
+      18
+    );
+    shotPoolRef.current = shotPool;
+
+    const createAsteroidPool = (tier: 3 | 2 | 1, prewarm: number) =>
+      new ObjectPool<Asteroid3D>(
+        () => {
+          const mesh = buildAsteroidGroup3D(tier);
+          mesh.visible = false;
+          stage.scene.add(mesh);
+          return {
+            mesh,
+            x: 0,
+            z: 0,
+            vx: 0,
+            vz: 0,
+            sizeTier: tier,
+            radius: tier === 3 ? 1.3 : tier === 2 ? 0.8 : 0.45,
+            rotVel: new THREE.Vector3(0, 0, 0)
+          };
+        },
+        (a) => {
+          a.mesh.visible = false;
+        },
+        prewarm
+      );
+
+    const asteroidPools: Record<1 | 2 | 3, ObjectPool<Asteroid3D>> = {
+      3: createAsteroidPool(3, 8),
+      2: createAsteroidPool(2, 12),
+      1: createAsteroidPool(1, 16)
+    };
+    asteroidPoolsRef.current = asteroidPools;
+    const asteroidTiers: (3 | 2 | 1)[] = [3, 2, 1];
+
     const spawnAsteroid = (x: number, z: number, tier: 3 | 2 | 1) => {
-      const mesh = buildAsteroidGroup3D(tier);
-      mesh.position.set(x, 0.7, z);
-      stage.scene.add(mesh);
+      const a = asteroidPools[tier].acquire();
       const angle = Math.random() * Math.PI * 2;
       const spd = (4 - tier) * 1.85 + Math.random() * 1.5;
-      asteroidsRef.current.push({
-        mesh,
-        x,
-        z,
-        vx: Math.cos(angle) * spd,
-        vz: Math.sin(angle) * spd,
-        sizeTier: tier,
-        radius: tier === 3 ? 1.3 : tier === 2 ? 0.8 : 0.45,
-        rotVel: new THREE.Vector3(
-          (Math.random() - 0.5) * 2.5,
-          (Math.random() - 0.5) * 2.5,
-          (Math.random() - 0.5) * 2.5
-        )
-      });
+      a.x = x;
+      a.z = z;
+      a.vx = Math.cos(angle) * spd;
+      a.vz = Math.sin(angle) * spd;
+      a.rotVel.set(
+        (Math.random() - 0.5) * 2.5,
+        (Math.random() - 0.5) * 2.5,
+        (Math.random() - 0.5) * 2.5
+      );
+      a.mesh.position.set(x, 0.7, z);
+      a.mesh.visible = true;
     };
 
     spawnSectorRef.current = (sec: number) => {
@@ -253,14 +345,9 @@ export default function CosmicAsteroidGame({
       }
     };
 
-    const shotGeo = new THREE.SphereGeometry(0.15, 8, 8);
-    const shotMat = new THREE.MeshStandardMaterial({
-      color: 0x22d3ee,
-      emissive: 0x06b6d4,
-      emissiveIntensity: 0.95
-    });
+    let thrustParticleAcc = 0;
 
-    stage.startLoop((dt) => {
+    stage.startLoop((dt, elapsed) => {
       if (gameStateRef.current !== 'playing') return;
 
       const s = shipStateRef.current;
@@ -273,6 +360,20 @@ export default function CosmicAsteroidGame({
       if (thrusting) {
         s.vx += -Math.sin(s.angle) * 14 * dt;
         s.vz += -Math.cos(s.angle) * 14 * dt;
+        thrustParticleAcc += dt;
+        if (thrustParticleAcc >= 0.04) {
+          thrustParticleAcc = 0;
+          stage.particles.burst(
+            s.x + Math.sin(s.angle) * 0.9,
+            0.7,
+            s.z + Math.cos(s.angle) * 0.9,
+            2,
+            0xf59e0b,
+            3.2,
+            0.55,
+            0
+          );
+        }
       }
 
       // Zero-G damping
@@ -292,6 +393,11 @@ export default function CosmicAsteroidGame({
       ship.group.rotation.y = s.angle;
       ship.thrusterL.visible = Boolean(thrusting);
       ship.thrusterR.visible = Boolean(thrusting);
+      if (thrusting) {
+        const flicker = 0.9 + Math.sin(elapsed * 28) * 0.22;
+        ship.thrusterL.scale.setScalar(flicker);
+        ship.thrusterR.scale.setScalar(flicker);
+      }
       ship.shieldMesh.visible = s.invuln > 0;
 
       if (s.invuln > 0) s.invuln -= dt;
@@ -304,27 +410,24 @@ export default function CosmicAsteroidGame({
         s.fireCooldown = 0.2;
         const dirX = -Math.sin(s.angle);
         const dirZ = -Math.cos(s.angle);
-        const mesh = new THREE.Mesh(shotGeo, shotMat);
-        mesh.position.set(s.x + dirX * 0.9, 0.7, s.z + dirZ * 0.9);
-        stage.scene.add(mesh);
-        shotsRef.current.push({
-          mesh,
-          x: s.x + dirX * 0.9,
-          z: s.z + dirZ * 0.9,
-          vx: dirX * 20 + s.vx * 0.3,
-          vz: dirZ * 20 + s.vz * 0.3,
-          life: 1.1
-        });
-        audio.playLaser?.();
+        const sh = shotPool.acquire();
+        sh.x = s.x + dirX * 0.9;
+        sh.z = s.z + dirZ * 0.9;
+        sh.vx = dirX * 20 + s.vx * 0.3;
+        sh.vz = dirZ * 20 + s.vz * 0.3;
+        sh.life = 1.1;
+        sh.mesh.position.set(sh.x, 0.7, sh.z);
+        sh.mesh.visible = true;
+        audioController.playLaser();
       }
 
       // Update plasma shots
-      for (let i = shotsRef.current.length - 1; i >= 0; i--) {
-        const sh = shotsRef.current[i];
+      const activeShots = shotPool.getActiveItems();
+      for (let i = activeShots.length - 1; i >= 0; i--) {
+        const sh = activeShots[i];
         sh.life -= dt;
         if (sh.life <= 0) {
-          stage.scene.remove(sh.mesh);
-          shotsRef.current.splice(i, 1);
+          shotPool.release(i);
           continue;
         }
         sh.x += sh.vx * dt;
@@ -337,83 +440,100 @@ export default function CosmicAsteroidGame({
       }
 
       // Update Asteroids
-      for (let i = asteroidsRef.current.length - 1; i >= 0; i--) {
-        const a = asteroidsRef.current[i];
-        a.x += a.vx * dt;
-        a.z += a.vz * dt;
-        if (a.x > WRAP_X) a.x = -WRAP_X;
-        if (a.x < -WRAP_X) a.x = WRAP_X;
-        if (a.z > WRAP_Z) a.z = -WRAP_Z;
-        if (a.z < -WRAP_Z) a.z = WRAP_Z;
+      for (const tier of asteroidTiers) {
+        const pool = asteroidPools[tier];
+        const activeList = pool.getActiveItems();
+        for (let i = activeList.length - 1; i >= 0; i--) {
+          const a = activeList[i];
+          a.x += a.vx * dt;
+          a.z += a.vz * dt;
+          if (a.x > WRAP_X) a.x = -WRAP_X;
+          if (a.x < -WRAP_X) a.x = WRAP_X;
+          if (a.z > WRAP_Z) a.z = -WRAP_Z;
+          if (a.z < -WRAP_Z) a.z = WRAP_Z;
 
-        a.mesh.position.set(a.x, 0.7, a.z);
-        a.mesh.rotation.x += a.rotVel.x * dt;
-        a.mesh.rotation.y += a.rotVel.y * dt;
+          a.mesh.position.set(a.x, 0.7, a.z);
+          a.mesh.rotation.x += a.rotVel.x * dt;
+          a.mesh.rotation.y += a.rotVel.y * dt;
 
-        // Check shot hits
-        let hit = false;
-        for (let j = shotsRef.current.length - 1; j >= 0; j--) {
-          const sh = shotsRef.current[j];
-          if (Math.hypot(sh.x - a.x, sh.z - a.z) < a.radius + 0.2) {
-            stage.scene.remove(sh.mesh);
-            shotsRef.current.splice(j, 1);
-            hit = true;
-            break;
-          }
-        }
-
-        if (hit) {
-          stage.scene.remove(a.mesh);
-          asteroidsRef.current.splice(i, 1);
-          addScore(a.sizeTier === 3 ? 20 : a.sizeTier === 2 ? 50 : 100);
-          stage.particles.burst(a.x, 0.7, a.z, a.sizeTier * 10, 0x06b6d4, 7.5);
-          stage.triggerTrauma(0.28);
-          audio.playExplosion?.();
-
-          if (a.sizeTier > 1) {
-            const nextTier = (a.sizeTier - 1) as 2 | 1;
-            spawnAsteroid(a.x, a.z, nextTier);
-            spawnAsteroid(a.x, a.z, nextTier);
+          // Check shot hits
+          let hit = false;
+          for (let j = activeShots.length - 1; j >= 0; j--) {
+            const sh = activeShots[j];
+            if (Math.hypot(sh.x - a.x, sh.z - a.z) < a.radius + 0.2) {
+              shotPool.release(j);
+              hit = true;
+              break;
+            }
           }
 
-          if (asteroidsRef.current.length === 0) {
-            s.sector += 1;
-            setSector(s.sector);
-            s.invuln = 2.0;
-            spawnSectorRef.current(s.sector);
-            stage.kickFov(6);
-          }
-          continue;
-        }
+          if (hit) {
+            const ax = a.x;
+            const az = a.z;
+            const sizeTier = a.sizeTier;
+            pool.release(i);
+            addScore(sizeTier === 3 ? 20 : sizeTier === 2 ? 50 : 100);
+            stage.particles.burst(ax, 0.7, az, sizeTier * 10, 0x06b6d4, 7.5);
+            stage.triggerTrauma(0.28);
+            audioController.playExplosion();
 
-        // Check ship collision
-        if (s.invuln <= 0 && Math.hypot(a.x - s.x, a.z - s.z) < a.radius + 0.55) {
-          s.lives -= 1;
-          setLives(s.lives);
-          s.invuln = 2.2;
-          s.x = 0;
-          s.z = 0;
-          s.vx = 0;
-          s.vz = 0;
-          stage.particles.burst(a.x, 0.7, a.z, 35, 0xef4444, 10);
-          stage.triggerTrauma(0.75);
-          audio.playExplosion?.();
-          if (s.lives <= 0) {
-            triggerGameOver(scoreRef.current);
-            return;
+            if (sizeTier > 1) {
+              const nextTier = (sizeTier - 1) as 2 | 1;
+              spawnAsteroid(ax, az, nextTier);
+              spawnAsteroid(ax, az, nextTier);
+            }
+
+            const remaining =
+              asteroidPools[3].activeCount +
+              asteroidPools[2].activeCount +
+              asteroidPools[1].activeCount;
+            if (remaining === 0) {
+              s.sector += 1;
+              setSector(s.sector);
+              s.invuln = 2.0;
+              spawnSectorRef.current(s.sector);
+              stage.kickFov(6);
+              audioController.playPowerup();
+            }
+            continue;
+          }
+
+          // Check ship collision
+          if (s.invuln <= 0 && Math.hypot(a.x - s.x, a.z - s.z) < a.radius + 0.55) {
+            s.lives -= 1;
+            setLives(s.lives);
+            s.invuln = 2.2;
+            s.x = 0;
+            s.z = 0;
+            s.vx = 0;
+            s.vz = 0;
+            stage.particles.burst(a.x, 0.7, a.z, 35, 0xef4444, 10);
+            stage.triggerTrauma(0.75);
+            if (s.lives <= 0) {
+              audioController.playGameOver();
+              triggerGameOver(scoreRef.current);
+              return;
+            }
+            audioController.playHit();
           }
         }
       }
     });
 
     return () => {
+      asteroidPools[3].releaseAll();
+      asteroidPools[2].releaseAll();
+      asteroidPools[1].releaseAll();
+      shotPool.releaseAll();
+      asteroidPoolsRef.current = null;
+      shotPoolRef.current = null;
       stage.dispose();
       stageRef.current = null;
     };
   }, [addScore, scoreRef, triggerGameOver]);
 
   return (
-    <div className="relative w-full h-full min-h-[460px] bg-slate-950 overflow-hidden rounded-2xl border border-cyan-500/20">
+    <div className="relative w-full h-full min-h-[260px] sm:min-h-[380px] lg:min-h-[460px] bg-slate-950 overflow-hidden rounded-2xl border border-cyan-500/20">
       <div ref={mountRef} className="absolute inset-0 w-full h-full" />
 
       <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex flex-wrap items-center justify-between gap-2 p-3.5">

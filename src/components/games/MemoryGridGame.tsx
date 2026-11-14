@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
 import { GameComponentProps } from '../../types';
-import { audio } from '../../utils/audio';
+import { audioController } from '../../sdk/audioController';
 import { useGameEngine } from '../../hooks/useGameEngine';
 import { GameOverlay } from '../gameplay/GameOverlay';
 import { ThreeDockOverlay } from '../gameplay/ThreeDockOverlay';
@@ -65,6 +65,7 @@ export default function MemoryGridGame({
     gameStateRef.current = gameState;
   }, [gameState]);
 
+  const lastTimeShownRef = useRef(60);
   const memStateRef = useRef({
     timeLeft: 60,
     firstPick: null as HoloCard3D | null,
@@ -83,6 +84,7 @@ export default function MemoryGridGame({
       lockTimer: 0,
       matchedCount: 0
     };
+    lastTimeShownRef.current = 60;
     setPairsFound(0);
     setTimeLeft(60);
     shuffleDeckFnRef.current();
@@ -238,7 +240,7 @@ export default function MemoryGridGame({
         if (!card || card.flipped || card.matched) return;
 
         card.flipped = true;
-        audio.playClick?.();
+        audioController.playClick();
 
         if (!st.firstPick) {
           st.firstPick = card;
@@ -261,10 +263,12 @@ export default function MemoryGridGame({
             st.matchedCount += 1;
             setPairsFound(st.matchedCount);
             addScore(50);
-            audio.playCoin?.();
+            audioController.playScore();
 
             if (st.matchedCount >= 8) {
               addScore(200);
+              audioController.playWin();
+              audioController.playLevelUp();
               stage.kickFov(5);
               st.matchedCount = 0;
               st.timeLeft = Math.min(60, st.timeLeft + 20);
@@ -272,6 +276,7 @@ export default function MemoryGridGame({
               shuffleDeckFnRef.current();
             }
           } else {
+            audioController.playHit();
             st.lockTimer = 0.7;
           }
         }
@@ -284,8 +289,13 @@ export default function MemoryGridGame({
       if (gameStateRef.current === 'playing') {
         const st = memStateRef.current;
         st.timeLeft -= dt;
-        setTimeLeft(Math.max(0, Math.ceil(st.timeLeft)));
+        const ceilTime = Math.max(0, Math.ceil(st.timeLeft));
+        if (ceilTime !== lastTimeShownRef.current) {
+          lastTimeShownRef.current = ceilTime;
+          setTimeLeft(ceilTime);
+        }
         if (st.timeLeft <= 0) {
+          audioController.playGameOver();
           triggerGameOver(scoreRef.current);
           return;
         }
@@ -316,8 +326,8 @@ export default function MemoryGridGame({
   }, [addScore, scoreRef, triggerGameOver]);
 
   return (
-    <div className="relative w-full h-full min-h-[460px] bg-slate-950 overflow-hidden rounded-2xl border border-purple-500/20">
-      <div ref={mountRef} className="absolute inset-0 w-full h-full cursor-pointer" />
+    <div className="relative w-full h-full min-h-[280px] sm:min-h-[380px] lg:min-h-[460px] bg-slate-950 overflow-hidden rounded-2xl border border-purple-500/20 select-none">
+      <div ref={mountRef} className="absolute inset-0 w-full h-full cursor-pointer touch-none" />
 
       <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex flex-wrap items-center justify-between gap-2 p-3.5">
         <div className="flex items-center gap-3 rounded-xl border border-white/10 bg-slate-950/85 px-3.5 py-2 text-xs text-slate-200 tabular-nums">

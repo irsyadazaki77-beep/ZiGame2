@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
 import { GameComponentProps } from '../../types';
-import { audio } from '../../utils/audio';
+import { audioController } from '../../sdk/audioController';
+import { ObjectPool } from '../../sdk/objectPool';
 import { useGameEngine } from '../../hooks/useGameEngine';
 import { GameOverlay } from '../gameplay/GameOverlay';
 import { ThreeDockOverlay } from '../gameplay/ThreeDockOverlay';
@@ -125,7 +126,7 @@ export default function OrbitalDefenseGame({
   });
 
   const slotsRef = useRef<TurretSlot3D[]>([]);
-  const dronesRef = useRef<InvaderDrone3D[]>([]);
+  const dronePoolRef = useRef<ObjectPool<InvaderDrone3D> | null>(null);
 
   const upgradeNextTurret = useCallback(() => {
     if (gameStateRef.current !== 'playing') return;
@@ -145,16 +146,12 @@ export default function OrbitalDefenseGame({
     setEnergy(ds.energy);
     targetSlot.level += 1;
     populateTurretHead(targetSlot.head, targetSlot.level);
-    audio.playPowerUp?.();
+    audioController.playPowerup();
     stageRef.current?.particles.burst(targetSlot.x, 0.6, targetSlot.z, 20, 0x38bdf8, 6);
   }, []);
 
   const handleStart = useCallback(() => {
-    const stage = stageRef.current;
-    if (stage) {
-      dronesRef.current.forEach((d) => stage.scene.remove(d.mesh));
-    }
-    dronesRef.current = [];
+    dronePoolRef.current?.releaseAll();
     defenseStateRef.current = {
       energy: 120,
       coreHp: 100,
@@ -252,6 +249,29 @@ export default function OrbitalDefenseGame({
     }
     slotsRef.current = builtSlots;
 
+    const droneMat = new THREE.MeshStandardMaterial({
+      color: 0xf43f5e,
+      emissive: 0xe11d48,
+      emissiveIntensity: 0.7
+    });
+    const droneGeo = new THREE.OctahedronGeometry(0.48, 0);
+    const dronePool = new ObjectPool<InvaderDrone3D>(
+      () => {
+        const g = new THREE.Group();
+        const hull = new THREE.Mesh(droneGeo, droneMat);
+        hull.position.y = 0.7;
+        g.add(hull);
+        g.visible = false;
+        stage.scene.add(g);
+        return { mesh: g, angle: 0, radius: 11.5, hp: 2, maxHp: 2, speed: 1.55 };
+      },
+      (d) => {
+        d.mesh.visible = false;
+      },
+      12
+    );
+    dronePoolRef.current = dronePool;
+
     stage.startLoop((dt, elapsed) => {
       coreSphere.rotation.y = elapsed * 1.4;
       gyroRing1.rotation.z = elapsed * 2.1;
@@ -260,36 +280,23 @@ export default function OrbitalDefenseGame({
       if (gameStateRef.current !== 'playing') return;
 
       const ds = defenseStateRef.current;
+      const activeDrones = dronePool.getActiveItems();
 
       // Spawn spiralling invader drones
       ds.spawnTimer -= dt;
       if (ds.spawnTimer <= 0) {
         ds.spawnTimer = Math.max(0.45, 1.35 - ds.wave * 0.08);
         const angle = Math.random() * Math.PI * 2;
-        const g = new THREE.Group();
-        const hull = new THREE.Mesh(
-          new THREE.OctahedronGeometry(0.48, 0),
-          new THREE.MeshStandardMaterial({
-            color: 0xf43f5e,
-            emissive: 0xe11d48,
-            emissiveIntensity: 0.7
-          })
-        );
-        hull.position.y = 0.7;
-        g.add(hull);
         const r = 11.5;
-        g.position.set(Math.cos(angle) * r, 0, Math.sin(angle) * r);
-        stage.scene.add(g);
-
         const maxHp = 2 + Math.floor(ds.wave * 0.8);
-        dronesRef.current.push({
-          mesh: g,
-          angle,
-          radius: r,
-          hp: maxHp,
-          maxHp,
-          speed: 1.55 + Math.min(1.5, ds.wave * 0.12)
-        });
+        const d = dronePool.acquire();
+        d.angle = angle;
+        d.radius = r;
+        d.hp = maxHp;
+        d.maxHp = maxHp;
+        d.speed = 1.55 + Math.min(1.5, ds.wave * 0.12);
+        d.mesh.position.set(Math.cos(angle) * r, 0, Math.sin(angle) * r);
+        d.mesh.visible = true;
       }
 
       // Turrets track and fire at nearest drone
@@ -299,7 +306,7 @@ export default function OrbitalDefenseGame({
 
         let nearest: InvaderDrone3D | null = null;
         let minDist = Infinity;
-        for (const d of dronesRef.current) {
+        for (const d of activeDrones) {
           const dx = d.mesh.position.x - slot.x;
           const dz = d.mesh.position.z - slot.z;
           const dist = Math.hypot(dx, dz);
@@ -322,14 +329,14 @@ export default function OrbitalDefenseGame({
               0x38bdf8,
               4.5
             );
-            audio.playLaser?.();
+            audioController.playLaser();
           }
         }
       }
 
       // Update drones
-      for (let i = dronesRef.current.length - 1; i >= 0; i--) {
-        const d = dronesRef.current[i];
+      for (let i = activeDrones.length - 1; i >= 0; i--) {
+        const d = activeDrones[i];
         if (d.hp <= 0) {
           stage.particles.burst(
             d.mesh.position.x,
@@ -339,17 +346,18 @@ export default function OrbitalDefenseGame({
             0xf59e0b,
             7.5
           );
-          stage.scene.remove(d.mesh);
-          dronesRef.current.splice(i, 1);
+          dronePool.release(i);
           ds.energy += 15;
           setEnergy(ds.energy);
           addScore(25);
+          audioController.playScore();
           ds.kills += 1;
           if (ds.kills >= 8 + ds.wave * 3) {
             ds.kills = 0;
             ds.wave += 1;
             setWave(ds.wave);
             stage.kickFov(4);
+            audioController.playPowerup();
           }
           continue;
         }
@@ -362,33 +370,35 @@ export default function OrbitalDefenseGame({
         d.mesh.rotation.y = -d.angle;
 
         if (d.radius < 1.45) {
-          stage.scene.remove(d.mesh);
-          dronesRef.current.splice(i, 1);
+          dronePool.release(i);
           ds.coreHp = Math.max(0, ds.coreHp - 20);
           setCoreHp(ds.coreHp);
           stage.particles.burst(0, 1.2, 0, 30, 0xef4444, 9);
           stage.triggerTrauma(0.65);
-          audio.playExplosion?.();
           if (ds.coreHp <= 0) {
+            audioController.playGameOver();
             triggerGameOver(scoreRef.current);
             return;
           }
+          audioController.playHit();
         }
       }
     });
 
     return () => {
+      dronePool.releaseAll();
+      dronePoolRef.current = null;
       stage.dispose();
       stageRef.current = null;
     };
   }, [addScore, scoreRef, triggerGameOver]);
 
   return (
-    <div className="relative w-full h-full min-h-[460px] bg-slate-950 overflow-hidden rounded-2xl border border-sky-500/20">
+    <div className="relative w-full h-full min-h-[260px] sm:min-h-[380px] lg:min-h-[460px] bg-slate-950 overflow-hidden rounded-2xl border border-sky-500/20">
       <div ref={mountRef} className="absolute inset-0 w-full h-full" />
 
-      <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex flex-wrap items-center justify-between gap-2 p-3.5">
-        <div className="flex items-center gap-3 rounded-xl border border-white/10 bg-slate-950/85 px-3.5 py-2 text-xs text-slate-200 tabular-nums">
+      <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex flex-wrap items-center justify-between gap-2 p-2.5 sm:p-3.5">
+        <div className="flex items-center gap-2 sm:gap-3 rounded-xl border border-white/10 bg-slate-950/85 px-2.5 sm:px-3.5 py-2 text-[11px] sm:text-xs text-slate-200 tabular-nums">
           <span className="flex items-center gap-1 font-semibold text-sky-400">
             <Cpu className="w-3.5 h-3.5" /> WAVE {wave}
           </span>
@@ -398,16 +408,18 @@ export default function OrbitalDefenseGame({
           <span className="text-amber-400 font-semibold">ENERGI: {energy}</span>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5 sm:gap-2">
           <button
             type="button"
             onClick={upgradeNextTurret}
             disabled={energy < 40}
-            className="pointer-events-auto flex items-center gap-1.5 rounded-xl bg-sky-500 px-3 py-2 text-xs font-semibold text-slate-950 transition-colors hover:bg-sky-400 disabled:opacity-40 whitespace-nowrap shrink-0"
+            className="pointer-events-auto flex items-center justify-center gap-1.5 min-h-[44px] rounded-xl bg-sky-500 px-3 py-2 text-xs font-semibold text-slate-950 transition-colors hover:bg-sky-400 disabled:opacity-40 whitespace-nowrap shrink-0"
           >
-            <PlusCircle className="w-3.5 h-3.5" /> Bangun / Upgrade Turret (40 Energi)
+            <PlusCircle className="w-3.5 h-3.5" />
+            <span className="sm:hidden">Turret (40E)</span>
+            <span className="hidden sm:inline">Bangun / Upgrade Turret (40 Energi)</span>
           </button>
-          <div className="rounded-xl border border-white/10 bg-slate-950/85 px-3 py-2 text-xs font-semibold text-emerald-400 tabular-nums whitespace-nowrap shrink-0">
+          <div className="rounded-xl border border-white/10 bg-slate-950/85 px-2.5 sm:px-3 py-2 text-[11px] sm:text-xs font-semibold text-emerald-400 tabular-nums whitespace-nowrap shrink-0">
             <Shield className="inline w-3.5 h-3.5 mr-1" /> INTI: {coreHp}%
           </div>
         </div>

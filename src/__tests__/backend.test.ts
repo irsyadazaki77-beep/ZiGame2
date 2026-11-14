@@ -1927,6 +1927,26 @@ describe('ZiGame 2.0 Backend Authority & Security Tests', () => {
         })
       ).toThrow(FatalError);
 
+      // Non-existent GOOGLE_APPLICATION_CREDENTIALS without Cloud Run identity also fails validation
+      expect(() =>
+        validateEnvironment({
+          NODE_ENV: 'production',
+          GOOGLE_APPLICATION_CREDENTIALS: 'admin123'
+        })
+      ).toThrow(FatalError);
+
+      // Cloud Run runtime with invalid placeholder credentials falls back safely to Cloud Run ADC
+      expect(() =>
+        validateEnvironment({
+          NODE_ENV: 'production',
+          K_SERVICE: 'zigame-web',
+          PORT: '3000',
+          FIREBASE_PROJECT_ID: 'probable-tempo-j67s8',
+          FIREBASE_SERVICE_ACCOUNT: 'admin123',
+          GOOGLE_APPLICATION_CREDENTIALS: 'admin123'
+        })
+      ).not.toThrow();
+
       // Valid service account JSON passes fail-fast validation
       expect(() =>
         validateEnvironment({
@@ -1934,6 +1954,38 @@ describe('ZiGame 2.0 Backend Authority & Security Tests', () => {
           FIREBASE_SERVICE_ACCOUNT: JSON.stringify({ project_id: 'zigame-prod' })
         })
       ).not.toThrow();
+    });
+
+    it('Credential Hygiene: Sanitizes invalid GOOGLE_APPLICATION_CREDENTIALS paths while preserving valid JSON credential files', async () => {
+      const fs = await import('fs');
+      const os = await import('os');
+      const path = await import('path');
+      const { hasValidAdcFile, sanitizeInvalidAdcEnv } = await import('../server/persistence/db');
+
+      const missingEnv: NodeJS.ProcessEnv = { GOOGLE_APPLICATION_CREDENTIALS: 'admin123' };
+      expect(hasValidAdcFile('admin123')).toBe(false);
+      expect(sanitizeInvalidAdcEnv(missingEnv)).toBe('admin123');
+      expect(missingEnv.GOOGLE_APPLICATION_CREDENTIALS).toBeUndefined();
+
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'zigame-adc-test-'));
+      const invalidJsonFile = path.join(tmpDir, 'bad.json');
+      const validJsonFile = path.join(tmpDir, 'valid.json');
+      try {
+        fs.writeFileSync(invalidJsonFile, 'admin123', 'utf-8');
+        fs.writeFileSync(validJsonFile, JSON.stringify({ type: 'service_account', project_id: 'zigame-prod' }), 'utf-8');
+
+        const badFileEnv: NodeJS.ProcessEnv = { GOOGLE_APPLICATION_CREDENTIALS: invalidJsonFile };
+        expect(hasValidAdcFile(invalidJsonFile)).toBe(false);
+        expect(sanitizeInvalidAdcEnv(badFileEnv)).toBe(invalidJsonFile);
+        expect(badFileEnv.GOOGLE_APPLICATION_CREDENTIALS).toBeUndefined();
+
+        const goodFileEnv: NodeJS.ProcessEnv = { GOOGLE_APPLICATION_CREDENTIALS: validJsonFile };
+        expect(hasValidAdcFile(validJsonFile)).toBe(true);
+        expect(sanitizeInvalidAdcEnv(goodFileEnv)).toBeNull();
+        expect(goodFileEnv.GOOGLE_APPLICATION_CREDENTIALS).toBe(validJsonFile);
+      } finally {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+      }
     });
 
     it('Idempotency Header & Double-Entry Ledger: Accepts X-Idempotency-Key header, rejects header/body mismatch, and records DEBIT/CREDIT accounts', async () => {

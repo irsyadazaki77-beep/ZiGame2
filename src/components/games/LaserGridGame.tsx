@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
 import { GameComponentProps } from '../../types';
-import { audio } from '../../utils/audio';
+import { audioController } from '../../sdk/audioController';
+import { ObjectPool } from '../../sdk/objectPool';
 import { useGameEngine } from '../../hooks/useGameEngine';
 import { inputManager } from '../../services/inputService';
 import { GameOverlay } from '../gameplay/GameOverlay';
@@ -70,22 +71,19 @@ export default function LaserGridGame({
     invuln: 0
   });
 
-  const lasersRef = useRef<LaserHazard3D[]>([]);
+  const laserPoolRef = useRef<ObjectPool<LaserHazard3D> | null>(null);
+  const swipeStartRef = useRef<{ x: number; y: number } | null>(null);
 
   const moveGrid = useCallback((dx: number, dz: number) => {
     if (gameStateRef.current !== 'playing') return;
     const st = gridStateRef.current;
     st.gx = Math.max(-1, Math.min(1, st.gx + dx));
     st.gz = Math.max(-1, Math.min(1, st.gz + dz));
-    audio.playClick?.();
+    audioController.playClick();
   }, []);
 
   const handleStart = useCallback(() => {
-    const stage = stageRef.current;
-    if (stage) {
-      lasersRef.current.forEach((l) => stage.scene.remove(l.mesh));
-    }
-    lasersRef.current = [];
+    laserPoolRef.current?.releaseAll();
     gridStateRef.current = {
       gx: 0,
       gz: 0,
@@ -202,6 +200,28 @@ export default function LaserGridGame({
     orbMesh.position.set(TILE_STEP, 0.9, -TILE_STEP);
     stage.scene.add(orbMesh);
 
+    const beamGeo = new THREE.CylinderGeometry(0.08, 0.08, 9.5, 10);
+    const laserPool = new ObjectPool<LaserHazard3D>(
+      () => {
+        const beamMat = new THREE.MeshStandardMaterial({
+          color: 0xf59e0b,
+          emissive: 0xf59e0b,
+          emissiveIntensity: 0.65,
+          transparent: true,
+          opacity: 0.55
+        });
+        const mesh = new THREE.Mesh(beamGeo, beamMat);
+        mesh.visible = false;
+        stage.scene.add(mesh);
+        return { isRow: true, index: 0, phase: 'warn', timer: 0.7, mesh };
+      },
+      (l) => {
+        l.mesh.visible = false;
+      },
+      10
+    );
+    laserPoolRef.current = laserPool;
+
     stage.startLoop((dt, elapsed) => {
       orbMesh.rotation.y = elapsed * 3.5;
       if (gameStateRef.current !== 'playing') return;
@@ -217,7 +237,7 @@ export default function LaserGridGame({
       // Collect data orb on grid
       if (st.gx === st.orbX && st.gz === st.orbZ) {
         addScore(35);
-        audio.playCoin?.();
+        audioController.playScore();
         stage.particles.burst(st.x, 0.9, st.z, 20, 0xfacc15, 6.5);
         let nx = st.orbX;
         let nz = st.orbZ;
@@ -235,33 +255,28 @@ export default function LaserGridGame({
         st.spawnTimer = Math.max(0.45, 1.15 - st.wave * 0.06);
         const isRow = Math.random() > 0.5;
         const idx = Math.floor(Math.random() * 3) - 1;
-        const beamGeo = new THREE.CylinderGeometry(0.08, 0.08, 9.5, 10);
-        if (isRow) beamGeo.rotateZ(Math.PI / 2);
-        else beamGeo.rotateX(Math.PI / 2);
+        const l = laserPool.acquire();
+        l.isRow = isRow;
+        l.index = idx;
+        l.phase = 'warn';
+        l.timer = Math.max(0.45, 0.85 - st.wave * 0.04);
 
-        const beamMat = new THREE.MeshStandardMaterial({
-          color: 0xf59e0b,
-          emissive: 0xf59e0b,
-          emissiveIntensity: 0.65,
-          transparent: true,
-          opacity: 0.55
-        });
-        const mesh = new THREE.Mesh(beamGeo, beamMat);
-        mesh.position.set(isRow ? 0 : idx * TILE_STEP, 0.95, isRow ? idx * TILE_STEP : 0);
-        stage.scene.add(mesh);
+        const mat = l.mesh.material as THREE.MeshStandardMaterial;
+        mat.color.setHex(0xf59e0b);
+        mat.emissive.setHex(0xf59e0b);
+        mat.emissiveIntensity = 0.65;
+        mat.opacity = 0.55;
 
-        lasersRef.current.push({
-          isRow,
-          index: idx,
-          phase: 'warn',
-          timer: Math.max(0.45, 0.85 - st.wave * 0.04),
-          mesh
-        });
+        l.mesh.rotation.set(isRow ? 0 : Math.PI / 2, 0, isRow ? Math.PI / 2 : 0);
+        l.mesh.scale.set(1, 1, 1);
+        l.mesh.position.set(isRow ? 0 : idx * TILE_STEP, 0.95, isRow ? idx * TILE_STEP : 0);
+        l.mesh.visible = true;
       }
 
       // Update Lasers
-      for (let i = lasersRef.current.length - 1; i >= 0; i--) {
-        const l = lasersRef.current[i];
+      const activeLasers = laserPool.getActiveItems();
+      for (let i = activeLasers.length - 1; i >= 0; i--) {
+        const l = activeLasers[i];
         l.timer -= dt;
         if (l.phase === 'warn' && l.timer <= 0) {
           l.phase = 'fire';
@@ -271,8 +286,8 @@ export default function LaserGridGame({
           mat.emissive.setHex(0xef4444);
           mat.emissiveIntensity = 1.2;
           mat.opacity = 1.0;
-          l.mesh.scale.set(2.2, 2.2, 1);
-          audio.playLaser?.();
+          l.mesh.scale.set(2.2, 1, 2.2);
+          audioController.playLaser();
 
           // Check hit on player tile
           const hit = l.isRow ? st.gz === l.index : st.gx === l.index;
@@ -282,34 +297,57 @@ export default function LaserGridGame({
             st.invuln = 1.2;
             stage.particles.burst(st.x, 0.9, st.z, 32, 0xef4444, 9);
             stage.triggerTrauma(0.7);
-            audio.playExplosion?.();
             if (st.lives <= 0) {
+              audioController.playGameOver();
               triggerGameOver(scoreRef.current);
               return;
             }
+            audioController.playHit();
           }
         } else if (l.phase === 'fire' && l.timer <= 0) {
-          stage.scene.remove(l.mesh);
-          lasersRef.current.splice(i, 1);
+          laserPool.release(i);
           st.survived += 1;
           addScore(10);
           if (st.survived % 8 === 0) {
             st.wave += 1;
             setWave(st.wave);
             stage.kickFov(3.5);
+            audioController.playPowerup();
           }
         }
       }
     });
 
     return () => {
+      laserPool.releaseAll();
+      laserPoolRef.current = null;
       stage.dispose();
       stageRef.current = null;
     };
   }, [addScore, scoreRef, triggerGameOver]);
 
   return (
-    <div className="relative w-full h-full min-h-[460px] bg-slate-950 overflow-hidden rounded-2xl border border-rose-500/20">
+    <div
+      className="relative w-full h-full min-h-[260px] sm:min-h-[380px] lg:min-h-[460px] bg-slate-950 overflow-hidden rounded-2xl border border-rose-500/20 touch-none"
+      onPointerDown={(e) => {
+        swipeStartRef.current = { x: e.clientX, y: e.clientY };
+      }}
+      onPointerUp={(e) => {
+        if (!swipeStartRef.current || gameStateRef.current !== 'playing') {
+          swipeStartRef.current = null;
+          return;
+        }
+        const dx = e.clientX - swipeStartRef.current.x;
+        const dy = e.clientY - swipeStartRef.current.y;
+        swipeStartRef.current = null;
+        if (Math.hypot(dx, dy) < 18) return;
+        if (Math.abs(dx) > Math.abs(dy)) {
+          moveGrid(dx > 0 ? 1 : -1, 0);
+        } else {
+          moveGrid(0, dy > 0 ? 1 : -1);
+        }
+      }}
+    >
       <div ref={mountRef} className="absolute inset-0 w-full h-full" />
 
       <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex flex-wrap items-center justify-between gap-2 p-3.5">

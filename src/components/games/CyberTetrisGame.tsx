@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
 import { GameComponentProps } from '../../types';
-import { audio } from '../../utils/audio';
+import { audioController } from '../../sdk';
 import { useGameEngine } from '../../hooks/useGameEngine';
 import { inputManager } from '../../services/inputService';
 import { GameOverlay } from '../gameplay/GameOverlay';
@@ -11,7 +11,7 @@ import {
   CameraPreset3D,
   QualityLevel3D
 } from '../../utils/threeStage';
-import { Layers, Zap } from 'lucide-react';
+import { Layers, Zap, RotateCw, ArrowDownToLine } from 'lucide-react';
 
 const COLS = 10;
 const ROWS = 16;
@@ -105,6 +105,8 @@ export default function CyberTetrisGame({
     level: 1
   });
 
+  const swipeStartRef = useRef<{ x: number; y: number } | null>(null);
+
   const collides = useCallback((board: number[][], shape: number[][], nx: number, ny: number) => {
     for (let r = 0; r < shape.length; r++) {
       for (let c = 0; c < shape[r].length; c++) {
@@ -127,7 +129,8 @@ export default function CyberTetrisGame({
     t.py = 0;
     if (collides(t.board, t.piece, t.px, t.py)) {
       stageRef.current?.triggerTrauma(0.75);
-      audio.playExplosion?.();
+      audioController.playExplosion();
+      audioController.playGameOver();
       triggerGameOver(scoreRef.current);
     }
   }, [collides, scoreRef, triggerGameOver]);
@@ -147,14 +150,13 @@ export default function CyberTetrisGame({
       }
     }
 
-    // Check full lines
     let cleared = 0;
     for (let r = ROWS - 1; r >= 0; r--) {
       if (t.board[r].every((cell) => cell !== 0)) {
         t.board.splice(r, 1);
         t.board.unshift(Array(COLS).fill(0));
         cleared += 1;
-        r += 1; // Recheck row index
+        r += 1;
       }
     }
 
@@ -168,10 +170,10 @@ export default function CyberTetrisGame({
       stage?.particles.burst(0, 4, 0, 28 * cleared, 0x22d3ee, 8.5);
       stage?.triggerTrauma(0.32);
       if (cleared >= 2) stage?.kickFov(4);
-      audio.playCoin?.();
+      audioController.playCombo(cleared + 1);
     } else {
       addScore(10);
-      audio.playClick?.();
+      audioController.playClick();
     }
 
     spawnNextPiece();
@@ -199,7 +201,7 @@ export default function CyberTetrisGame({
     const rotated = t.piece[0].map((_, idx) => t.piece.map((row) => row[idx]).reverse());
     if (!collides(t.board, rotated, t.px, t.py)) {
       t.piece = rotated;
-      audio.playClick?.();
+      audioController.playClick();
     }
   }, [collides]);
 
@@ -231,28 +233,17 @@ export default function CyberTetrisGame({
   }, [startWithCountdown]);
 
   useEffect(() => {
-    const onKeyDown = (e: KeyboardEvent) => {
-      const k = e.key.toLowerCase();
-      if (k === 'arrowleft' || k === 'a') movePiece(-1, 0);
-      else if (k === 'arrowright' || k === 'd') movePiece(1, 0);
-      else if (k === 'arrowdown' || k === 's') movePiece(0, 1);
-      else if (k === 'arrowup' || k === 'w') rotatePiece();
-      else if (e.key === ' ') hardDrop();
-    };
-    window.addEventListener('keydown', onKeyDown);
-
     const unsub = inputManager.subscribe({
       onActionDown: (action) => {
         if (action === 'LEFT') movePiece(-1, 0);
-        if (action === 'RIGHT') movePiece(1, 0);
-        if (action === 'DOWN') movePiece(0, 1);
-        if (action === 'UP') rotatePiece();
-        if (action === 'ACTION_PRIMARY') hardDrop();
+        else if (action === 'RIGHT') movePiece(1, 0);
+        else if (action === 'DOWN') movePiece(0, 1);
+        else if (action === 'UP') rotatePiece();
+        else if (action === 'PRIMARY' || action === 'ACTION_PRIMARY') hardDrop();
       }
     });
 
     return () => {
-      window.removeEventListener('keydown', onKeyDown);
       unsub();
     };
   }, [hardDrop, movePiece, rotatePiece]);
@@ -388,11 +379,36 @@ export default function CyberTetrisGame({
   }, [movePiece]);
 
   return (
-    <div className="relative w-full h-full min-h-[460px] bg-slate-950 overflow-hidden rounded-2xl border border-cyan-500/20">
-      <div ref={mountRef} className="absolute inset-0 w-full h-full" />
+    <div className="relative w-full h-full min-h-[280px] sm:min-h-[380px] lg:min-h-[460px] bg-slate-950 overflow-hidden rounded-2xl border border-cyan-500/20 touch-none select-none">
+      <div
+        ref={mountRef}
+        className="absolute inset-0 w-full h-full touch-none"
+        onPointerDown={(e) => {
+          swipeStartRef.current = { x: e.clientX, y: e.clientY };
+        }}
+        onPointerUp={(e) => {
+          if (!swipeStartRef.current) return;
+          const dx = e.clientX - swipeStartRef.current.x;
+          const dy = e.clientY - swipeStartRef.current.y;
+          swipeStartRef.current = null;
+          if (Math.abs(dx) < 16 && Math.abs(dy) < 16) {
+            rotatePiece();
+          } else if (Math.abs(dx) > Math.abs(dy)) {
+            if (dx < -22) movePiece(-1, 0);
+            else if (dx > 22) movePiece(1, 0);
+          } else if (dy > 48) {
+            hardDrop();
+          } else if (dy > 20) {
+            movePiece(0, 1);
+          }
+        }}
+        onPointerCancel={() => {
+          swipeStartRef.current = null;
+        }}
+      />
 
-      <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex flex-wrap items-center justify-between gap-2 p-3.5">
-        <div className="flex items-center gap-3 rounded-xl border border-white/10 bg-slate-950/85 px-3.5 py-2 text-xs text-slate-200 tabular-nums">
+      <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex flex-wrap items-center justify-between gap-2 p-3 sm:p-3.5">
+        <div className="flex items-center gap-2 sm:gap-3 rounded-xl border border-white/10 bg-slate-950/85 px-3 py-1.5 sm:px-3.5 sm:py-2 text-xs text-slate-200 tabular-nums">
           <span className="flex items-center gap-1 font-semibold text-cyan-400">
             <Layers className="w-3.5 h-3.5" /> LEVEL {level} · BARIS: {linesCleared}
           </span>
@@ -400,6 +416,65 @@ export default function CyberTetrisGame({
           <span>SKOR: <strong className="text-white">{score}</strong></span>
         </div>
       </div>
+
+      {gameState === 'playing' && (
+        <div className="pointer-events-auto absolute inset-x-3 bottom-24 z-10 flex items-center justify-between gap-1.5 sm:hidden pb-[env(safe-area-inset-bottom)]">
+          <button
+            type="button"
+            onPointerDown={(e) => {
+              e.stopPropagation();
+              movePiece(-1, 0);
+            }}
+            className="min-h-[44px] flex-1 rounded-xl border border-cyan-500/35 bg-slate-950/90 text-xs font-bold text-white active:bg-cyan-500 active:text-slate-950"
+            aria-label="Geser Kiri"
+          >
+            ◀
+          </button>
+          <button
+            type="button"
+            onPointerDown={(e) => {
+              e.stopPropagation();
+              rotatePiece();
+            }}
+            className="min-h-[44px] flex-1 rounded-xl border border-cyan-500/35 bg-slate-950/90 text-xs font-bold text-cyan-300 flex items-center justify-center active:bg-cyan-500 active:text-slate-950"
+            aria-label="Putar Balok"
+          >
+            <RotateCw className="w-4 h-4" />
+          </button>
+          <button
+            type="button"
+            onPointerDown={(e) => {
+              e.stopPropagation();
+              movePiece(0, 1);
+            }}
+            className="min-h-[44px] flex-1 rounded-xl border border-cyan-500/35 bg-slate-950/90 text-xs font-bold text-white active:bg-cyan-500 active:text-slate-950"
+            aria-label="Turun"
+          >
+            ▼
+          </button>
+          <button
+            type="button"
+            onPointerDown={(e) => {
+              e.stopPropagation();
+              movePiece(1, 0);
+            }}
+            className="min-h-[44px] flex-1 rounded-xl border border-cyan-500/35 bg-slate-950/90 text-xs font-bold text-white active:bg-cyan-500 active:text-slate-950"
+            aria-label="Geser Kanan"
+          >
+            ▶
+          </button>
+          <button
+            type="button"
+            onPointerDown={(e) => {
+              e.stopPropagation();
+              hardDrop();
+            }}
+            className="min-h-[44px] px-3.5 rounded-xl bg-cyan-500 text-slate-950 text-xs font-bold flex items-center gap-1 active:bg-cyan-400 whitespace-nowrap"
+          >
+            <ArrowDownToLine className="w-3.5 h-3.5" /> Drop
+          </button>
+        </div>
+      )}
 
       <ThreeDockOverlay
         cameraPreset={cameraPreset}

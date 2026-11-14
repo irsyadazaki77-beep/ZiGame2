@@ -226,7 +226,7 @@ export const VirtualControls: React.FC<VirtualControlsProps> = ({
   return (
     <div
       data-testid="sdk-virtual-controls"
-      className={`pointer-events-none fixed inset-x-0 bottom-4 z-40 flex items-end justify-between px-4 sm:px-6 select-none touch-none ${className}`}
+      className={`pointer-events-none fixed inset-x-0 bottom-3 pb-[env(safe-area-inset-bottom,0px)] z-40 flex items-end justify-between px-4 sm:px-6 select-none touch-none ${className}`}
     >
       {/* Left Directional Pad or Analog Joystick */}
       <div className="pointer-events-auto">
@@ -271,7 +271,7 @@ export const VirtualControls: React.FC<VirtualControlsProps> = ({
           <div
             role="group"
             aria-label="Virtual D-Pad"
-            className="relative w-32 h-32 rounded-full bg-zinc-950/75 border border-white/10 backdrop-blur-md shadow-xl flex items-center justify-center touch-none"
+            className="relative w-36 h-36 rounded-full bg-zinc-950/75 border border-white/10 backdrop-blur-md shadow-xl flex items-center justify-center touch-none"
           >
             <button
               type="button"
@@ -280,11 +280,11 @@ export const VirtualControls: React.FC<VirtualControlsProps> = ({
               onPointerUp={(e) => handleDpadPress('up', false, e)}
               onPointerCancel={(e) => handleDpadPress('up', false, e)}
               onPointerLeave={(e) => handleDpadPress('up', false, e)}
-              className={`absolute top-1 left-1/2 -translate-x-1/2 w-10 h-10 rounded-lg border border-white/10 flex items-center justify-center transition-colors ${
+              className={`absolute top-1 left-1/2 -translate-x-1/2 w-11 h-11 rounded-lg border border-white/10 flex items-center justify-center transition-colors ${
                 dpadPressed.up ? 'bg-indigo-600 text-white' : 'bg-zinc-900/90 text-zinc-300'
               }`}
             >
-              <ArrowUp size={16} />
+              <ArrowUp size={18} />
             </button>
             <button
               type="button"
@@ -293,11 +293,11 @@ export const VirtualControls: React.FC<VirtualControlsProps> = ({
               onPointerUp={(e) => handleDpadPress('left', false, e)}
               onPointerCancel={(e) => handleDpadPress('left', false, e)}
               onPointerLeave={(e) => handleDpadPress('left', false, e)}
-              className={`absolute left-1 top-1/2 -translate-y-1/2 w-10 h-10 rounded-lg border border-white/10 flex items-center justify-center transition-colors ${
+              className={`absolute left-1 top-1/2 -translate-y-1/2 w-11 h-11 rounded-lg border border-white/10 flex items-center justify-center transition-colors ${
                 dpadPressed.left ? 'bg-indigo-600 text-white' : 'bg-zinc-900/90 text-zinc-300'
               }`}
             >
-              <ArrowLeft size={16} />
+              <ArrowLeft size={18} />
             </button>
             <button
               type="button"
@@ -306,11 +306,11 @@ export const VirtualControls: React.FC<VirtualControlsProps> = ({
               onPointerUp={(e) => handleDpadPress('right', false, e)}
               onPointerCancel={(e) => handleDpadPress('right', false, e)}
               onPointerLeave={(e) => handleDpadPress('right', false, e)}
-              className={`absolute right-1 top-1/2 -translate-y-1/2 w-10 h-10 rounded-lg border border-white/10 flex items-center justify-center transition-colors ${
+              className={`absolute right-1 top-1/2 -translate-y-1/2 w-11 h-11 rounded-lg border border-white/10 flex items-center justify-center transition-colors ${
                 dpadPressed.right ? 'bg-indigo-600 text-white' : 'bg-zinc-900/90 text-zinc-300'
               }`}
             >
-              <ArrowRight size={16} />
+              <ArrowRight size={18} />
             </button>
             <button
               type="button"
@@ -319,11 +319,11 @@ export const VirtualControls: React.FC<VirtualControlsProps> = ({
               onPointerUp={(e) => handleDpadPress('down', false, e)}
               onPointerCancel={(e) => handleDpadPress('down', false, e)}
               onPointerLeave={(e) => handleDpadPress('down', false, e)}
-              className={`absolute bottom-1 left-1/2 -translate-x-1/2 w-10 h-10 rounded-lg border border-white/10 flex items-center justify-center transition-colors ${
+              className={`absolute bottom-1 left-1/2 -translate-x-1/2 w-11 h-11 rounded-lg border border-white/10 flex items-center justify-center transition-colors ${
                 dpadPressed.down ? 'bg-indigo-600 text-white' : 'bg-zinc-900/90 text-zinc-300'
               }`}
             >
-              <ArrowDown size={16} />
+              <ArrowDown size={18} />
             </button>
           </div>
         )}
@@ -339,7 +339,7 @@ export const VirtualControls: React.FC<VirtualControlsProps> = ({
             onPointerUp={(e) => handleActionButton('B', false, e)}
             onPointerCancel={(e) => handleActionButton('B', false, e)}
             onPointerLeave={(e) => handleActionButton('B', false, e)}
-            className="w-13 h-13 rounded-full bg-zinc-900/85 active:bg-amber-500 active:text-slate-950 text-zinc-100 font-mono font-bold text-sm border border-white/15 backdrop-blur-md shadow-xl flex items-center justify-center active:scale-95 transition-all touch-none"
+            className="w-12 h-12 rounded-full bg-zinc-900/85 active:bg-amber-500 active:text-slate-950 text-zinc-100 font-mono font-bold text-sm border border-white/15 backdrop-blur-md shadow-xl flex items-center justify-center active:scale-95 transition-all touch-none"
           >
             {labelB}
           </button>

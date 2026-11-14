@@ -1,9 +1,10 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
-import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import { audio } from '../../utils/audio';
+import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
+import { audioController } from '../../sdk/audioController';
 import { useGameEngine } from '../../sdk';
-import { disposeThreeScene } from '../../utils/threeCleanup';
+import { inputManager } from '../../services/inputService';
+import { ThreeStageController, followDirectionalShadow } from '../../utils/threeStage';
 import { screenShake } from '../../utils/screenShake';
 import { GameOverlay } from '../gameplay/GameOverlay';
 import { Layers, Sparkles, Eye, Zap, ChevronDown, ChevronUp } from 'lucide-react';
@@ -15,15 +16,6 @@ interface NeonStackerGameProps {
 }
 
 type CameraAngle = 'isometric' | 'front' | 'orbit';
-
-interface PlacedSlab {
-  mesh: THREE.Mesh;
-  x: number;
-  z: number;
-  width: number;
-  depth: number;
-  y: number;
-}
 
 interface FallingCutPiece {
   mesh: THREE.Mesh;
@@ -51,8 +43,11 @@ const PALETTE_HEX = [
   0xec4899, 0xf43f5e, 0xf97316, 0xf59e0b, 0x10b981, 0x14b8a6
 ];
 
-const _camPos = new THREE.Vector3();
-const _camTarget = new THREE.Vector3();
+const _camTargetPos = new THREE.Vector3(7.5, 8.5, 7.5);
+const _camSmoothPos = new THREE.Vector3(7.5, 8.5, 7.5);
+const _camLookAt = new THREE.Vector3(0, 0, 0);
+const _shadowFocus = new THREE.Vector3(0, 0, 0);
+const _lampOffset = new THREE.Vector3(8, 16, 10);
 
 export default function NeonStackerGame({ onGameOver, onScoreUpdate, highScore }: NeonStackerGameProps) {
   const {
@@ -64,8 +59,6 @@ export default function NeonStackerGame({ onGameOver, onScoreUpdate, highScore }
     startWithCountdown,
     resumeGame,
     countdown,
-    startLoop,
-    stopLoop,
     gameStateRef
   } = useGameEngine({
     gameId: 'neonstacker',
@@ -86,6 +79,7 @@ export default function NeonStackerGame({ onGameOver, onScoreUpdate, highScore }
   const slowMoActiveRef = useRef(false);
   const slowMoTimerRef = useRef(0);
   const slowMoChargesRef = useRef(1);
+  const bannerTimerRef = useRef<number | null>(null);
 
   const stackStateRef = useRef<{
     rowIdx: number;
@@ -102,6 +96,7 @@ export default function NeonStackerGame({ onGameOver, onScoreUpdate, highScore }
     prevD: number;
     perfectStreak: number;
     resetRequested: boolean;
+    traumaToTrigger: number;
     sliceQueue: {
       x: number;
       y: number;
@@ -136,6 +131,7 @@ export default function NeonStackerGame({ onGameOver, onScoreUpdate, highScore }
     prevD: INITIAL_SIZE,
     perfectStreak: 0,
     resetRequested: true,
+    traumaToTrigger: 0,
     sliceQueue: [],
     placedQueue: []
   });
@@ -144,10 +140,23 @@ export default function NeonStackerGame({ onGameOver, onScoreUpdate, highScore }
     cameraAngleRef.current = cameraAngle;
   }, [cameraAngle]);
 
+  useEffect(() => {
+    return () => {
+      if (bannerTimerRef.current !== null) {
+        clearTimeout(bannerTimerRef.current);
+      }
+    };
+  }, []);
+
   const triggerBanner = useCallback((msg: string) => {
     setBannerText(msg);
-    const t = window.setTimeout(() => setBannerText(null), 1100);
-    return () => clearTimeout(t);
+    if (bannerTimerRef.current !== null) {
+      clearTimeout(bannerTimerRef.current);
+    }
+    bannerTimerRef.current = window.setTimeout(() => {
+      setBannerText(null);
+      bannerTimerRef.current = null;
+    }, 1100);
   }, []);
 
   const activateSlowMo = useCallback(() => {
@@ -158,7 +167,7 @@ export default function NeonStackerGame({ onGameOver, onScoreUpdate, highScore }
     slowMoTimerRef.current = 4.5;
     setSlowMoCharges(slowMoChargesRef.current);
     setSlowMoActive(true);
-    audio.playLaser();
+    audioController.playLaser();
     triggerBanner('CHRONO STABILIZER AKTIF (KECEPATAN 50%)');
   }, [gameStateRef, triggerBanner]);
 
@@ -186,12 +195,13 @@ export default function NeonStackerGame({ onGameOver, onScoreUpdate, highScore }
       prevD: INITIAL_SIZE,
       perfectStreak: 0,
       resetRequested: true,
+      traumaToTrigger: 0,
       sliceQueue: [],
       placedQueue: []
     };
 
     startWithCountdown(() => {
-      audio.playClick();
+      audioController.playClick();
     });
   }, [startWithCountdown, updateScore]);
 
@@ -207,7 +217,6 @@ export default function NeonStackerGame({ onGameOver, onScoreUpdate, highScore }
     const absDz = Math.abs(deltaZ);
 
     if (st.axis === 'x' && absDx >= st.activeW) {
-      // Missed completely!
       st.sliceQueue.push({
         x: st.activeX,
         y: yPos,
@@ -218,7 +227,8 @@ export default function NeonStackerGame({ onGameOver, onScoreUpdate, highScore }
         vx: st.dir * 2.5,
         vz: 0
       });
-      audio.playExplosion();
+      st.traumaToTrigger = 0.8;
+      audioController.playGameOver();
       screenShake.trigger('heavy');
       triggerGameOver();
       return;
@@ -235,7 +245,8 @@ export default function NeonStackerGame({ onGameOver, onScoreUpdate, highScore }
         vx: 0,
         vz: st.dir * 2.5
       });
-      audio.playExplosion();
+      st.traumaToTrigger = 0.8;
+      audioController.playGameOver();
       screenShake.trigger('heavy');
       triggerGameOver();
       return;
@@ -252,10 +263,10 @@ export default function NeonStackerGame({ onGameOver, onScoreUpdate, highScore }
 
     if (isPerfect) {
       st.perfectStreak += 1;
-      audio.playLevelUp();
+      st.traumaToTrigger = Math.max(st.traumaToTrigger, 0.32);
+      audioController.playPowerup();
       screenShake.trigger('medium');
 
-      // Expand slab slightly after 3 consecutive perfect drops
       if (st.perfectStreak >= 3) {
         nextW = Math.min(INITIAL_SIZE, st.activeW + 0.22);
         nextD = Math.min(INITIAL_SIZE, st.activeD + 0.22);
@@ -269,7 +280,8 @@ export default function NeonStackerGame({ onGameOver, onScoreUpdate, highScore }
       }
     } else {
       st.perfectStreak = 0;
-      audio.playScore();
+      st.traumaToTrigger = Math.max(st.traumaToTrigger, 0.18);
+      audioController.playScore();
       screenShake.trigger('light');
 
       if (st.axis === 'x') {
@@ -343,7 +355,6 @@ export default function NeonStackerGame({ onGameOver, onScoreUpdate, highScore }
     }
   }, [addScore, gameStateRef, triggerBanner, triggerGameOver]);
 
-  // Keyboard listener
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'h' || e.key === 'H') {
@@ -364,86 +375,80 @@ export default function NeonStackerGame({ onGameOver, onScoreUpdate, highScore }
       }
     };
     window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    const unsub = inputManager.subscribe({
+      onActionDown: (action) => {
+        if (action === 'PRIMARY' || action === 'ACTION_PRIMARY' || action === 'UP') {
+          handleStack();
+        } else if (action === 'DOWN') {
+          activateSlowMo();
+        }
+      }
+    });
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      unsub();
+    };
   }, [activateSlowMo, gameStateRef, handleStack]);
 
-  // Three.js WebGL Studio Scene (mounts once)
+  // Unified ThreeStageController WebGL Studio Scene
   useEffect(() => {
     const mount = canvasMountRef.current;
     if (!mount) return;
 
-    const isSoftwareGl = (() => {
-      const gl = document.createElement('canvas').getContext('webgl2');
-      if (!gl) return true;
-      const ext = gl.getExtension('WEBGL_debug_renderer_info');
-      const param = ext ? ext.UNMASKED_RENDERER_WEBGL : gl.RENDERER;
-      const gpu = String(gl.getParameter(param));
-      gl.getExtension('WEBGL_lose_context')?.loseContext();
-      return /SwiftShader|llvmpipe|softpipe|Software|Basic Render/i.test(gpu);
-    })();
+    let stage: ThreeStageController;
+    try {
+      stage = new ThreeStageController({
+        container: mount,
+        backgroundColor: 0x060913,
+        fogColor: 0x060913,
+        fogDensity: 0.022,
+        fov: 45,
+        near: 0.1,
+        far: 150,
+        manualCamera: true,
+        enableGridFloor: false,
+        shadowBounds: 10,
+        toneMappingExposure: 1.15,
+        bloom: {
+          enabled: true,
+          strength: 0.56,
+          radius: 0.42,
+          threshold: 0.8
+        }
+      });
+    } catch {
+      return;
+    }
 
-    const width = mount.clientWidth || 600;
-    const height = mount.clientHeight || 520;
-
-    const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x060913);
-    scene.fog = new THREE.FogExp2(0x060913, 0.025);
-
-    const camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 150);
+    const { scene, camera } = stage;
     camera.position.set(7.5, 8.5, 7.5);
+    stage.rimLight.color.setHex(0xec4899);
+    stage.rimLight.position.set(-9, 10, -8);
 
-    const renderer = new THREE.WebGLRenderer({
-      antialias: !isSoftwareGl,
-      powerPreference: 'high-performance'
-    });
-    renderer.outputColorSpace = THREE.SRGBColorSpace;
-    renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.15;
-    renderer.setPixelRatio(isSoftwareGl ? 1 : Math.min(window.devicePixelRatio, 2));
-    renderer.setSize(width, height);
-    renderer.shadowMap.enabled = !isSoftwareGl;
-    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-    mount.appendChild(renderer.domElement);
-
-    const pmremGenerator = new THREE.PMREMGenerator(renderer);
-    scene.environment = pmremGenerator.fromScene(new RoomEnvironment(), 0.04).texture;
-    pmremGenerator.dispose();
-
-    // 3-Point Studio Lighting
-    const hemiLight = new THREE.HemisphereLight(0x38bdf8, 0x090d16, 0.8);
-    scene.add(hemiLight);
-
-    const keyLight = new THREE.DirectionalLight(0xfff7ed, 1.7);
-    keyLight.position.set(8, 18, 10);
-    keyLight.castShadow = !isSoftwareGl;
-    keyLight.shadow.mapSize.set(1024, 1024);
-    keyLight.shadow.bias = -0.0005;
-    keyLight.shadow.normalBias = 0.02;
-    scene.add(keyLight);
-
-    const rimLight = new THREE.DirectionalLight(0xec4899, 0.9);
-    rimLight.position.set(-9, 10, -8);
-    scene.add(rimLight);
-
-    // Composite Studio Foundation Pedestal (3 parts)
+    // Composite Studio Foundation Pedestal
     const pedestalGroup = new THREE.Group();
     const basePlinth = new THREE.Mesh(
       new THREE.CylinderGeometry(3.2, 3.6, 1.4, 32),
-      new THREE.MeshStandardMaterial({ color: 0x0f172a, metalness: 0.7, roughness: 0.3 })
+      new THREE.MeshStandardMaterial({ color: 0x0f172a, metalness: 0.72, roughness: 0.28 })
     );
     basePlinth.position.y = -1.2;
     pedestalGroup.add(basePlinth);
 
     const baseRing = new THREE.Mesh(
-      new THREE.TorusGeometry(3.25, 0.06, 12, 48),
-      new THREE.MeshBasicMaterial({ color: 0x06b6d4 })
+      new THREE.TorusGeometry(3.25, 0.065, 12, 48),
+      new THREE.MeshStandardMaterial({
+        color: 0x22d3ee,
+        emissive: 0x06b6d4,
+        emissiveIntensity: 1.75,
+        roughness: 0.15
+      })
     );
     baseRing.rotation.x = Math.PI / 2;
     baseRing.position.y = -0.52;
     pedestalGroup.add(baseRing);
 
     const foundationSlab = new THREE.Mesh(
-      new THREE.BoxGeometry(INITIAL_SIZE, SLAB_HEIGHT, INITIAL_SIZE),
+      new RoundedBoxGeometry(INITIAL_SIZE, SLAB_HEIGHT, INITIAL_SIZE, 2, 0.06),
       new THREE.MeshPhysicalMaterial({
         color: 0x1e293b,
         metalness: 0.65,
@@ -452,7 +457,7 @@ export default function NeonStackerGame({ onGameOver, onScoreUpdate, highScore }
       })
     );
     foundationSlab.position.y = -SLAB_HEIGHT / 2;
-    foundationSlab.receiveShadow = !isSoftwareGl;
+    foundationSlab.receiveShadow = !stage.isSoftwareGl;
     pedestalGroup.add(foundationSlab);
     scene.add(pedestalGroup);
 
@@ -461,12 +466,17 @@ export default function NeonStackerGame({ onGameOver, onScoreUpdate, highScore }
 
     const activeSlabMat = new THREE.MeshPhysicalMaterial({
       color: PALETTE_HEX[0],
+      emissive: PALETTE_HEX[0],
+      emissiveIntensity: 0.45,
       metalness: 0.45,
       roughness: 0.18,
       clearcoat: 1.0
     });
-    const activeSlabMesh = new THREE.Mesh(new THREE.BoxGeometry(1, SLAB_HEIGHT, 1), activeSlabMat);
-    activeSlabMesh.castShadow = !isSoftwareGl;
+    const activeSlabMesh = new THREE.Mesh(
+      new RoundedBoxGeometry(1, SLAB_HEIGHT, 1, 2, 0.04),
+      activeSlabMat
+    );
+    activeSlabMesh.castShadow = !stage.isSoftwareGl;
     scene.add(activeSlabMesh);
 
     const fallingPieces: FallingCutPiece[] = [];
@@ -493,25 +503,10 @@ export default function NeonStackerGame({ onGameOver, onScoreUpdate, highScore }
       shockwaves.length = 0;
     };
 
-    const handleResize = () => {
-      if (!mount) return;
-      const w = mount.clientWidth || 600;
-      const h = mount.clientHeight || 520;
-      camera.aspect = w / h;
-      camera.updateProjectionMatrix();
-      renderer.setSize(w, h);
-    };
-    const resizeObserver = new ResizeObserver(handleResize);
-    resizeObserver.observe(mount);
-    window.addEventListener('resize', handleResize);
+    _camSmoothPos.set(7.5, 8.5, 7.5);
 
-    let elapsed = 0;
-    let swRenderAcc = 0;
-    let hasRenderedInitial = false;
-
-    startLoop((_timestamp, deltaTimeMs) => {
-      const delta = Math.min(deltaTimeMs / 1000, 0.05);
-      elapsed += delta;
+    stage.startLoop((dt, elapsed) => {
+      const delta = Math.min(dt, 0.05);
       const st = stackStateRef.current;
 
       if (st.resetRequested) {
@@ -519,7 +514,12 @@ export default function NeonStackerGame({ onGameOver, onScoreUpdate, highScore }
         st.resetRequested = false;
       }
 
-      // Process newly placed slabs
+      if (st.traumaToTrigger > 0) {
+        stage.cameraRig.addTrauma(st.traumaToTrigger);
+        st.traumaToTrigger = 0;
+      }
+
+      // Process newly placed slabs with RoundedBoxGeometry & HDR perfect glow
       while (st.placedQueue.length > 0) {
         const item = st.placedQueue.shift()!;
         const mat = new THREE.MeshPhysicalMaterial({
@@ -527,24 +527,32 @@ export default function NeonStackerGame({ onGameOver, onScoreUpdate, highScore }
           metalness: 0.45,
           roughness: 0.2,
           clearcoat: 0.9,
-          emissive: item.isPerfect ? item.colorHex : 0x000000,
-          emissiveIntensity: item.isPerfect ? 0.35 : 0
+          emissive: item.colorHex,
+          emissiveIntensity: item.isPerfect ? 1.35 : 0.28
         });
-        const mesh = new THREE.Mesh(new THREE.BoxGeometry(item.w, SLAB_HEIGHT, item.d), mat);
+        const radius = Math.min(0.055, item.w * 0.18, item.d * 0.18);
+        const mesh = new THREE.Mesh(
+          new RoundedBoxGeometry(item.w, SLAB_HEIGHT, item.d, 2, radius),
+          mat
+        );
         mesh.position.set(item.x, item.y, item.z);
-        mesh.castShadow = !isSoftwareGl;
-        mesh.receiveShadow = !isSoftwareGl;
+        mesh.castShadow = !stage.isSoftwareGl;
+        mesh.receiveShadow = !stage.isSoftwareGl;
         towerGroup.add(mesh);
 
         if (item.isPerfect) {
+          stage.particles.burst(item.x, item.y, item.z, 22, item.colorHex, 6.5);
+          stage.cameraRig.kickFov(2.2);
           const ringGeo = new THREE.RingGeometry(
             Math.max(item.w, item.d) * 0.65,
-            Math.max(item.w, item.d) * 0.78,
+            Math.max(item.w, item.d) * 0.8,
             32
           );
           ringGeo.rotateX(-Math.PI / 2);
-          const ringMat = new THREE.MeshBasicMaterial({
-            color: 0xfbbf24,
+          const ringMat = new THREE.MeshStandardMaterial({
+            color: 0xfef08a,
+            emissive: 0xfbbf24,
+            emissiveIntensity: 2.0,
             side: THREE.DoubleSide,
             transparent: true,
             opacity: 0.95
@@ -553,6 +561,8 @@ export default function NeonStackerGame({ onGameOver, onScoreUpdate, highScore }
           ringMesh.position.set(item.x, item.y - SLAB_HEIGHT / 2 + 0.02, item.z);
           scene.add(ringMesh);
           shockwaves.push({ mesh: ringMesh, scale: 1, opacity: 0.95 });
+        } else {
+          stage.particles.burst(item.x, item.y, item.z, 8, item.colorHex, 4);
         }
       }
 
@@ -561,12 +571,19 @@ export default function NeonStackerGame({ onGameOver, onScoreUpdate, highScore }
         const cut = st.sliceQueue.shift()!;
         const cutMat = new THREE.MeshStandardMaterial({
           color: cut.colorHex,
-          metalness: 0.3,
-          roughness: 0.4
+          emissive: cut.colorHex,
+          emissiveIntensity: 0.35,
+          metalness: 0.35,
+          roughness: 0.35
         });
-        const cutMesh = new THREE.Mesh(new THREE.BoxGeometry(cut.w, SLAB_HEIGHT, cut.d), cutMat);
+        const radius = Math.min(0.045, cut.w * 0.18, cut.d * 0.18);
+        const cutMesh = new THREE.Mesh(
+          new RoundedBoxGeometry(cut.w, SLAB_HEIGHT, cut.d, 2, radius),
+          cutMat
+        );
         cutMesh.position.set(cut.x, cut.y, cut.z);
         scene.add(cutMesh);
+        stage.particles.burst(cut.x, cut.y, cut.z, 10, cut.colorHex, 5);
         fallingPieces.push({
           mesh: cutMesh,
           vx: cut.vx,
@@ -613,10 +630,12 @@ export default function NeonStackerGame({ onGameOver, onScoreUpdate, highScore }
       }
 
       const activeY = (st.rowIdx + 0.5) * SLAB_HEIGHT;
+      const curHex = PALETTE_HEX[st.rowIdx % PALETTE_HEX.length];
       activeSlabMesh.visible = gameStateRef.current === 'playing';
       activeSlabMesh.scale.set(st.activeW, 1, st.activeD);
       activeSlabMesh.position.set(st.activeX, activeY, st.activeZ);
-      activeSlabMat.color.setHex(PALETTE_HEX[st.rowIdx % PALETTE_HEX.length]);
+      activeSlabMat.color.setHex(curHex);
+      activeSlabMat.emissive.setHex(curHex);
 
       // Update falling sliced pieces
       for (let i = fallingPieces.length - 1; i >= 0; i--) {
@@ -642,7 +661,7 @@ export default function NeonStackerGame({ onGameOver, onScoreUpdate, highScore }
         sw.scale += delta * 2.2;
         sw.opacity -= delta * 1.6;
         sw.mesh.scale.setScalar(sw.scale);
-        (sw.mesh.material as THREE.MeshBasicMaterial).opacity = Math.max(0, sw.opacity);
+        (sw.mesh.material as THREE.MeshStandardMaterial).opacity = Math.max(0, sw.opacity);
         if (sw.opacity <= 0) {
           sw.mesh.geometry.dispose();
           (sw.mesh.material as THREE.Material).dispose();
@@ -651,53 +670,41 @@ export default function NeonStackerGame({ onGameOver, onScoreUpdate, highScore }
         }
       }
 
-      // Smooth camera tracking tower height
+      // Smooth camera tracking tower height + followDirectionalShadow + trauma shake
       const towerTopY = st.rowIdx * SLAB_HEIGHT;
+      _shadowFocus.set(0, towerTopY, 0);
+      followDirectionalShadow(stage.keyLight, _shadowFocus, 10, true, _lampOffset);
+
       const mode = cameraAngleRef.current;
       if (mode === 'isometric') {
-        _camPos.set(7.2, towerTopY + 6.2, 7.2);
+        _camTargetPos.set(7.2, towerTopY + 6.2, 7.2);
       } else if (mode === 'front') {
-        _camPos.set(0, towerTopY + 5.2, 9.8);
+        _camTargetPos.set(0, towerTopY + 5.2, 9.8);
       } else {
         const orbAngle = elapsed * 0.45;
-        _camPos.set(Math.cos(orbAngle) * 8.8, towerTopY + 6.0, Math.sin(orbAngle) * 8.8);
+        _camTargetPos.set(Math.cos(orbAngle) * 8.8, towerTopY + 6.0, Math.sin(orbAngle) * 8.8);
       }
-      _camTarget.set(0, Math.max(0, towerTopY - 0.8), 0);
+      _camLookAt.set(0, Math.max(0, towerTopY - 0.8), 0);
 
-      camera.position.x = THREE.MathUtils.damp(camera.position.x, _camPos.x, 6, delta);
-      camera.position.y = THREE.MathUtils.damp(camera.position.y, _camPos.y, 6, delta);
-      camera.position.z = THREE.MathUtils.damp(camera.position.z, _camPos.z, 6, delta);
-      camera.lookAt(_camTarget);
+      _camSmoothPos.x = THREE.MathUtils.damp(_camSmoothPos.x, _camTargetPos.x, 6, delta);
+      _camSmoothPos.y = THREE.MathUtils.damp(_camSmoothPos.y, _camTargetPos.y, 6, delta);
+      _camSmoothPos.z = THREE.MathUtils.damp(_camSmoothPos.z, _camTargetPos.z, 6, delta);
 
-      keyLight.position.y = towerTopY + 16;
-      keyLight.target.position.set(0, towerTopY, 0);
-      keyLight.target.updateMatrixWorld();
-
-      if (!isSoftwareGl) {
-        renderer.render(scene, camera);
-      } else {
-        swRenderAcc += delta;
-        if (!hasRenderedInitial || swRenderAcc >= 0.06) {
-          hasRenderedInitial = true;
-          swRenderAcc = 0;
-          renderer.render(scene, camera);
-        }
-      }
+      stage.cameraRig.stepFovRecovery(camera, 45, delta);
+      stage.cameraRig.applyTraumaToCamera(camera, _camSmoothPos, delta, 0.36);
+      camera.lookAt(_camLookAt);
     });
 
     return () => {
-      stopLoop();
-      resizeObserver.disconnect();
-      window.removeEventListener('resize', handleResize);
       clearTower();
-      disposeThreeScene(scene, renderer);
+      stage.dispose();
     };
-  }, [gameStateRef, startLoop, stopLoop]);
+  }, [gameStateRef]);
 
   return (
     <div
       onPointerDown={handleStack}
-      className="relative w-full h-full min-h-[480px] flex flex-col items-center justify-center bg-[#060913] overflow-hidden select-none cursor-pointer touch-none"
+      className="relative w-full h-full min-h-[260px] sm:min-h-[380px] lg:min-h-[480px] flex flex-col items-center justify-center bg-[#060913] overflow-hidden select-none cursor-pointer touch-none"
     >
       {/* Dedicated WebGL Mount Container */}
       <div ref={canvasMountRef} className="absolute inset-0 w-full h-full" />
@@ -768,7 +775,7 @@ export default function NeonStackerGame({ onGameOver, onScoreUpdate, highScore }
             <button
               onClick={activateSlowMo}
               disabled={slowMoCharges <= 0 || slowMoActive}
-              className={`px-3 py-1.5 rounded-lg font-mono font-semibold flex items-center gap-1.5 transition-colors whitespace-nowrap ${
+              className={`min-h-[44px] sm:min-h-[34px] px-3 py-1.5 rounded-lg font-mono font-semibold flex items-center gap-1.5 transition-colors whitespace-nowrap ${
                 slowMoActive
                   ? 'bg-amber-500 text-slate-950'
                   : slowMoCharges > 0
@@ -785,7 +792,7 @@ export default function NeonStackerGame({ onGameOver, onScoreUpdate, highScore }
                 e.stopPropagation();
                 handleStack();
               }}
-              className="px-4 py-1.5 rounded-lg bg-pink-600 hover:bg-pink-500 text-white font-semibold tracking-wide whitespace-nowrap touch-none"
+              className="min-h-[44px] sm:min-h-[34px] px-4 py-1.5 rounded-lg bg-pink-600 hover:bg-pink-500 text-white font-semibold tracking-wide whitespace-nowrap touch-none"
             >
               Tumpuk Balok
             </button>

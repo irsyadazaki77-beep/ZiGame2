@@ -5,12 +5,12 @@ import { GameStats, DailyMission, Achievement, PlayerProfile, RecentlyPlayedEntr
 import { challengeService } from '../services/challengeService';
 import { dailyStreakService } from '../services/dailyStreakService';
 import { getRecommendedGames, getTrendingGames } from '../utils/recommendationEngine';
-import { audio } from '../utils/audio';
+import { audioController } from '../sdk/audioController';
 import { useNavigate } from 'react-router-dom';
 import { NewPlayerOnboardingModal } from '../components/onboarding/NewPlayerOnboardingModal';
 import { DailyStreakModal } from '../components/rewards/DailyStreakModal';
 import { PWAInstallButton } from '../components/pwa/PWAInstallButton';
-import { GAME_QUALITY_MAP } from '../config/qualityTiers';
+import { getGameQualityInfo } from '../config/qualityTiers';
 import GameCard from '../components/GameCard';
 import { GameArtwork } from '../components/GameArtwork';
 
@@ -65,7 +65,7 @@ export default function Home({
 
   const toggleFavorite = (e: React.MouseEvent, gameId: string) => {
     e.stopPropagation();
-    audio.playCoin();
+    audioController.playCoin();
     const updated = favorites.includes(gameId)
       ? favorites.filter(id => id !== gameId)
       : [...favorites, gameId];
@@ -84,7 +84,9 @@ export default function Home({
 
   // Shelves computation
   const flagshipGames = useMemo(() => {
-    const list = games.filter(g => GAME_QUALITY_MAP[g.id]?.tier === 'flagship');
+    const featured = games.filter(g => g.featured);
+    if (featured.length > 0) return featured.slice(0, 8);
+    const list = games.filter(g => getGameQualityInfo(g.id).tier === 'flagship');
     return list.length > 0 ? list.slice(0, 4) : games.slice(0, 4);
   }, [games]);
 
@@ -93,16 +95,21 @@ export default function Home({
   }, [games, profile, recentlyPlayed]);
 
   const quickPlayGames = useMemo(() => {
-    return games.filter(g => GAME_QUALITY_MAP[g.id]?.estimatedDuration === 'quick').slice(0, 4);
+    return games.filter(g => getGameQualityInfo(g.id).estimatedDuration === 'quick').slice(0, 4);
   }, [games]);
 
   const topRatedGames = useMemo(() => {
     return [...games].sort((a, b) => (b.plays || 0) - (a.plays || 0)).slice(0, 4);
   }, [games]);
 
-  // Spotlight game (either Tetris, Snake, Space, or the highest play game)
+  // Spotlight game (prefer Wizard Chess, Cyber Tetris, Snake, or first game)
   const spotlightGame = useMemo(() => {
-    return games.find(g => g.id === 'tetris') || games.find(g => g.id === 'snake') || games[0];
+    return (
+      games.find(g => g.id === 'wizard-chess') ||
+      games.find(g => g.id === 'cyber-tetris') ||
+      games.find(g => g.id === 'snake') ||
+      games[0]
+    );
   }, [games]);
 
   // Continue playing (the last played game)
@@ -156,8 +163,8 @@ export default function Home({
 
           <div className="relative z-10 p-5 sm:p-8 lg:p-10 flex flex-col md:flex-row items-start md:items-center justify-between gap-5 sm:gap-6">
             <div className="max-w-xl space-y-2.5 sm:space-y-3">
-              <div className="inline-flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3 py-1 rounded-full bg-indigo-500/10 border border-indigo-500/20 text-indigo-500 text-[11px] sm:text-xs font-semibold">
-                <Sparkles size={12} className="text-indigo-500 shrink-0" />
+              <div className="inline-flex items-center gap-1.5 text-indigo-400 text-[11px] sm:text-xs font-semibold uppercase tracking-wider">
+                <Sparkles size={12} className="text-indigo-400 shrink-0" />
                 <span>Pilihan Utama Hari Ini</span>
               </div>
 
@@ -171,15 +178,15 @@ export default function Home({
 
               <div className="flex flex-wrap items-center gap-2.5 sm:gap-3 pt-2">
                 <button
-                  onClick={() => { audio.playCoin(); onSelectGame(spotlightGame.id); }}
-                  className="px-4 sm:px-6 py-2.5 sm:py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs sm:text-sm shadow-md shadow-indigo-600/30 transition flex items-center gap-2 cursor-pointer active:scale-98"
+                  onClick={() => { audioController.playCoin(); onSelectGame(spotlightGame.id); }}
+                  className="min-h-[44px] px-4 sm:px-6 py-2.5 sm:py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs sm:text-sm shadow-md shadow-indigo-600/30 transition flex items-center gap-2 cursor-pointer active:scale-98"
                 >
                   <Play size={15} fill="currentColor" />
                   Main Sekarang
                 </button>
                 <button
-                  onClick={() => { audio.playCoin(); navigate('/games'); }}
-                  className="px-4 sm:px-5 py-2.5 sm:py-3 rounded-xl bg-surface-subtle hover:bg-surface-hover border border-border-subtle text-text-primary font-semibold text-xs sm:text-sm transition cursor-pointer"
+                  onClick={() => { audioController.playCoin(); navigate('/games'); }}
+                  className="min-h-[44px] px-4 sm:px-5 py-2.5 sm:py-3 rounded-xl bg-surface-subtle hover:bg-surface-hover border border-border-subtle text-text-primary font-semibold text-xs sm:text-sm transition cursor-pointer"
                 >
                   Jelajahi Semua
                 </button>
@@ -219,7 +226,7 @@ export default function Home({
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
         {/* Streak Quick Card */}
         <div 
-          onClick={() => { audio.playCoin(); setShowDailyStreakModal(true); }}
+          onClick={() => { audioController.playCoin(); setShowDailyStreakModal(true); }}
           className="p-4 rounded-2xl bg-amber-500/10 hover:bg-amber-500/15 border border-amber-500/20 hover:border-amber-500/35 flex items-center justify-between gap-3 cursor-pointer transition shadow-xs group"
         >
           <div className="flex items-center gap-3">
@@ -230,7 +237,7 @@ export default function Home({
               <div className="flex items-center gap-1.5">
                 <span className="font-bold text-xs sm:text-sm text-text-primary">Login Beruntun {streakInfo.currentStreak} Hari</span>
                 {streakInfo.canClaimToday && (
-                  <span className="w-2 h-2 rounded-full bg-amber-500 animate-ping" />
+                  <span className="text-[10px] font-semibold text-amber-400">· Siap Klaim</span>
                 )}
               </div>
               <p className="text-[11px] text-text-muted mt-0.5">
@@ -240,7 +247,7 @@ export default function Home({
               </p>
             </div>
           </div>
-          <button className="px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-zinc-950 font-bold text-xs shrink-0 transition shadow-sm">
+          <button className="min-h-[36px] px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-zinc-950 font-bold text-xs shrink-0 transition shadow-sm">
             {streakInfo.canClaimToday ? 'Klaim' : 'Lihat'}
           </button>
         </div>
@@ -288,14 +295,14 @@ export default function Home({
 
               <div className="pt-4 flex items-center gap-2.5">
                 <button
-                  onClick={() => { audio.playCoin(); onSelectGame(lastPlayedGame.id); }}
-                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs rounded-xl flex items-center gap-2 transition cursor-pointer"
+                  onClick={() => { audioController.playCoin(); onSelectGame(lastPlayedGame.id); }}
+                  className="min-h-[40px] px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs rounded-xl flex items-center gap-2 transition cursor-pointer"
                 >
                   <Play size={13} fill="currentColor" /> Lanjutkan Sesi
                 </button>
                 <button
-                  onClick={() => { audio.playCoin(); navigate('/games'); }}
-                  className="px-3.5 py-2 bg-surface-subtle hover:bg-surface-hover border border-border-subtle text-text-primary font-semibold text-xs rounded-xl transition cursor-pointer"
+                  onClick={() => { audioController.playCoin(); navigate('/games'); }}
+                  className="min-h-[40px] px-3.5 py-2 bg-surface-subtle hover:bg-surface-hover border border-border-subtle text-text-primary font-semibold text-xs rounded-xl transition cursor-pointer"
                 >
                   Pilih Lainnya
                 </button>
@@ -311,8 +318,8 @@ export default function Home({
                 <p className="text-xs text-text-muted mt-0.5">Pilih game dari perpustakaan dan ciptakan rekor skor perdana Anda!</p>
               </div>
               <button
-                onClick={() => { audio.playCoin(); navigate('/games'); }}
-                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs rounded-xl transition cursor-pointer"
+                onClick={() => { audioController.playCoin(); navigate('/games'); }}
+                className="min-h-[40px] px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs rounded-xl transition cursor-pointer"
               >
                 Buka Perpustakaan Game
               </button>
@@ -367,15 +374,15 @@ export default function Home({
               <div className="pt-4 flex items-center justify-end">
                 {dailyChallengeToHighlight.gameId ? (
                   <button
-                    onClick={() => { audio.playCoin(); onSelectGame(dailyChallengeToHighlight.gameId!); }}
-                    className="px-4 py-2 bg-amber-400 hover:bg-amber-300 text-zinc-950 font-bold text-xs rounded-xl transition cursor-pointer"
+                    onClick={() => { audioController.playCoin(); onSelectGame(dailyChallengeToHighlight.gameId!); }}
+                    className="min-h-[40px] px-4 py-2 bg-amber-400 hover:bg-amber-300 text-zinc-950 font-bold text-xs rounded-xl transition cursor-pointer"
                   >
                     Mulai Misi
                   </button>
                 ) : (
                   <button
-                    onClick={() => { audio.playCoin(); navigate('/challenges'); }}
-                    className="px-4 py-2 bg-surface-subtle hover:bg-surface-hover border border-border-subtle text-text-primary font-semibold text-xs rounded-xl transition cursor-pointer"
+                    onClick={() => { audioController.playCoin(); navigate('/challenges'); }}
+                    className="min-h-[40px] px-4 py-2 bg-surface-subtle hover:bg-surface-hover border border-border-subtle text-text-primary font-semibold text-xs rounded-xl transition cursor-pointer"
                   >
                     Lihat Semua Tantangan
                   </button>
@@ -392,20 +399,20 @@ export default function Home({
         </div>
       </div>
 
-      {/* 3. Flagship Games Shelf (Featured High Quality Games) */}
+      {/* 3. Featured / Top Picks Flagship Shelf */}
       <section className="space-y-3.5 sm:space-y-4">
         <div className="flex justify-between items-center">
           <div>
             <h2 className="text-base sm:text-lg font-bold text-text-primary tracking-tight flex items-center gap-2">
               <Trophy className="text-amber-500 w-4 h-4 shrink-0" />
-              Game Unggulan (Flagship)
+              Pilihan Unggulan (Featured Picks)
             </h2>
             <p className="text-[11px] sm:text-xs text-text-muted mt-0.5">
-              Koleksi permainan terbaik dengan kontrol presisi, audio haptik, dan performa 60 FPS
+              Koleksi game flagship terkurasi dengan kontrol presisi, audio terpadu, dan performa 60 FPS
             </p>
           </div>
           <button
-            onClick={() => { audio.playCoin(); navigate('/games'); }}
+            onClick={() => { audioController.playCoin(); navigate('/games'); }}
             className="text-xs text-indigo-500 hover:text-indigo-600 dark:hover:text-indigo-400 font-medium transition flex items-center gap-1 cursor-pointer shrink-0"
           >
             Lihat Katalog <ArrowRight size={13} />
@@ -439,7 +446,7 @@ export default function Home({
             </p>
           </div>
           <button
-            onClick={() => { audio.playCoin(); navigate('/games'); }}
+            onClick={() => { audioController.playCoin(); navigate('/games'); }}
             className="text-xs text-indigo-500 hover:text-indigo-600 dark:hover:text-indigo-400 font-medium transition flex items-center gap-1 cursor-pointer shrink-0"
           >
             Semua Game <ArrowRight size={13} />

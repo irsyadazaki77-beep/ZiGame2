@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Gamepad2, PanelLeft, Sun, Moon, CloudOff, Cloud } from 'lucide-react';
+import { Gamepad2, PanelLeft, Sun, Moon, CloudOff, Cloud, Volume2, VolumeX } from 'lucide-react';
 import { useGameContext } from '../../contexts/GameContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { formatNumber } from '../../utils/format';
-import { audio } from '../../utils/audio';
+import { audioController } from '../../sdk/audioController';
 
 import { PWAInstallButton } from '../pwa/PWAInstallButton';
 
@@ -20,9 +20,16 @@ export const TopBar: React.FC<TopBarProps> = ({
   const navigate = useNavigate();
   const { profile, theme, toggleTheme } = useGameContext();
   const { isFirebaseUser } = useAuth();
+  const [isMuted, setIsMuted] = useState<boolean>(() => audioController.isMuted());
   const [systemTime, setSystemTime] = useState<string>(() => {
     return new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
   });
+
+  useEffect(() => {
+    return audioController.subscribe(() => {
+      setIsMuted(audioController.isMuted());
+    });
+  }, []);
 
   useEffect(() => {
     const updateTime = () => {
@@ -90,9 +97,28 @@ export const TopBar: React.FC<TopBarProps> = ({
         {/* PWA In-App Install Action */}
         <PWAInstallButton variant="topbar" />
 
+        {/* Global Audio Mute Button */}
+        <button
+          onClick={() => {
+            const muted = audioController.toggleMute();
+            setIsMuted(muted);
+            if (!muted) audioController.playClick();
+          }}
+          className={`w-8 h-8 sm:w-9 sm:h-9 rounded-full border flex items-center justify-center transition-all duration-150 cursor-pointer focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:outline-hidden ${
+            isMuted
+              ? 'bg-rose-500/10 border-rose-500/30 text-rose-400'
+              : 'bg-surface-subtle border-border-subtle text-text-secondary hover:text-text-primary hover:bg-surface-card-hover'
+          }`}
+          title={isMuted ? 'Aktifkan Suara Arcade' : 'Bisukan Suara Arcade'}
+          aria-label={isMuted ? 'Aktifkan Suara' : 'Bisukan Suara'}
+          aria-pressed={isMuted}
+        >
+          {isMuted ? <VolumeX size={14} /> : <Volume2 size={14} />}
+        </button>
+
         {/* Toggle Theme Button */}
         <button
-          onClick={() => { audio.playCoin(); toggleTheme(); }}
+          onClick={() => { audioController.playClick(); toggleTheme(); }}
           className="w-8 h-8 sm:w-9 sm:h-9 rounded-full bg-surface-subtle border border-border-subtle flex items-center justify-center text-text-secondary hover:text-text-primary hover:bg-surface-card-hover transition-all duration-150 cursor-pointer focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:outline-hidden"
           title={theme === 'light' ? 'Beralih ke Tema Gelap' : 'Beralih ke Tema Terang'}
           aria-label="Ganti Tema Visual"

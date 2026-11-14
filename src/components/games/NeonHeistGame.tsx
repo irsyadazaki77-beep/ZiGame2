@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
 import { GameComponentProps } from '../../types';
-import { audio } from '../../utils/audio';
+import { audioController } from '../../sdk/audioController';
 import { useGameEngine } from '../../hooks/useGameEngine';
 import { inputManager } from '../../services/inputService';
 import { GameOverlay } from '../gameplay/GameOverlay';
@@ -12,6 +12,7 @@ import {
   QualityLevel3D,
   buildCyberActionHero3D
 } from '../../utils/threeStage';
+import { disposeObject3D } from '../../utils/threeCleanup';
 import { ShieldAlert, Terminal, KeyRound } from 'lucide-react';
 
 interface Guard3D {
@@ -119,7 +120,8 @@ export default function NeonHeistGame({
     speed: 6.8
   });
 
-  const keysRef = useRef<Record<string, boolean>>({});
+  const dirsRef = useRef({ left: false, right: false, up: false, down: false });
+  const dragMoveRef = useRef({ active: false, startX: 0, startY: 0, mx: 0, mz: 0 });
   const guardsRef = useRef<Guard3D[]>([]);
   const terminalsRef = useRef<DataTerminal3D[]>([]);
   const buildFloorRef = useRef<(fl: number) => void>(() => {});
@@ -155,33 +157,22 @@ export default function NeonHeistGame({
   }, []);
 
   useEffect(() => {
-    const onKeyDown = (e: KeyboardEvent) => {
-      keysRef.current[e.key.toLowerCase()] = true;
-    };
-    const onKeyUp = (e: KeyboardEvent) => {
-      keysRef.current[e.key.toLowerCase()] = false;
-    };
-    window.addEventListener('keydown', onKeyDown);
-    window.addEventListener('keyup', onKeyUp);
-
     const unsub = inputManager.subscribe({
       onActionDown: (action) => {
-        if (action === 'LEFT') keysRef.current['arrowleft'] = true;
-        if (action === 'RIGHT') keysRef.current['arrowright'] = true;
-        if (action === 'UP') keysRef.current['arrowup'] = true;
-        if (action === 'DOWN') keysRef.current['arrowdown'] = true;
+        if (action === 'LEFT') dirsRef.current.left = true;
+        if (action === 'RIGHT') dirsRef.current.right = true;
+        if (action === 'UP') dirsRef.current.up = true;
+        if (action === 'DOWN') dirsRef.current.down = true;
       },
       onActionUp: (action) => {
-        if (action === 'LEFT') keysRef.current['arrowleft'] = false;
-        if (action === 'RIGHT') keysRef.current['arrowright'] = false;
-        if (action === 'UP') keysRef.current['arrowup'] = false;
-        if (action === 'DOWN') keysRef.current['arrowdown'] = false;
+        if (action === 'LEFT') dirsRef.current.left = false;
+        if (action === 'RIGHT') dirsRef.current.right = false;
+        if (action === 'UP') dirsRef.current.up = false;
+        if (action === 'DOWN') dirsRef.current.down = false;
       }
     });
 
     return () => {
-      window.removeEventListener('keydown', onKeyDown);
-      window.removeEventListener('keyup', onKeyUp);
       unsub();
     };
   }, []);
@@ -232,8 +223,14 @@ export default function NeonHeistGame({
     stage.scene.add(portalGroup);
 
     buildFloorRef.current = (fl: number) => {
-      guardsRef.current.forEach((g) => stage.scene.remove(g.group));
-      terminalsRef.current.forEach((t) => stage.scene.remove(t.mesh));
+      guardsRef.current.forEach((g) => {
+        stage.scene.remove(g.group);
+        disposeObject3D(g.group);
+      });
+      terminalsRef.current.forEach((t) => {
+        stage.scene.remove(t.mesh);
+        disposeObject3D(t.mesh);
+      });
       guardsRef.current = [];
       terminalsRef.current = [];
 
@@ -280,21 +277,44 @@ export default function NeonHeistGame({
 
     buildFloorRef.current(1);
 
+    const onPointerDown = (e: PointerEvent) => {
+      dragMoveRef.current = { active: true, startX: e.clientX, startY: e.clientY, mx: 0, mz: 0 };
+    };
+    const onPointerMove = (e: PointerEvent) => {
+      if (!dragMoveRef.current.active) return;
+      const dx = e.clientX - dragMoveRef.current.startX;
+      const dy = e.clientY - dragMoveRef.current.startY;
+      if (Math.hypot(dx, dy) > 10) {
+        dragMoveRef.current.mx = THREE.MathUtils.clamp(dx / 36, -1, 1);
+        dragMoveRef.current.mz = THREE.MathUtils.clamp(dy / 36, -1, 1);
+      }
+    };
+    const onPointerUp = () => {
+      dragMoveRef.current.active = false;
+      dragMoveRef.current.mx = 0;
+      dragMoveRef.current.mz = 0;
+    };
+
+    container.addEventListener('pointerdown', onPointerDown);
+    container.addEventListener('pointermove', onPointerMove);
+    container.addEventListener('pointerup', onPointerUp);
+    container.addEventListener('pointercancel', onPointerUp);
+
     stage.startLoop((dt, elapsed) => {
       portalRing.rotation.z = elapsed * 2;
       if (gameStateRef.current !== 'playing') return;
 
       const hs = heistRef.current;
-      const keys = keysRef.current;
+      const dirs = dirsRef.current;
 
-      let mx = 0;
-      let mz = 0;
-      if (keys['arrowleft'] || keys['a']) mx -= 1;
-      if (keys['arrowright'] || keys['d']) mx += 1;
-      if (keys['arrowup'] || keys['w']) mz -= 1;
-      if (keys['arrowdown'] || keys['s']) mz += 1;
+      let mx = dragMoveRef.current.active ? dragMoveRef.current.mx : 0;
+      let mz = dragMoveRef.current.active ? dragMoveRef.current.mz : 0;
+      if (dirs.left) mx -= 1;
+      if (dirs.right) mx += 1;
+      if (dirs.up) mz -= 1;
+      if (dirs.down) mz += 1;
 
-      if (mx !== 0 || mz !== 0) {
+      if (Math.hypot(mx, mz) > 0.05) {
         const len = Math.hypot(mx, mz);
         mx /= len;
         mz /= len;
@@ -320,7 +340,7 @@ export default function NeonHeistGame({
           hs.hacked += 1;
           setHackedCount(hs.hacked);
           addScore(50);
-          audio.playCoin?.();
+          audioController.playScore();
           stage.particles.burst(t.x, 1.2, t.z, 22, 0x10b981, 6.5);
         }
       }
@@ -330,7 +350,7 @@ export default function NeonHeistGame({
         addScore(150);
         hs.floor += 1;
         setFloorLevel(hs.floor);
-        audio.playPowerUp?.();
+        audioController.playLevelUp();
         stage.particles.burst(0, 1.0, -6.8, 36, 0x22d3ee, 9);
         stage.kickFov(5);
         buildFloorRef.current(hs.floor);
@@ -358,7 +378,8 @@ export default function NeonHeistGame({
         if (dist < 0.85 || inFront) {
           stage.particles.burst(hs.x, 0.9, hs.z, 35, 0xef4444, 9.5);
           stage.triggerTrauma(0.75);
-          audio.playExplosion?.();
+          audioController.playExplosion();
+          audioController.playGameOver();
           triggerGameOver(scoreRef.current);
           return;
         }
@@ -366,14 +387,18 @@ export default function NeonHeistGame({
     });
 
     return () => {
+      container.removeEventListener('pointerdown', onPointerDown);
+      container.removeEventListener('pointermove', onPointerMove);
+      container.removeEventListener('pointerup', onPointerUp);
+      container.removeEventListener('pointercancel', onPointerUp);
       stage.dispose();
       stageRef.current = null;
     };
   }, [addScore, scoreRef, triggerGameOver]);
 
   return (
-    <div className="relative w-full h-full min-h-[460px] bg-slate-950 overflow-hidden rounded-2xl border border-cyan-500/20">
-      <div ref={mountRef} className="absolute inset-0 w-full h-full" />
+    <div className="relative w-full h-full min-h-[280px] sm:min-h-[380px] lg:min-h-[460px] bg-slate-950 overflow-hidden rounded-2xl border border-cyan-500/20 select-none">
+      <div ref={mountRef} className="absolute inset-0 w-full h-full touch-none" />
 
       <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex flex-wrap items-center justify-between gap-2 p-3.5">
         <div className="flex items-center gap-3 rounded-xl border border-white/10 bg-slate-950/85 px-3.5 py-2 text-xs text-slate-200 tabular-nums">

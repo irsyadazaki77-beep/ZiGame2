@@ -3,7 +3,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { ScoreController } from '../sdk/scoreController';
 import { LoopController } from '../sdk/loopController';
 import { LifecycleCoordinator } from '../sdk/lifecycleCoordinator';
-import { AudioController } from '../sdk/audioController';
+import { AudioController, audioController } from '../sdk/audioController';
 import { TelemetryController } from '../sdk/telemetryController';
 import { ReplayController } from '../sdk/replayController';
 import { PerformanceController } from '../sdk/performanceController';
@@ -13,7 +13,9 @@ import { ViewportController } from '../sdk/viewportController';
 import { BrickBreakerEngine } from '../sdk/BrickBreakerEngine';
 import { PhysicsWorkerController } from '../sdk/physicsWorkerController';
 import { createGameRuntimeContext } from '../sdk/runtimeContext';
-import { CANONICAL_GAME_IDS } from '../config/canonicalGames';
+import { CANONICAL_GAME_IDS, toCanonicalGameId } from '../config/canonicalGames';
+import { CANONICAL_GAME_REGISTRY } from '../config/gameRegistry';
+import { GAME_QUALITY_MAP, getGameQualityInfo } from '../config/qualityTiers';
 
 describe('ZiGame 2.0 Unified Game SDK & Architecture Tests', () => {
   beforeEach(() => {
@@ -469,6 +471,71 @@ describe('ZiGame 2.0 Unified Game SDK & Architecture Tests', () => {
       expect(ctx2.gameId).toBe('neon-2048');
       ctx2.lifecycle.destroy();
     });
+
+    it('should persist audioController volume & mute settings in localStorage and notify subscribers', () => {
+      const listener = vi.fn();
+      const unsubscribe = audioController.subscribe(listener);
+
+      audioController.setMasterVolume(0.65);
+      audioController.setSfxVolume(0.45);
+      audioController.setMusicVolume(0.35);
+      audioController.setMuted(true);
+
+      expect(audioController.getMasterVolume()).toBeCloseTo(0.65, 2);
+      expect(audioController.getSfxVolume()).toBeCloseTo(0.45, 2);
+      expect(audioController.getMusicVolume()).toBeCloseTo(0.35, 2);
+      expect(audioController.isMuted()).toBe(true);
+
+      expect(localStorage.getItem('zigame_master_vol')).toBe('0.65');
+      expect(localStorage.getItem('zigame_sfx_vol')).toBe('0.45');
+      expect(localStorage.getItem('zigame_music_vol')).toBe('0.35');
+      expect(localStorage.getItem('zigame_muted')).toBe('true');
+
+      const nextMute = audioController.toggleMute();
+      expect(nextMute).toBe(false);
+      expect(audioController.isMuted()).toBe(false);
+      expect(localStorage.getItem('zigame_muted')).toBe('false');
+      expect(listener).toHaveBeenCalled();
+
+      expect(() => {
+        audioController.playClick();
+        audioController.playScore();
+        audioController.playCombo(3);
+        audioController.playHit();
+        audioController.playPowerup();
+        audioController.playWin();
+        audioController.playGameOver();
+      }).not.toThrow();
+
+      unsubscribe();
+      audioController.setMasterVolume(1);
+      audioController.setSfxVolume(0.7);
+      audioController.setMusicVolume(0.5);
+    });
+
+    it('should validate CANONICAL_GAME_REGISTRY Phase 4 parity (controlsHint, tier, featured, controlType, qualityMap)', () => {
+      const featuredGames = CANONICAL_GAME_IDS.filter(
+        (id) => CANONICAL_GAME_REGISTRY[id].featured === true
+      );
+      expect(featuredGames.length).toBeGreaterThanOrEqual(6);
+
+      for (const id of CANONICAL_GAME_IDS) {
+        const entry = CANONICAL_GAME_REGISTRY[id];
+        expect(entry, `Missing registry entry for ${id}`).toBeDefined();
+        expect(typeof entry.controlsHint).toBe('string');
+        expect(entry.controlsHint.trim().length).toBeGreaterThan(10);
+        expect(['flagship', 'arcade', 'classic']).toContain(entry.tier);
+        expect(entry.controlType).toBeDefined();
+        expect(GAME_QUALITY_MAP[id]).toBeDefined();
+        expect(getGameQualityInfo(id).gameId).toBe(id);
+      }
+
+      // Verify legacy aliases normalize cleanly in quality lookup
+      expect(toCanonicalGameId('tetris')).toBe('cyber-tetris');
+      expect(getGameQualityInfo('tetris').gameId).toBe('cyber-tetris');
+      expect(getGameQualityInfo('brick').gameId).toBe('brick-breaker');
+    });
   });
 });
+
 

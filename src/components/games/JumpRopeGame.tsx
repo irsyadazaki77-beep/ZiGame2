@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
 import { GameComponentProps } from '../../types';
-import { audio } from '../../utils/audio';
+import { audioController } from '../../sdk';
 import { useGameEngine } from '../../hooks/useGameEngine';
 import { inputManager } from '../../services/inputService';
 import { GameOverlay } from '../gameplay/GameOverlay';
@@ -62,7 +62,7 @@ export default function JumpRopeGame({
     if (!st.jumping) {
       st.jumping = true;
       st.vy = 9.8;
-      audio.playJump?.();
+      audioController.playJump();
     }
   }, []);
 
@@ -71,7 +71,7 @@ export default function JumpRopeGame({
       y: 0,
       vy: 0,
       jumping: false,
-      ropeAngle: Math.PI, // Start at top of arc
+      ropeAngle: Math.PI,
       ropeSpeed: 3.4,
       jumps: 0,
       scoredThisCycle: false
@@ -82,21 +82,15 @@ export default function JumpRopeGame({
   }, [startWithCountdown]);
 
   useEffect(() => {
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === ' ' || e.key === 'ArrowUp' || e.key.toLowerCase() === 'w') {
-        jump();
-      }
-    };
-    window.addEventListener('keydown', onKeyDown);
-
     const unsub = inputManager.subscribe({
       onActionDown: (action) => {
-        if (action === 'ACTION_PRIMARY' || action === 'UP') jump();
+        if (action === 'PRIMARY' || action === 'ACTION_PRIMARY' || action === 'UP') {
+          jump();
+        }
       }
     });
 
     return () => {
-      window.removeEventListener('keydown', onKeyDown);
       unsub();
     };
   }, [jump]);
@@ -142,7 +136,6 @@ export default function JumpRopeGame({
     stageRef.current = stage;
     setQuality(stage.getQualityLevel());
 
-    // Build Left & Right Automated Rope Turret Pylons
     const pylonMat = new THREE.MeshStandardMaterial({
       color: 0x334155,
       metalness: 0.8,
@@ -154,7 +147,6 @@ export default function JumpRopeGame({
     pylonR.position.x = 3.4;
     stage.scene.add(pylonL, pylonR);
 
-    // Build 360-degree Swinging Plasma Laser Rope Arc
     const ropePivot = new THREE.Group();
     ropePivot.position.set(0, 1.45, 0);
     const ropeArc = new THREE.Mesh(
@@ -165,7 +157,7 @@ export default function JumpRopeGame({
         emissiveIntensity: 1.1
       })
     );
-    ropeArc.rotation.z = Math.PI; // Hang downward at angle = 0
+    ropeArc.rotation.z = Math.PI;
     ropePivot.add(ropeArc);
     stage.scene.add(ropePivot);
 
@@ -197,12 +189,12 @@ export default function JumpRopeGame({
       hero.armL.rotation.x = st.jumping ? -0.9 : 0;
       hero.armR.rotation.x = st.jumping ? -0.9 : 0;
 
-      // Rope passes bottom of arc when angle crosses 0 / 2PI
       if (prevAngle > Math.PI * 1.5 && st.ropeAngle < Math.PI * 0.5) {
         if (st.y < 0.48) {
           stage.particles.burst(0, 0.4, 0, 36, 0xef4444, 9);
           stage.triggerTrauma(0.75);
-          audio.playExplosion?.();
+          audioController.playExplosion();
+          audioController.playGameOver();
           triggerGameOver(scoreRef.current);
           return;
         } else {
@@ -212,7 +204,7 @@ export default function JumpRopeGame({
           addScore(20 + st.jumps * 2);
           stage.particles.burst(0, 0.2, 0, 18, 0x22c55e, 6.5);
           stage.triggerTrauma(0.18);
-          audio.playCoin?.();
+          audioController.playScore();
         }
       }
     });
@@ -224,14 +216,15 @@ export default function JumpRopeGame({
   }, [addScore, scoreRef, triggerGameOver]);
 
   return (
-    <div
-      className="relative w-full h-full min-h-[460px] bg-slate-950 overflow-hidden rounded-2xl border border-emerald-500/20"
-      onClick={jump}
-    >
-      <div ref={mountRef} className="absolute inset-0 w-full h-full cursor-pointer" />
+    <div className="relative w-full h-full min-h-[280px] sm:min-h-[380px] lg:min-h-[460px] bg-slate-950 overflow-hidden rounded-2xl border border-emerald-500/20 touch-none select-none">
+      <div
+        ref={mountRef}
+        className="absolute inset-0 w-full h-full cursor-pointer touch-none"
+        onPointerDown={jump}
+      />
 
-      <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex flex-wrap items-center justify-between gap-2 p-3.5">
-        <div className="flex items-center gap-3 rounded-xl border border-white/10 bg-slate-950/85 px-3.5 py-2 text-xs text-slate-200 tabular-nums">
+      <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex flex-wrap items-center justify-between gap-2 p-3 sm:p-3.5">
+        <div className="flex items-center gap-2 sm:gap-3 rounded-xl border border-white/10 bg-slate-950/85 px-3 py-1.5 sm:px-3.5 sm:py-2 text-xs text-slate-200 tabular-nums">
           <span className="flex items-center gap-1 font-semibold text-emerald-400">
             <Flame className="w-3.5 h-3.5" /> LOMPATAN: {jumps}
           </span>
@@ -239,7 +232,7 @@ export default function JumpRopeGame({
           <span>SKOR: <strong className="text-white">{score}</strong></span>
         </div>
 
-        <div className="rounded-xl border border-white/10 bg-slate-950/85 px-3.5 py-2 text-xs font-semibold text-amber-400 tabular-nums">
+        <div className="rounded-xl border border-white/10 bg-slate-950/85 px-3 py-1.5 sm:px-3.5 sm:py-2 text-xs font-semibold text-amber-400 tabular-nums">
           KECEPATAN: {rpm} RPM
         </div>
       </div>

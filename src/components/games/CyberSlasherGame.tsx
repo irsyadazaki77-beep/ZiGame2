@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
 import { GameComponentProps } from '../../types';
-import { audio } from '../../utils/audio';
+import { audioController, ObjectPool } from '../../sdk';
+import { inputManager } from '../../services/inputService';
 import { useGameEngine } from '../../hooks/useGameEngine';
 import { GameOverlay } from '../gameplay/GameOverlay';
 import { ThreeDockOverlay } from '../gameplay/ThreeDockOverlay';
@@ -108,14 +109,10 @@ export default function CyberSlasherGame({
     isSlashing: false
   });
 
-  const targetsRef = useRef<SlashTarget3D[]>([]);
+  const resetTargetsFnRef = useRef<(() => void) | null>(null);
 
   const handleStart = useCallback(() => {
-    const stage = stageRef.current;
-    if (stage) {
-      targetsRef.current.forEach((t) => stage.scene.remove(t.mesh));
-    }
-    targetsRef.current = [];
+    resetTargetsFnRef.current?.();
     stateRef.current = {
       lives: 3,
       combo: 0,
@@ -127,7 +124,9 @@ export default function CyberSlasherGame({
     };
     setLives(3);
     setCombo(0);
-    startWithCountdown();
+    startWithCountdown(() => {
+      audioController.playClick();
+    });
   }, [startWithCountdown]);
 
   const handleSelectPreset = useCallback((preset: CameraPreset3D) => {
@@ -183,6 +182,43 @@ export default function CyberSlasherGame({
     bladeTip.position.set(0, 2.5, 0.5);
     stage.scene.add(bladeTip);
 
+    const orbColors = [0x10b981, 0x06b6d4, 0xf59e0b, 0xec4899, 0xa855f7];
+
+    const createTargetPool = (isBomb: boolean, color: number, initialSize: number) =>
+      new ObjectPool<SlashTarget3D>(
+        () => {
+          const mesh = buildSlashTargetMesh(isBomb, color);
+          mesh.visible = false;
+          stage.scene.add(mesh);
+          return {
+            mesh,
+            x: 0,
+            y: -5,
+            z: 0,
+            vx: 0,
+            vy: 0,
+            rotSpeed: new THREE.Vector3(),
+            isBomb,
+            sliced: false,
+            color,
+            points: 15
+          };
+        },
+        (item) => {
+          item.sliced = false;
+          item.mesh.visible = false;
+        },
+        initialSize
+      );
+
+    const bombPool = createTargetPool(true, 0xef4444, 4);
+    const gemPools = orbColors.map((col) => createTargetPool(false, col, 3));
+    const allPools = [bombPool, ...gemPools];
+
+    resetTargetsFnRef.current = () => {
+      allPools.forEach((p) => p.releaseAll());
+    };
+
     const slashAt = (wx: number, wy: number) => {
       if (gameStateRef.current !== 'playing') return;
       const st = stateRef.current;
@@ -190,35 +226,54 @@ export default function CyberSlasherGame({
       st.pointerWorldY = wy;
       bladeTip.position.set(wx, wy, 0.5);
 
-      for (let i = targetsRef.current.length - 1; i >= 0; i--) {
-        const t = targetsRef.current[i];
-        if (t.sliced) continue;
-        if (Math.hypot(t.x - wx, t.y - wy) < 1.15) {
-          t.sliced = true;
-          stage.scene.remove(t.mesh);
-          targetsRef.current.splice(i, 1);
+      for (const pool of allPools) {
+        const items = pool.getActiveItems();
+        for (let i = items.length - 1; i >= 0; i--) {
+          const t = items[i];
+          if (t.sliced) continue;
+          if (Math.hypot(t.x - wx, t.y - wy) < 1.15) {
+            t.sliced = true;
+            pool.release(i);
 
-          if (t.isBomb) {
-            stage.particles.burst(t.x, t.y, 0, 42, 0xef4444, 11);
-            stage.triggerTrauma(0.85);
-            audio.playExplosion?.();
-            triggerGameOver(scoreRef.current);
-            return;
-          } else {
-            st.combo += 1;
-            st.comboTimer = 1.6;
-            setCombo(st.combo);
-            const mult = Math.min(4, 1 + Math.floor(st.combo / 4));
-            addScore(t.points * mult);
-            stage.particles.burst(t.x, t.y, 0, 22, t.color, 8.5);
-            stage.triggerTrauma(0.2);
-            if (st.combo % 5 === 0) {
-              stage.triggerSlowMo(0.45, 0.22);
-              stage.kickFov(3.5);
+            if (t.isBomb) {
+              stage.particles.burst(t.x, t.y, 0, 42, 0xef4444, 11);
+              stage.triggerTrauma(0.85);
+              audioController.playExplosion();
+              audioController.playGameOver();
+              triggerGameOver(scoreRef.current);
+              return;
+            } else {
+              st.combo += 1;
+              st.comboTimer = 1.6;
+              setCombo(st.combo);
+              const mult = Math.min(4, 1 + Math.floor(st.combo / 4));
+              addScore(t.points * mult);
+              stage.particles.burst(t.x, t.y, 0, 22, t.color, 8.5);
+              stage.triggerTrauma(0.2);
+              if (st.combo % 5 === 0) {
+                stage.triggerSlowMo(0.45, 0.22);
+                stage.kickFov(3.5);
+                audioController.playCombo(st.combo);
+              } else {
+                audioController.playScore();
+              }
             }
-            audio.playCoin?.();
           }
         }
+      }
+    };
+
+    const slashNearestGem = () => {
+      let best: SlashTarget3D | null = null;
+      for (const pool of gemPools) {
+        for (const t of pool.getActiveItems()) {
+          if (!t.sliced && t.y > 0.5 && (!best || t.y > best.y)) {
+            best = t;
+          }
+        }
+      }
+      if (best) {
+        slashAt(best.x, best.y);
       }
     };
 
@@ -232,22 +287,24 @@ export default function CyberSlasherGame({
       slashAt(wx, wy);
     };
 
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (gameStateRef.current !== 'playing') return;
-      // Keyboard quick-slash support: Space/Arrows slash nearest non-bomb orb
-      if (e.key === ' ' || e.key.startsWith('Arrow')) {
-        const orb = targetsRef.current.find((t) => !t.isBomb && !t.sliced && t.y > 0.5);
-        if (orb) {
-          slashAt(orb.x, orb.y);
+    const unsubInput = inputManager.subscribe({
+      onActionDown: (action) => {
+        if (gameStateRef.current !== 'playing') return;
+        if (
+          action === 'PRIMARY' ||
+          action === 'ACTION_PRIMARY' ||
+          action === 'UP' ||
+          action === 'DOWN' ||
+          action === 'LEFT' ||
+          action === 'RIGHT'
+        ) {
+          slashNearestGem();
         }
       }
-    };
+    });
 
     container.addEventListener('pointermove', onPointerMove);
     container.addEventListener('pointerdown', onPointerMove);
-    window.addEventListener('keydown', onKeyDown);
-
-    const orbColors = [0x10b981, 0x06b6d4, 0xf59e0b, 0xec4899, 0xa855f7];
 
     stage.startLoop((dt) => {
       bladeTip.rotation.y += dt * 8;
@@ -258,7 +315,7 @@ export default function CyberSlasherGame({
       const st = stateRef.current;
       if (st.comboTimer > 0) {
         st.comboTimer -= dt;
-        if (st.comboTimer <= 0) {
+        if (st.comboTimer <= 0 && st.combo !== 0) {
           st.combo = 0;
           setCombo(0);
         }
@@ -270,53 +327,50 @@ export default function CyberSlasherGame({
         const batch = 1 + Math.floor(Math.random() * 2);
         for (let b = 0; b < batch; b++) {
           const isBomb = Math.random() < 0.18;
-          const color = orbColors[Math.floor(Math.random() * orbColors.length)];
-          const mesh = buildSlashTargetMesh(isBomb, color);
+          const colorIdx = Math.floor(Math.random() * orbColors.length);
+          const pool = isBomb ? bombPool : gemPools[colorIdx];
+          const t = pool.acquire();
           const startX = (Math.random() - 0.5) * 8.5;
-          const vx = -startX * (0.35 + Math.random() * 0.35);
-          const vy = 9.8 + Math.random() * 2.6;
-          mesh.position.set(startX, -0.5, 0);
-          stage.scene.add(mesh);
-
-          targetsRef.current.push({
-            mesh,
-            x: startX,
-            y: -0.5,
-            z: 0,
-            vx,
-            vy,
-            rotSpeed: new THREE.Vector3(
-              (Math.random() - 0.5) * 5,
-              (Math.random() - 0.5) * 5,
-              (Math.random() - 0.5) * 5
-            ),
-            isBomb,
-            sliced: false,
-            color,
-            points: 15
-          });
+          t.x = startX;
+          t.y = -0.5;
+          t.z = 0;
+          t.vx = -startX * (0.35 + Math.random() * 0.35);
+          t.vy = 9.8 + Math.random() * 2.6;
+          t.rotSpeed.set(
+            (Math.random() - 0.5) * 5,
+            (Math.random() - 0.5) * 5,
+            (Math.random() - 0.5) * 5
+          );
+          t.sliced = false;
+          t.mesh.position.set(startX, -0.5, 0);
+          t.mesh.visible = true;
         }
       }
 
-      for (let i = targetsRef.current.length - 1; i >= 0; i--) {
-        const t = targetsRef.current[i];
-        t.x += t.vx * dt;
-        t.y += t.vy * dt;
-        t.vy -= 12.5 * dt;
-        t.mesh.position.set(t.x, t.y, t.z);
-        t.mesh.rotation.x += t.rotSpeed.x * dt;
-        t.mesh.rotation.y += t.rotSpeed.y * dt;
+      for (const pool of allPools) {
+        const items = pool.getActiveItems();
+        for (let i = items.length - 1; i >= 0; i--) {
+          const t = items[i];
+          t.x += t.vx * dt;
+          t.y += t.vy * dt;
+          t.vy -= 12.5 * dt;
+          t.mesh.position.set(t.x, t.y, t.z);
+          t.mesh.rotation.x += t.rotSpeed.x * dt;
+          t.mesh.rotation.y += t.rotSpeed.y * dt;
 
-        if (t.y < -1.5) {
-          stage.scene.remove(t.mesh);
-          targetsRef.current.splice(i, 1);
-          if (!t.isBomb && !t.sliced) {
-            st.lives -= 1;
-            setLives(st.lives);
-            stage.triggerTrauma(0.35);
-            if (st.lives <= 0) {
-              triggerGameOver(scoreRef.current);
-              return;
+          if (t.y < -1.5) {
+            const missedGem = !t.isBomb && !t.sliced;
+            pool.release(i);
+            if (missedGem) {
+              st.lives -= 1;
+              setLives(st.lives);
+              audioController.playHit();
+              stage.triggerTrauma(0.35);
+              if (st.lives <= 0) {
+                audioController.playGameOver();
+                triggerGameOver(scoreRef.current);
+                return;
+              }
             }
           }
         }
@@ -324,17 +378,19 @@ export default function CyberSlasherGame({
     });
 
     return () => {
+      unsubInput();
       container.removeEventListener('pointermove', onPointerMove);
       container.removeEventListener('pointerdown', onPointerMove);
-      window.removeEventListener('keydown', onKeyDown);
+      allPools.forEach((p) => p.releaseAll());
+      resetTargetsFnRef.current = null;
       stage.dispose();
       stageRef.current = null;
     };
   }, [addScore, scoreRef, triggerGameOver]);
 
   return (
-    <div className="relative w-full h-full min-h-[460px] bg-slate-950 overflow-hidden rounded-2xl border border-emerald-500/20">
-      <div ref={mountRef} className="absolute inset-0 w-full h-full cursor-crosshair" />
+    <div className="relative w-full h-full min-h-[280px] sm:min-h-[380px] lg:min-h-[460px] bg-slate-950 overflow-hidden rounded-2xl border border-emerald-500/20 touch-none">
+      <div ref={mountRef} className="absolute inset-0 w-full h-full cursor-crosshair touch-none" />
 
       <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex flex-wrap items-center justify-between gap-2 p-3.5">
         <div className="flex items-center gap-3 rounded-xl border border-white/10 bg-slate-950/85 px-3.5 py-2 text-xs text-slate-200 tabular-nums">

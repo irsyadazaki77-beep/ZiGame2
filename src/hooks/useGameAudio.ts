@@ -1,24 +1,30 @@
 import { useState, useEffect, useCallback } from 'react';
-import { audio } from '../utils/audio';
+import { audioController } from '../sdk/audioController';
 
 export function useGameAudio(isBossMode: boolean) {
-  const [isMuted, setIsMuted] = useState(() => audio.getMuteState());
+  const [isMuted, setIsMuted] = useState(() => audioController.isMuted());
   const [isBgmOn, setIsBgmOn] = useState(true);
+
+  useEffect(() => {
+    return audioController.subscribe(() => {
+      setIsMuted(audioController.isMuted());
+    });
+  }, []);
 
   // Background audio sync
   useEffect(() => {
     if (isBgmOn && !isMuted && !isBossMode) {
-      audio.startBgm();
+      audioController.startBgm();
     } else {
-      audio.stopBgm();
+      audioController.stopBgm();
     }
     return () => {
-      audio.stopBgm();
+      audioController.stopBgm();
     };
   }, [isBgmOn, isMuted, isBossMode]);
 
   const handleToggleMute = useCallback(() => {
-    const newMuteState = audio.toggleMute();
+    const newMuteState = audioController.toggleMute();
     setIsMuted(newMuteState);
   }, []);
 

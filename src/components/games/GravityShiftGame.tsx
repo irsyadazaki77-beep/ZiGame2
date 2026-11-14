@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
 import { GameComponentProps } from '../../types';
-import { audio } from '../../utils/audio';
+import { audioController } from '../../sdk/audioController';
+import { ObjectPool } from '../../sdk/objectPool';
 import { useGameEngine } from '../../hooks/useGameEngine';
 import { inputManager } from '../../services/inputService';
 import { GameOverlay } from '../gameplay/GameOverlay';
@@ -63,7 +64,7 @@ export default function GravityShiftGame({
     distAcc: 0
   });
 
-  const hazardsRef = useRef<GravityHazard3D[]>([]);
+  const hazardPoolsRef = useRef<Record<GravityHazard3D['type'], ObjectPool<GravityHazard3D>> | null>(null);
 
   const flipGravity = useCallback(() => {
     if (gameStateRef.current !== 'playing') return;
@@ -71,16 +72,15 @@ export default function GravityShiftGame({
     s.inverted = !s.inverted;
     s.targetY = s.inverted ? CEILING_Y : 0;
     setPolarity(s.inverted ? 'CEILING' : 'FLOOR');
-    audio.playJump?.();
+    audioController.playJump();
     stageRef.current?.kickFov(3.5);
   }, []);
 
   const handleStart = useCallback(() => {
-    const stage = stageRef.current;
-    if (stage) {
-      hazardsRef.current.forEach((h) => stage.scene.remove(h.mesh));
+    if (hazardPoolsRef.current) {
+      hazardPoolsRef.current.spike.releaseAll();
+      hazardPoolsRef.current.orb.releaseAll();
     }
-    hazardsRef.current = [];
     stateRef.current = {
       y: 0,
       targetY: 0,
@@ -103,7 +103,7 @@ export default function GravityShiftGame({
 
     const unsub = inputManager.subscribe({
       onActionDown: (action) => {
-        if (action === 'ACTION_PRIMARY' || action === 'UP' || action === 'DOWN') {
+        if (action === 'PRIMARY' || action === 'ACTION_PRIMARY' || action === 'UP' || action === 'DOWN') {
           flipGravity();
         }
       }
@@ -183,6 +183,52 @@ export default function GravityShiftGame({
     hero.group.position.set(-4.5, 0, 0);
     stage.scene.add(hero.group);
 
+    const spikeMat = new THREE.MeshStandardMaterial({
+      color: 0xf43f5e,
+      emissive: 0xe11d48,
+      emissiveIntensity: 0.75,
+      roughness: 0.25
+    });
+    const spikeGeo1 = new THREE.ConeGeometry(0.42, 1.25, 6);
+    const spikeGeo2 = new THREE.ConeGeometry(0.32, 0.95, 6);
+    const orbMat = new THREE.MeshStandardMaterial({
+      color: 0x22d3ee,
+      emissive: 0x06b6d4,
+      emissiveIntensity: 0.9
+    });
+    const orbGeo = new THREE.OctahedronGeometry(0.45, 0);
+
+    const createHazardPool = (type: GravityHazard3D['type'], prewarm: number) =>
+      new ObjectPool<GravityHazard3D>(
+        () => {
+          const g = new THREE.Group();
+          if (type === 'spike') {
+            const cone1 = new THREE.Mesh(spikeGeo1, spikeMat);
+            cone1.position.y = 0.62;
+            const cone2 = new THREE.Mesh(spikeGeo2, spikeMat);
+            cone2.position.set(0.45, 0.48, 0);
+            g.add(cone1, cone2);
+          } else {
+            const orb = new THREE.Mesh(orbGeo, orbMat);
+            g.add(orb);
+          }
+          g.visible = false;
+          stage.scene.add(g);
+          return { mesh: g, x: 16, onCeiling: false, type };
+        },
+        (h) => {
+          h.mesh.visible = false;
+        },
+        prewarm
+      );
+
+    const hazardPools: Record<GravityHazard3D['type'], ObjectPool<GravityHazard3D>> = {
+      spike: createHazardPool('spike', 12),
+      orb: createHazardPool('orb', 6)
+    };
+    hazardPoolsRef.current = hazardPools;
+    const hazardTypes: GravityHazard3D['type'][] = ['spike', 'orb'];
+
     stage.startLoop((dt, elapsed) => {
       if (gameStateRef.current !== 'playing') return;
 
@@ -210,81 +256,62 @@ export default function GravityShiftGame({
         s.spawnTimer = Math.max(0.38, 1.05 - (s.speed - 13.5) * 0.035);
         const onCeiling = Math.random() > 0.5;
         const type: GravityHazard3D['type'] = Math.random() < 0.75 ? 'spike' : 'orb';
-        const g = new THREE.Group();
-
+        const h = hazardPools[type].acquire();
+        h.x = 16;
+        h.onCeiling = onCeiling;
         if (type === 'spike') {
-          const spikeMat = new THREE.MeshStandardMaterial({
-            color: 0xf43f5e,
-            emissive: 0xe11d48,
-            emissiveIntensity: 0.75,
-            roughness: 0.25
-          });
-          const cone1 = new THREE.Mesh(new THREE.ConeGeometry(0.42, 1.25, 6), spikeMat);
-          cone1.position.y = 0.62;
-          const cone2 = new THREE.Mesh(new THREE.ConeGeometry(0.32, 0.95, 6), spikeMat);
-          cone2.position.set(0.45, 0.48, 0);
-          g.add(cone1, cone2);
-          if (onCeiling) {
-            g.rotation.z = Math.PI;
-            g.position.set(16, CEILING_Y, 0);
-          } else {
-            g.position.set(16, 0, 0);
-          }
+          h.mesh.rotation.z = onCeiling ? Math.PI : 0;
+          h.mesh.position.set(16, onCeiling ? CEILING_Y : 0, 0);
         } else {
-          const orbMat = new THREE.MeshStandardMaterial({
-            color: 0x22d3ee,
-            emissive: 0x06b6d4,
-            emissiveIntensity: 0.9
-          });
-          const orb = new THREE.Mesh(new THREE.OctahedronGeometry(0.45, 0), orbMat);
-          g.add(orb);
-          g.position.set(16, onCeiling ? CEILING_Y - 0.85 : 0.85, 0);
+          h.mesh.position.set(16, onCeiling ? CEILING_Y - 0.85 : 0.85, 0);
         }
-
-        stage.scene.add(g);
-        hazardsRef.current.push({ mesh: g, x: 16, onCeiling, type });
+        h.mesh.visible = true;
       }
 
       // Update hazards
-      for (let i = hazardsRef.current.length - 1; i >= 0; i--) {
-        const h = hazardsRef.current[i];
-        h.x -= s.speed * dt;
-        h.mesh.position.x = h.x;
-        if (h.type === 'orb') {
-          h.mesh.rotation.y += dt * 4;
-        }
+      for (const hType of hazardTypes) {
+        const pool = hazardPools[hType];
+        const activeList = pool.getActiveItems();
+        for (let i = activeList.length - 1; i >= 0; i--) {
+          const h = activeList[i];
+          h.x -= s.speed * dt;
+          h.mesh.position.x = h.x;
+          if (h.type === 'orb') {
+            h.mesh.rotation.y += dt * 4;
+          }
 
-        // Check collision with hero at x = -4.5
-        if (Math.abs(h.x - -4.5) < 0.72) {
-          const sameSide = h.onCeiling ? s.y > CEILING_Y * 0.55 : s.y < CEILING_Y * 0.45;
-          if (sameSide) {
-            if (h.type === 'orb') {
-              stage.scene.remove(h.mesh);
-              hazardsRef.current.splice(i, 1);
-              addScore(30);
-              audio.playCoin?.();
-              stage.particles.burst(-4.5, s.y + (s.inverted ? -0.8 : 0.8), 0, 18, 0x22d3ee, 7);
-              continue;
-            } else {
-              stage.scene.remove(h.mesh);
-              hazardsRef.current.splice(i, 1);
-              stage.particles.burst(-4.5, s.y + (s.inverted ? -0.8 : 0.8), 0, 36, 0xf43f5e, 10);
-              stage.triggerTrauma(0.75);
-              audio.playExplosion?.();
-              triggerGameOver(scoreRef.current);
-              return;
+          // Check collision with hero at x = -4.5
+          if (Math.abs(h.x - -4.5) < 0.72) {
+            const sameSide = h.onCeiling ? s.y > CEILING_Y * 0.55 : s.y < CEILING_Y * 0.45;
+            if (sameSide) {
+              if (h.type === 'orb') {
+                pool.release(i);
+                addScore(30);
+                audioController.playScore();
+                stage.particles.burst(-4.5, s.y + (s.inverted ? -0.8 : 0.8), 0, 18, 0x22d3ee, 7);
+                continue;
+              } else {
+                pool.release(i);
+                stage.particles.burst(-4.5, s.y + (s.inverted ? -0.8 : 0.8), 0, 36, 0xf43f5e, 10);
+                stage.triggerTrauma(0.75);
+                audioController.playGameOver();
+                triggerGameOver(scoreRef.current);
+                return;
+              }
             }
           }
-        }
 
-        if (h.x < -14) {
-          stage.scene.remove(h.mesh);
-          hazardsRef.current.splice(i, 1);
+          if (h.x < -14) {
+            pool.release(i);
+          }
         }
       }
     });
 
     return () => {
+      hazardPools.spike.releaseAll();
+      hazardPools.orb.releaseAll();
+      hazardPoolsRef.current = null;
       stage.dispose();
       stageRef.current = null;
     };
@@ -292,8 +319,8 @@ export default function GravityShiftGame({
 
   return (
     <div
-      className="relative w-full h-full min-h-[460px] bg-slate-950 overflow-hidden rounded-2xl border border-cyan-500/20"
-      onClick={flipGravity}
+      className="relative w-full h-full min-h-[260px] sm:min-h-[380px] lg:min-h-[460px] bg-slate-950 overflow-hidden rounded-2xl border border-cyan-500/20 touch-none"
+      onPointerDown={flipGravity}
     >
       <div ref={mountRef} className="absolute inset-0 w-full h-full" />
 

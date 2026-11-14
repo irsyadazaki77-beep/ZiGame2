@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
 import { GameComponentProps } from '../../types';
-import { audio } from '../../utils/audio';
+import { audioController } from '../../sdk';
 import { useGameEngine } from '../../hooks/useGameEngine';
 import { GameOverlay } from '../gameplay/GameOverlay';
 import { ThreeDockOverlay } from '../gameplay/ThreeDockOverlay';
@@ -252,7 +252,8 @@ export default function CyberMinesGame({
           10
         );
         stage.triggerTrauma(0.8);
-        audio.playExplosion?.();
+        audioController.playExplosion();
+        audioController.playGameOver();
         triggerGameOver(scoreRef.current);
         return;
       }
@@ -289,7 +290,8 @@ export default function CyberMinesGame({
 
       if (unrevealedSafe === 0) {
         addScore(250);
-        audio.playPowerUp?.();
+        audioController.playWin();
+        audioController.playLevelUp();
         stage.kickFov(5);
         resetGridFnRef.current();
         setSafeRemaining(GRID_SIZE * GRID_SIZE - MINE_COUNT);
@@ -314,10 +316,10 @@ export default function CyberMinesGame({
           if (!cell.revealed) {
             cell.flagged = !cell.flagged;
             cell.flagMesh.visible = cell.flagged;
-            audio.playClick?.();
+            audioController.playClick();
           }
         } else {
-          audio.playCoin?.();
+          audioController.playScore();
           revealCell(cell);
         }
       }
@@ -339,11 +341,11 @@ export default function CyberMinesGame({
   }, [addScore, scoreRef, triggerGameOver]);
 
   return (
-    <div className="relative w-full h-full min-h-[460px] bg-slate-950 overflow-hidden rounded-2xl border border-amber-500/20">
-      <div ref={mountRef} className="absolute inset-0 w-full h-full cursor-pointer" />
+    <div className="relative w-full h-full min-h-[280px] sm:min-h-[380px] lg:min-h-[460px] bg-slate-950 overflow-hidden rounded-2xl border border-amber-500/20 touch-none select-none">
+      <div ref={mountRef} className="absolute inset-0 w-full h-full cursor-pointer touch-none" />
 
-      <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex flex-wrap items-center justify-between gap-2 p-3.5">
-        <div className="flex items-center gap-3 rounded-xl border border-white/10 bg-slate-950/85 px-3.5 py-2 text-xs text-slate-200 tabular-nums">
+      <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex flex-wrap items-center justify-between gap-2 p-3 sm:p-3.5">
+        <div className="flex items-center gap-2 sm:gap-3 rounded-xl border border-white/10 bg-slate-950/85 px-3 py-1.5 sm:px-3.5 sm:py-2 text-xs text-slate-200 tabular-nums">
           <span className="flex items-center gap-1 font-semibold text-amber-400">
             <ShieldCheck className="w-3.5 h-3.5" /> PETAK AMAN: {safeRemaining}
           </span>
@@ -354,7 +356,7 @@ export default function CyberMinesGame({
         <button
           type="button"
           onClick={() => setFlagMode((f) => !f)}
-          className={`pointer-events-auto flex items-center gap-1.5 rounded-xl px-3.5 py-2 text-xs font-semibold transition-colors whitespace-nowrap shrink-0 ${
+          className={`pointer-events-auto min-h-[44px] flex items-center gap-1.5 rounded-xl px-3.5 py-2 text-xs font-semibold transition-colors whitespace-nowrap shrink-0 ${
             flagMode
               ? 'bg-amber-500 text-slate-950'
               : 'border border-white/15 bg-slate-900/90 text-slate-200 hover:bg-slate-800'

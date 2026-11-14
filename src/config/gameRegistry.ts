@@ -5,6 +5,7 @@ import { lazyWithRetry as lazy } from '../utils/lazyWithRetry';
 
 export type GameLayoutType = 'square' | 'portrait' | 'landscape';
 export type GameControlType = TouchControlsType;
+export type GameCatalogTier = 'flagship' | 'arcade' | 'classic';
 
 export interface GameRegistryItem {
   id: CanonicalGameId;
@@ -19,6 +20,9 @@ export interface GameRegistryItem {
   accentShadow: string;
   icon: string;
   controls: string;
+  controlsHint: string;
+  featured?: boolean;
+  tier?: GameCatalogTier;
   controlType?: GameControlType;
   supportedInputs?: InputSource[];
   avgDuration: string;
@@ -38,6 +42,8 @@ export const CANONICAL_GAME_REGISTRY: Record<CanonicalGameId, GameRegistryItem> 
     accentShadow: 'shadow-[0_0_15px_rgba(34,197,94,0.15)]',
     icon: '🐍',
     controls: 'Arrows / WASD',
+    controlsHint: 'Desktop: WASD/Panah · Mobile: Swipe atau D-Pad untuk belok',
+    tier: 'classic',
     controlType: 'dpad',
     supportedInputs: ['keyboard', 'touch', 'gamepad'],
     avgDuration: '2-5 mins'
@@ -55,6 +61,9 @@ export const CANONICAL_GAME_REGISTRY: Record<CanonicalGameId, GameRegistryItem> 
     accentShadow: 'shadow-[0_0_15px_rgba(236,72,153,0.15)]',
     icon: '🧱',
     controls: 'Mouse / Touch',
+    controlsHint: 'Desktop: Mouse/Panah & Spasi · Mobile: Geser layar atau tombol Kiri/Kanan',
+    featured: true,
+    tier: 'flagship',
     controlType: 'leftright',
     supportedInputs: ['keyboard', 'touch', 'mouse'],
     avgDuration: '3-10 mins'
@@ -72,6 +81,8 @@ export const CANONICAL_GAME_REGISTRY: Record<CanonicalGameId, GameRegistryItem> 
     accentShadow: 'shadow-[0_0_15px_rgba(234,179,8,0.15)]',
     icon: '🐦',
     controls: 'Space / Tap',
+    controlsHint: 'Desktop: Spasi/Klik untuk terbang · Mobile: Ketuk layar untuk mengepak',
+    tier: 'classic',
     controlType: 'actiononly',
     supportedInputs: ['keyboard', 'touch', 'mouse', 'gamepad'],
     avgDuration: '1-2 mins'
@@ -89,6 +100,8 @@ export const CANONICAL_GAME_REGISTRY: Record<CanonicalGameId, GameRegistryItem> 
     accentShadow: 'shadow-[0_0_15px_rgba(99,102,241,0.15)]',
     icon: '🚀',
     controls: 'Arrows + Space',
+    controlsHint: 'Desktop: WASD/Panah & Spasi · Mobile: D-Pad + tombol tembak',
+    tier: 'arcade',
     controlType: 'dpad',
     supportedInputs: ['keyboard', 'touch', 'gamepad'],
     avgDuration: '2-5 mins'
@@ -106,7 +119,10 @@ export const CANONICAL_GAME_REGISTRY: Record<CanonicalGameId, GameRegistryItem> 
     accentShadow: 'shadow-[0_0_15px_rgba(168,85,247,0.15)]',
     icon: '🧠',
     controls: 'Mouse / Touch',
-    controlType: 'actiononly',
+    controlsHint: 'Desktop & Mobile: Klik/ketuk tablet 3D untuk membalik & mencocokkan simbol',
+    tier: 'classic',
+    controlType: 'none',
+    supportedInputs: ['mouse', 'touch'],
     avgDuration: '2-5 mins'
   },
   'cyber-runner': {
@@ -122,7 +138,10 @@ export const CANONICAL_GAME_REGISTRY: Record<CanonicalGameId, GameRegistryItem> 
     accentShadow: 'shadow-[0_0_15px_rgba(249,115,22,0.15)]',
     icon: '🏃‍♂️',
     controls: 'Arrows / Swipe',
-    controlType: 'actiononly',
+    controlsHint: 'Desktop: Atas/Spasi lompat, Bawah tunduk · Mobile: Ketuk lompat, swipe bawah tunduk',
+    tier: 'arcade',
+    controlType: 'updown',
+    supportedInputs: ['keyboard', 'touch', 'gamepad'],
     avgDuration: '2-4 mins'
   },
   'neon-pong': {
@@ -137,8 +156,11 @@ export const CANONICAL_GAME_REGISTRY: Record<CanonicalGameId, GameRegistryItem> 
     themeColor: '#3b82f6',
     accentShadow: 'shadow-[0_0_15px_rgba(59,130,246,0.15)]',
     icon: '🏓',
-    controls: 'Arrows / WASD',
-    controlType: 'actiononly',
+    controls: 'Arrows / WASD / Touch',
+    controlsHint: 'Desktop: W/S atau Panah Atas/Bawah · Mobile: Seret layar atau tombol Atas/Bawah',
+    tier: 'classic',
+    controlType: 'updown',
+    supportedInputs: ['keyboard', 'touch', 'mouse', 'gamepad'],
     avgDuration: '2-5 mins'
   },
   'neon-stacker': {
@@ -153,8 +175,11 @@ export const CANONICAL_GAME_REGISTRY: Record<CanonicalGameId, GameRegistryItem> 
     themeColor: '#f43f5e',
     accentShadow: 'shadow-[0_0_15px_rgba(244,63,94,0.15)]',
     icon: '🧱',
-    controls: 'Arrows / WASD',
+    controls: 'Space / Tap',
+    controlsHint: 'Desktop: Spasi/Klik untuk menjatuhkan balok · Mobile: Ketuk layar tepat waktu',
+    tier: 'arcade',
     controlType: 'actiononly',
+    supportedInputs: ['keyboard', 'touch', 'mouse'],
     avgDuration: '2-5 mins'
   },
   'vaporwave-racer': {
@@ -170,7 +195,10 @@ export const CANONICAL_GAME_REGISTRY: Record<CanonicalGameId, GameRegistryItem> 
     accentShadow: 'shadow-[0_0_15px_rgba(217,70,239,0.15)]',
     icon: '🏎️',
     controls: 'Arrows / Swipe',
-    controlType: 'actiononly',
+    controlsHint: 'Desktop: A/D belok, W/Spasi nitro · Mobile: Swipe kiri/kanan atau tombol kemudi',
+    tier: 'flagship',
+    controlType: 'leftright',
+    supportedInputs: ['keyboard', 'touch', 'gamepad'],
     avgDuration: '2-4 mins'
   },
   'lock-breaker': {
@@ -185,8 +213,11 @@ export const CANONICAL_GAME_REGISTRY: Record<CanonicalGameId, GameRegistryItem> 
     themeColor: '#f59e0b',
     accentShadow: 'shadow-[0_0_15px_rgba(245,158,11,0.15)]',
     icon: '🔐',
-    controls: 'Mouse / Touch',
+    controls: 'Space / Tap',
+    controlsHint: 'Desktop: Spasi/Klik · Mobile: Ketuk layar saat jarum menyentuh target bercahaya',
+    tier: 'arcade',
     controlType: 'actiononly',
+    supportedInputs: ['keyboard', 'touch', 'mouse'],
     avgDuration: '3-10 mins'
   },
   'sine-rider': {
@@ -201,8 +232,11 @@ export const CANONICAL_GAME_REGISTRY: Record<CanonicalGameId, GameRegistryItem> 
     themeColor: '#06b6d4',
     accentShadow: 'shadow-[0_0_15px_rgba(6,182,212,0.15)]',
     icon: '🏄‍♂️',
-    controls: 'Arrows / WASD',
+    controls: 'Hold Space / Touch',
+    controlsHint: 'Desktop: Tahan Spasi/Klik untuk naik · Mobile: Tahan layar untuk mengatur elevasi',
+    tier: 'arcade',
     controlType: 'actiononly',
+    supportedInputs: ['keyboard', 'touch', 'mouse'],
     avgDuration: '2-5 mins'
   },
   'cosmic-dodge': {
@@ -217,8 +251,11 @@ export const CANONICAL_GAME_REGISTRY: Record<CanonicalGameId, GameRegistryItem> 
     themeColor: '#10b981',
     accentShadow: 'shadow-[0_0_15px_rgba(16,185,129,0.15)]',
     icon: '✨',
-    controls: 'Arrows / Swipe',
-    controlType: 'actiononly',
+    controls: 'Arrows / Drag',
+    controlsHint: 'Desktop: Panah/A-D atau geser mouse · Mobile: Seret layar atau tombol Kiri/Kanan',
+    tier: 'arcade',
+    controlType: 'leftright',
+    supportedInputs: ['keyboard', 'touch', 'mouse', 'gamepad'],
     avgDuration: '2-4 mins'
   },
   'laser-grid': {
@@ -233,8 +270,11 @@ export const CANONICAL_GAME_REGISTRY: Record<CanonicalGameId, GameRegistryItem> 
     themeColor: '#ef4444',
     accentShadow: 'shadow-[0_0_15px_rgba(239,68,68,0.15)]',
     icon: '⚡',
-    controls: 'Arrows / WASD',
-    controlType: 'actiononly',
+    controls: 'WASD / Tap Tile',
+    controlsHint: 'Desktop: WASD/Panah pindah petak · Mobile: D-Pad atau ketuk langsung petak aman',
+    tier: 'arcade',
+    controlType: 'dpad',
+    supportedInputs: ['keyboard', 'touch', 'mouse'],
     avgDuration: '2-5 mins'
   },
   'cyber-simon': {
@@ -249,8 +289,11 @@ export const CANONICAL_GAME_REGISTRY: Record<CanonicalGameId, GameRegistryItem> 
     themeColor: '#a855f7',
     accentShadow: 'shadow-[0_0_15px_rgba(168,85,247,0.15)]',
     icon: '🧠',
-    controls: 'Mouse / Touch',
-    controlType: 'actiononly',
+    controls: '1-4 / Arrows / Tap',
+    controlsHint: 'Desktop: Tombol 1-4/Panah atau klik pad · Mobile: Ketuk pad warna sesuai urutan',
+    tier: 'classic',
+    controlType: 'none',
+    supportedInputs: ['mouse', 'touch', 'keyboard'],
     avgDuration: '2-5 mins'
   },
   'plinko-neo': {
@@ -265,8 +308,11 @@ export const CANONICAL_GAME_REGISTRY: Record<CanonicalGameId, GameRegistryItem> 
     themeColor: '#f59e0b',
     accentShadow: 'shadow-[0_0_15px_rgba(245,158,11,0.15)]',
     icon: '🎰',
-    controls: 'Mouse / Touch',
+    controls: 'Space / Tap',
+    controlsHint: 'Desktop: Klik/Spasi jatuhkan bola · Mobile: Ketuk papan Plinko untuk meluncurkan bola',
+    tier: 'arcade',
     controlType: 'actiononly',
+    supportedInputs: ['mouse', 'touch', 'keyboard'],
     avgDuration: '1-3 mins'
   },
   'cosmic-asteroid': {
@@ -282,7 +328,11 @@ export const CANONICAL_GAME_REGISTRY: Record<CanonicalGameId, GameRegistryItem> 
     accentShadow: 'shadow-[0_0_15px_rgba(6,182,212,0.15)]',
     icon: '☄️',
     controls: 'WASD + Space',
-    controlType: 'actiononly',
+    controlsHint: 'Desktop: A/D putar, W dorong, Spasi tembak · Mobile: D-Pad + tombol Action',
+    featured: true,
+    tier: 'flagship',
+    controlType: 'dpad',
+    supportedInputs: ['keyboard', 'touch', 'gamepad'],
     avgDuration: '2-5 mins'
   },
   'cyber-slasher': {
@@ -297,8 +347,11 @@ export const CANONICAL_GAME_REGISTRY: Record<CanonicalGameId, GameRegistryItem> 
     themeColor: '#10b981',
     accentShadow: 'shadow-[0_0_15px_rgba(16,185,129,0.15)]',
     icon: '⚔️',
-    controls: 'Mouse Drag / Swipe',
-    controlType: 'actiononly',
+    controls: 'Drag / Swipe',
+    controlsHint: 'Desktop: Seret mouse untuk menebas · Mobile: Usap jari melintasi orb bercahaya',
+    tier: 'arcade',
+    controlType: 'none',
+    supportedInputs: ['mouse', 'touch'],
     avgDuration: '2-4 mins'
   },
   'cyber-clicker': {
@@ -313,8 +366,11 @@ export const CANONICAL_GAME_REGISTRY: Record<CanonicalGameId, GameRegistryItem> 
     themeColor: '#6366f1',
     accentShadow: 'shadow-[0_0_15px_rgba(99,102,241,0.15)]',
     icon: '⚡',
-    controls: 'Mouse Click / Tap',
-    controlType: 'actiononly',
+    controls: 'Click / Tap Core',
+    controlsHint: 'Desktop & Mobile: Klik/ketuk inti reaktor 3D dan beli upgrade satelit orbit',
+    tier: 'arcade',
+    controlType: 'none',
+    supportedInputs: ['mouse', 'touch'],
     avgDuration: '5-20 mins'
   },
   'block-match': {
@@ -329,8 +385,11 @@ export const CANONICAL_GAME_REGISTRY: Record<CanonicalGameId, GameRegistryItem> 
     themeColor: '#ec4899',
     accentShadow: 'shadow-[0_0_15px_rgba(236,72,153,0.15)]',
     icon: '💎',
-    controls: 'Mouse Click / Touch',
-    controlType: 'actiononly',
+    controls: 'Click / Tap',
+    controlsHint: 'Desktop & Mobile: Pilih dua kristal bersebelahan untuk menukar & mencocokkan 3+',
+    tier: 'classic',
+    controlType: 'none',
+    supportedInputs: ['mouse', 'touch'],
     avgDuration: '3-8 mins'
   },
   'cyber-typer': {
@@ -345,8 +404,11 @@ export const CANONICAL_GAME_REGISTRY: Record<CanonicalGameId, GameRegistryItem> 
     themeColor: '#22c55e',
     accentShadow: 'shadow-[0_0_15px_rgba(34,197,94,0.15)]',
     icon: '⌨️',
-    controls: 'Keyboard Only',
-    controlType: 'actiononly',
+    controls: 'Keyboard / Tap Word',
+    controlsHint: 'Desktop: Ketik kata target langsung · Mobile: Gunakan tombol Keyboard atau ketuk target',
+    tier: 'arcade',
+    controlType: 'none',
+    supportedInputs: ['keyboard', 'touch'],
     avgDuration: '2-5 mins'
   },
   'maze-runner': {
@@ -361,8 +423,11 @@ export const CANONICAL_GAME_REGISTRY: Record<CanonicalGameId, GameRegistryItem> 
     themeColor: '#f97316',
     accentShadow: 'shadow-[0_0_15px_rgba(249,115,22,0.15)]',
     icon: '🧭',
-    controls: 'Arrows / WASD',
-    controlType: 'actiononly',
+    controls: 'WASD / Arrows / Swipe',
+    controlsHint: 'Desktop: WASD/Panah keluar labirin · Mobile: Swipe atau D-Pad menuju portal hijau',
+    tier: 'arcade',
+    controlType: 'dpad',
+    supportedInputs: ['keyboard', 'touch', 'gamepad'],
     avgDuration: '2-5 mins'
   },
   'memory-path': {
@@ -378,7 +443,10 @@ export const CANONICAL_GAME_REGISTRY: Record<CanonicalGameId, GameRegistryItem> 
     accentShadow: 'shadow-[0_0_15px_rgba(59,130,246,0.15)]',
     icon: '👣',
     controls: 'Mouse / Touch',
-    controlType: 'actiononly',
+    controlsHint: 'Desktop & Mobile: Hafalkan petak biru yang menyala lalu ketuk berurutan dari bawah',
+    tier: 'arcade',
+    controlType: 'none',
+    supportedInputs: ['mouse', 'touch'],
     avgDuration: '2-5 mins'
   },
   'rhythm-tap': {
@@ -393,8 +461,11 @@ export const CANONICAL_GAME_REGISTRY: Record<CanonicalGameId, GameRegistryItem> 
     themeColor: '#a855f7',
     accentShadow: 'shadow-[0_0_15px_rgba(168,85,247,0.15)]',
     icon: '🎵',
-    controls: 'D, F, J, K / Touch',
-    controlType: 'actiononly',
+    controls: 'D, F, J, K / Tap Lanes',
+    controlsHint: 'Desktop: Tombol D, F, J, K sesuai jalur · Mobile: Ketuk 4 pad jalur di layar',
+    tier: 'arcade',
+    controlType: 'none',
+    supportedInputs: ['keyboard', 'touch', 'mouse'],
     avgDuration: '2-4 mins'
   },
   'pixel-golf': {
@@ -410,7 +481,10 @@ export const CANONICAL_GAME_REGISTRY: Record<CanonicalGameId, GameRegistryItem> 
     accentShadow: 'shadow-[0_0_15px_rgba(16,185,129,0.15)]',
     icon: '⛳',
     controls: 'Drag & Release',
-    controlType: 'actiononly',
+    controlsHint: 'Desktop & Mobile: Tarik ke belakang dari bola lalu lepaskan untuk memukul ke lubang',
+    tier: 'arcade',
+    controlType: 'none',
+    supportedInputs: ['mouse', 'touch'],
     avgDuration: '2-5 mins'
   },
   'pixel-dino': {
@@ -425,8 +499,11 @@ export const CANONICAL_GAME_REGISTRY: Record<CanonicalGameId, GameRegistryItem> 
     themeColor: '#eab308',
     accentShadow: 'shadow-[0_0_15px_rgba(234,179,8,0.15)]',
     icon: '🦖',
-    controls: 'Space / Tap',
+    controls: 'Space / Down / Tap',
+    controlsHint: 'Desktop: Spasi/Atas lompat, Bawah tunduk · Mobile: Ketuk lompat, swipe bawah/Tunduk',
+    tier: 'classic',
     controlType: 'actiononly',
+    supportedInputs: ['keyboard', 'touch', 'mouse'],
     avgDuration: '2-5 mins'
   },
   'cyber-tetris': {
@@ -441,8 +518,12 @@ export const CANONICAL_GAME_REGISTRY: Record<CanonicalGameId, GameRegistryItem> 
     themeColor: '#06b6d4',
     accentShadow: 'shadow-[0_0_15px_rgba(6,182,212,0.15)]',
     icon: '🧱',
-    controls: 'Arrows / Touch',
+    controls: 'Arrows + Space / Swipe',
+    controlsHint: 'Desktop: A/D geser, W putar, Spasi drop · Mobile: Swipe atau tombol sentuh balok',
+    featured: true,
+    tier: 'classic',
     controlType: 'dpad',
+    supportedInputs: ['keyboard', 'touch', 'gamepad'],
     avgDuration: '3-10 mins'
   },
   'archery-neo': {
@@ -458,7 +539,10 @@ export const CANONICAL_GAME_REGISTRY: Record<CanonicalGameId, GameRegistryItem> 
     accentShadow: 'shadow-[0_0_15px_rgba(239,68,68,0.15)]',
     icon: '🏹',
     controls: 'Drag & Release',
-    controlType: 'actiononly',
+    controlsHint: 'Desktop & Mobile: Tarik tali busur untuk membidik arah & daya lalu lepaskan panah',
+    tier: 'arcade',
+    controlType: 'none',
+    supportedInputs: ['mouse', 'touch'],
     avgDuration: '2-5 mins'
   },
   'cyber-mines': {
@@ -473,8 +557,11 @@ export const CANONICAL_GAME_REGISTRY: Record<CanonicalGameId, GameRegistryItem> 
     themeColor: '#f59e0b',
     accentShadow: 'shadow-[0_0_15px_rgba(245,158,11,0.15)]',
     icon: '💣',
-    controls: 'Left Click (Open) / Right Click (Flag)',
-    controlType: 'actiononly',
+    controls: 'Click / Mode Flag',
+    controlsHint: 'Desktop: Klik buka, Klik Kanan bendera · Mobile: Ketuk petak & ganti mode Bendera',
+    tier: 'classic',
+    controlType: 'none',
+    supportedInputs: ['mouse', 'touch'],
     avgDuration: '3-10 mins'
   },
   'neon-2048': {
@@ -490,7 +577,10 @@ export const CANONICAL_GAME_REGISTRY: Record<CanonicalGameId, GameRegistryItem> 
     accentShadow: 'shadow-[0_0_15px_rgba(244,63,94,0.15)]',
     icon: '🔢',
     controls: 'Arrows / Swipe',
+    controlsHint: 'Desktop: WASD/Panah · Mobile: Swipe 4 arah di papan atau gunakan D-Pad',
+    tier: 'classic',
     controlType: 'dpad',
+    supportedInputs: ['keyboard', 'touch', 'gamepad'],
     avgDuration: '5-15 mins'
   },
   'whack-a-drone': {
@@ -505,8 +595,11 @@ export const CANONICAL_GAME_REGISTRY: Record<CanonicalGameId, GameRegistryItem> 
     themeColor: '#d946ef',
     accentShadow: 'shadow-[0_0_15px_rgba(217,70,239,0.15)]',
     icon: '🔨',
-    controls: 'Mouse Click / Tap',
-    controlType: 'actiononly',
+    controls: 'Click / Tap Drone',
+    controlsHint: 'Desktop & Mobile: Klik/ketuk drone jahat yang muncul dari pod sebelum menghilang',
+    tier: 'arcade',
+    controlType: 'none',
+    supportedInputs: ['mouse', 'touch'],
     avgDuration: '2-4 mins'
   },
   'jump-rope': {
@@ -522,7 +615,10 @@ export const CANONICAL_GAME_REGISTRY: Record<CanonicalGameId, GameRegistryItem> 
     accentShadow: 'shadow-[0_0_15px_rgba(34,197,94,0.15)]',
     icon: '🪢',
     controls: 'Space / Tap',
+    controlsHint: 'Desktop: Spasi/Atas/Klik untuk melompat · Mobile: Ketuk layar saat kabel laser mendekat',
+    tier: 'arcade',
     controlType: 'actiononly',
+    supportedInputs: ['keyboard', 'touch', 'mouse'],
     avgDuration: '1-3 mins'
   },
   'neon-drift': {
@@ -537,7 +633,10 @@ export const CANONICAL_GAME_REGISTRY: Record<CanonicalGameId, GameRegistryItem> 
     themeColor: '#22d3ee',
     accentShadow: 'shadow-[0_0_15px_rgba(34,211,238,0.25)]',
     icon: '🏎️',
-    controls: 'WASD / Arrows + Space (Nitro) + Shift (Drift) / Touch',
+    controls: 'WASD + Space (Nitro) / Touch',
+    controlsHint: 'Desktop: A/D belok, Spasi nitro, Shift drift · Mobile: D-Pad + Action / kontrol layar',
+    featured: true,
+    tier: 'flagship',
     controlType: 'dpad',
     supportedInputs: ['keyboard', 'touch', 'gamepad'],
     avgDuration: '2-5 mins'
@@ -554,8 +653,11 @@ export const CANONICAL_GAME_REGISTRY: Record<CanonicalGameId, GameRegistryItem> 
     themeColor: '#06b6d4',
     accentShadow: 'shadow-[0_0_15px_rgba(6,182,212,0.15)]',
     icon: '🥷',
-    controls: 'WASD / Mouse',
+    controls: 'WASD / Touch Drag',
+    controlsHint: 'Desktop: WASD/Panah menyusup · Mobile: Seret layar atau D-Pad menuju terminal & portal',
+    tier: 'flagship',
     controlType: 'dpad',
+    supportedInputs: ['keyboard', 'touch', 'gamepad'],
     avgDuration: '2-5 mins'
   },
   'void-survivor': {
@@ -570,8 +672,12 @@ export const CANONICAL_GAME_REGISTRY: Record<CanonicalGameId, GameRegistryItem> 
     themeColor: '#a855f7',
     accentShadow: 'shadow-[0_0_15px_rgba(168,85,247,0.15)]',
     icon: '⚔️',
-    controls: 'WASD / Arrows',
+    controls: 'WASD / Joystick',
+    controlsHint: 'Desktop: WASD/Panah bergerak & hindari musuh · Mobile: D-Pad atau Analog Joystick',
+    featured: true,
+    tier: 'flagship',
     controlType: 'dpad',
+    supportedInputs: ['keyboard', 'touch', 'gamepad'],
     avgDuration: '5-15 mins'
   },
   'orbital-defense': {
@@ -586,8 +692,11 @@ export const CANONICAL_GAME_REGISTRY: Record<CanonicalGameId, GameRegistryItem> 
     themeColor: '#38bdf8',
     accentShadow: 'shadow-[0_0_15px_rgba(56,189,248,0.15)]',
     icon: '🛰️',
-    controls: 'Mouse / Click',
-    controlType: 'actiononly',
+    controls: 'Click / Tap Node',
+    controlsHint: 'Desktop & Mobile: Pilih jenis menara lalu klik/ketuk landasan orbit untuk membangun',
+    tier: 'flagship',
+    controlType: 'none',
+    supportedInputs: ['mouse', 'touch'],
     avgDuration: '5-10 mins'
   },
   'gravity-shift': {
@@ -602,8 +711,11 @@ export const CANONICAL_GAME_REGISTRY: Record<CanonicalGameId, GameRegistryItem> 
     themeColor: '#06b6d4',
     accentShadow: 'shadow-[0_0_15px_rgba(6,182,212,0.15)]',
     icon: '🌌',
-    controls: 'A/D + Space',
-    controlType: 'leftright',
+    controls: 'Spasi / Tap Flip',
+    controlsHint: 'Desktop: Spasi/W/S balik gravitasi · Mobile: Ketuk layar atau tombol Action untuk flip',
+    tier: 'flagship',
+    controlType: 'actiononly',
+    supportedInputs: ['keyboard', 'touch', 'mouse'],
     avgDuration: '2-6 mins'
   },
   'hex-dominion': {
@@ -618,8 +730,11 @@ export const CANONICAL_GAME_REGISTRY: Record<CanonicalGameId, GameRegistryItem> 
     themeColor: '#6366f1',
     accentShadow: 'shadow-[0_0_15px_rgba(99,102,241,0.15)]',
     icon: '🔷',
-    controls: 'Mouse / Click',
-    controlType: 'actiononly',
+    controls: 'Click / Tap Hex',
+    controlsHint: 'Desktop & Mobile: Klik/ketuk petak heksagonal 3D untuk merebut & memperkuat wilayah',
+    tier: 'flagship',
+    controlType: 'none',
+    supportedInputs: ['mouse', 'touch'],
     avgDuration: '5-12 mins'
   },
   'wizard-chess': {
@@ -634,8 +749,11 @@ export const CANONICAL_GAME_REGISTRY: Record<CanonicalGameId, GameRegistryItem> 
     themeColor: '#f59e0b',
     accentShadow: 'shadow-[0_0_15px_rgba(245,158,11,0.2)]',
     icon: '♟️',
-    controls: 'Mouse / Touch + Orbit',
-    controlType: 'actiononly',
+    controls: 'Tap Bidak & Petak / Orbit',
+    controlsHint: 'Desktop & Mobile: Ketuk bidak & petak tujuan, seret latar untuk putar kamera 3D',
+    featured: true,
+    tier: 'flagship',
+    controlType: 'none',
     supportedInputs: ['mouse', 'touch', 'keyboard'],
     avgDuration: '5-15 mins'
   },
@@ -652,7 +770,10 @@ export const CANONICAL_GAME_REGISTRY: Record<CanonicalGameId, GameRegistryItem> 
     accentShadow: 'shadow-[0_0_15px_rgba(239,68,68,0.2)]',
     icon: '🏎️',
     controls: 'WASD / Arrows + Space',
-    controlType: 'dpad',
+    controlsHint: 'Desktop: WASD/Panah gas & belok, Spasi nitro · Mobile: Tombol Kemudi, Gas & Nitro di layar',
+    featured: true,
+    tier: 'flagship',
+    controlType: 'none',
     supportedInputs: ['keyboard', 'touch', 'gamepad'],
     avgDuration: '2-5 mins'
   },
@@ -668,8 +789,11 @@ export const CANONICAL_GAME_REGISTRY: Record<CanonicalGameId, GameRegistryItem> 
     themeColor: '#f59e0b',
     accentShadow: 'shadow-[0_0_15px_rgba(245,158,11,0.2)]',
     icon: '🌍',
-    controls: 'Mouse Click & Drag / Touch',
-    controlType: 'actiononly',
+    controls: 'Draw / Tap Tools',
+    controlsHint: 'Desktop & Mobile: Pilih kuas di panel bawah lalu ketuk/seret di peta untuk mencipta dunia',
+    featured: true,
+    tier: 'flagship',
+    controlType: 'none',
     supportedInputs: ['mouse', 'touch', 'keyboard'],
     avgDuration: '5-20 mins'
   }

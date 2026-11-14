@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { GameComponentProps } from '../../types';
 import { useGameEngine } from '../../hooks/useGameEngine';
 import { GameOverlay } from '../gameplay/GameOverlay';
-import { audio } from '../../utils/audio';
+import { audioController } from '../../sdk/audioController';
 import { screenShake } from '../../utils/screenShake';
 import {
   DIVINE_ERA_CHALLENGES,
@@ -126,12 +126,12 @@ export default function WorldBoxGame({ onGameOver, onScoreUpdate, highScore }: G
     engineRef.current = new WorldBoxEngine({
       onScoreAdd: (pts) => addScore(pts),
       onSound: (type) => {
-        if (type === 'click') audio.playClick();
-        else if (type === 'coin') audio.playCoin();
-        else if (type === 'powerup') audio.playPowerup();
-        else if (type === 'explosion') audio.playExplosion();
-        else if (type === 'hit') audio.playHit();
-        else if (type === 'levelup') audio.playLevelUp();
+        if (type === 'click') audioController.playClick();
+        else if (type === 'coin') audioController.playCoin();
+        else if (type === 'powerup') audioController.playPowerup();
+        else if (type === 'explosion') audioController.playExplosion();
+        else if (type === 'hit') audioController.playHit();
+        else if (type === 'levelup') audioController.playLevelUp();
       },
       onShake: (intensity) => screenShake.trigger(intensity)
     });
@@ -335,7 +335,7 @@ export default function WorldBoxGame({ onGameOver, onScoreUpdate, highScore }: G
   return (
     <div
       ref={containerRef}
-      className="relative w-full h-full min-h-[560px] bg-slate-950 text-slate-100 flex flex-col select-none overflow-hidden rounded-xl border border-slate-800"
+      className="relative w-full h-full min-h-[420px] sm:min-h-[520px] lg:min-h-[560px] bg-slate-950 text-slate-100 flex flex-col select-none overflow-hidden rounded-xl border border-slate-800"
     >
       {/* TOP CHRONICLE & SIMULATION HUD BAR */}
       <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-2.5 bg-slate-900/95 border-b border-slate-800 z-20">
@@ -415,11 +415,11 @@ export default function WorldBoxGame({ onGameOver, onScoreUpdate, highScore }: G
             type="button"
             onClick={() => {
               if (engineRef.current?.saveToLocalStorage()) {
-                audio.playPowerup();
+                audioController.playPowerup();
                 syncHudSnapshot();
               }
             }}
-            className="px-2 py-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg flex items-center gap-1"
+            className="px-2 py-1.5 min-h-[36px] text-xs bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg flex items-center gap-1"
             title="Quick Save Dunia"
           >
             <Save className="w-3.5 h-3.5" />
@@ -428,11 +428,11 @@ export default function WorldBoxGame({ onGameOver, onScoreUpdate, highScore }: G
             type="button"
             onClick={() => {
               if (engineRef.current?.loadFromLocalStorage()) {
-                audio.playLevelUp();
+                audioController.playLevelUp();
                 syncHudSnapshot();
               }
             }}
-            className="px-2 py-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg flex items-center gap-1"
+            className="px-2 py-1.5 min-h-[36px] text-xs bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg flex items-center gap-1"
             title="Quick Load Dunia"
           >
             <Download className="w-3.5 h-3.5" />
@@ -453,10 +453,10 @@ export default function WorldBoxGame({ onGameOver, onScoreUpdate, highScore }: G
                   hud.population * 25 + hud.kingdomCount * 300 + hud.year * 20
                 );
                 setScore(finalScore);
-                audio.playLevelUp();
+                audioController.playLevelUp();
                 triggerGameOver(finalScore);
               }}
-              className="px-3 py-1.5 text-xs font-semibold bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-lg flex items-center gap-1.5"
+              className="px-3 py-1.5 min-h-[44px] sm:min-h-0 text-xs font-semibold bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-lg flex items-center gap-1.5"
             >
               <Award className="w-3.5 h-3.5" />
               <span>Klaim Skor</span>
@@ -500,7 +500,7 @@ export default function WorldBoxGame({ onGameOver, onScoreUpdate, highScore }: G
       <div className="relative flex-1 flex flex-col lg:flex-row min-h-0 overflow-hidden">
         <div
           ref={canvasWrapperRef}
-          className="relative flex-1 bg-[#071324] flex items-center justify-center overflow-hidden min-h-[320px]"
+          className="relative flex-1 bg-[#071324] flex items-center justify-center overflow-hidden min-h-[240px] sm:min-h-[320px]"
         >
           <canvas
             ref={canvasRef}
@@ -516,14 +516,14 @@ export default function WorldBoxGame({ onGameOver, onScoreUpdate, highScore }: G
             <button
               type="button"
               onClick={() => setCamera((c) => ({ ...c, zoom: Math.min(2.5, Number((c.zoom + 0.25).toFixed(2))) }))}
-              className="p-1.5 text-slate-300 hover:text-white hover:bg-slate-800 rounded"
+              className="min-w-[36px] min-h-[36px] sm:min-w-0 sm:min-h-0 p-1.5 flex items-center justify-center text-slate-300 hover:text-white hover:bg-slate-800 rounded"
             >
               <ZoomIn className="w-4 h-4" />
             </button>
             <button
               type="button"
               onClick={() => setCamera((c) => ({ ...c, zoom: Math.max(1, Number((c.zoom - 0.25).toFixed(2))) }))}
-              className="p-1.5 text-slate-300 hover:text-white hover:bg-slate-800 rounded"
+              className="min-w-[36px] min-h-[36px] sm:min-w-0 sm:min-h-0 p-1.5 flex items-center justify-center text-slate-300 hover:text-white hover:bg-slate-800 rounded"
             >
               <ZoomOut className="w-4 h-4" />
             </button>
@@ -693,7 +693,7 @@ export default function WorldBoxGame({ onGameOver, onScoreUpdate, highScore }: G
       </div>
 
       {/* BOTTOM GOD POWERS TOOLBAR */}
-      <div className="bg-slate-900 border-t border-slate-800 px-3 py-2 space-y-2 z-20">
+      <div className="bg-slate-900 border-t border-slate-800 px-3 py-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] space-y-2 z-20">
         <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5">
           {[
             { id: 'terrain' as const, label: 'Medan & Bioma', icon: Globe },
@@ -712,7 +712,7 @@ export default function WorldBoxGame({ onGameOver, onScoreUpdate, highScore }: G
                   const first = GOD_POWERS_CATALOG.find((t) => t.category === cat.id);
                   if (first) setSelectedTool(first.id);
                 }}
-                className={`px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 whitespace-nowrap shrink-0 min-h-[38px] ${
+                className={`px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 whitespace-nowrap shrink-0 min-h-[44px] ${
                   activeCategory === cat.id ? 'bg-amber-500 text-slate-950 font-semibold' : 'bg-slate-950 text-slate-300 border border-slate-800'
                 }`}
               >
@@ -727,8 +727,8 @@ export default function WorldBoxGame({ onGameOver, onScoreUpdate, highScore }: G
             <button
               key={tool.id}
               type="button"
-              onClick={() => { setSelectedTool(tool.id); audio.playClick(); }}
-              className={`px-3 py-2 rounded-lg text-xs font-medium flex items-center gap-2 whitespace-nowrap shrink-0 min-h-[40px] border ${
+              onClick={() => { setSelectedTool(tool.id); audioController.playClick(); }}
+              className={`px-3 py-2 rounded-lg text-xs font-medium flex items-center gap-2 whitespace-nowrap shrink-0 min-h-[44px] border ${
                 selectedTool === tool.id ? 'bg-slate-800 text-white border-amber-400' : 'bg-slate-950/90 text-slate-300 border-slate-800'
               }`}
             >

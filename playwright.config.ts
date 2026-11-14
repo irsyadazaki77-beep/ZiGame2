@@ -1,4 +1,16 @@
+import fs from 'node:fs';
 import { defineConfig, devices } from '@playwright/test';
+
+const preinstalledShell = '/ms-playwright/chrome-headless-shell-linux64/chrome-headless-shell';
+const launchOptions = {
+  ...(fs.existsSync(preinstalledShell) ? { executablePath: preinstalledShell } : {}),
+  args: [
+    '--use-gl=angle',
+    '--use-angle=swiftshader',
+    '--enable-unsafe-swiftshader',
+    '--ignore-gpu-blocklist',
+  ],
+};
 
 export default defineConfig({
   testDir: './e2e',
@@ -10,6 +22,7 @@ export default defineConfig({
   use: {
     baseURL: 'http://localhost:3000',
     trace: 'on-first-retry',
+    launchOptions,
   },
   projects: [
     {

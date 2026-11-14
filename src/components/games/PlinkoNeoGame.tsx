@@ -1,8 +1,9 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
 import { GameComponentProps } from '../../types';
-import { audio } from '../../utils/audio';
+import { audioController, ObjectPool } from '../../sdk';
 import { useGameEngine } from '../../hooks/useGameEngine';
+import { inputManager } from '../../services/inputService';
 import { GameOverlay } from '../gameplay/GameOverlay';
 import { ThreeDockOverlay } from '../gameplay/ThreeDockOverlay';
 import {
@@ -61,6 +62,7 @@ export default function PlinkoNeoGame({
 
   const activeBallsRef = useRef<PlinkoBall3D[]>([]);
   const spawnBallFnRef = useRef<(xOffset?: number) => void>(() => {});
+  const releaseBallsRef = useRef<() => void>(() => {});
 
   const dropBall = useCallback(() => {
     if (gameStateRef.current !== 'playing') return;
@@ -68,14 +70,11 @@ export default function PlinkoNeoGame({
     plinkoRef.current.ballsRemaining -= 1;
     setBallsLeft(plinkoRef.current.ballsRemaining);
     spawnBallFnRef.current();
-    audio.playClick?.();
+    audioController.playClick();
   }, []);
 
   const handleStart = useCallback(() => {
-    const stage = stageRef.current;
-    if (stage) {
-      activeBallsRef.current.forEach((b) => stage.scene.remove(b.mesh));
-    }
+    releaseBallsRef.current();
     activeBallsRef.current = [];
     plinkoRef.current = {
       ballsRemaining: 12,
@@ -101,11 +100,14 @@ export default function PlinkoNeoGame({
   }, []);
 
   useEffect(() => {
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === ' ' || e.key === 'Enter') dropBall();
-    };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
+    const unsub = inputManager.subscribe({
+      onActionDown: (action) => {
+        if (action === 'PRIMARY' || action === 'ACTION_PRIMARY' || action === 'DOWN') {
+          dropBall();
+        }
+      }
+    });
+    return () => unsub();
   }, [dropBall]);
 
   useEffect(() => {
@@ -135,7 +137,6 @@ export default function PlinkoNeoGame({
     stageRef.current = stage;
     setQuality(stage.getQualityLevel());
 
-    // Build 3D PlinkoPeg Matrix on Table
     const pegGeo = new THREE.CylinderGeometry(0.18, 0.2, 0.55, 12);
     const pegMat = new THREE.MeshPhysicalMaterial({
       color: 0xe2e8f0,
@@ -158,7 +159,6 @@ export default function PlinkoNeoGame({
       }
     }
 
-    // Build 5 Multiplier Pockets at z = 5.2
     const pocketColors = [0x38bdf8, 0xa855f7, 0xf59e0b, 0xa855f7, 0x38bdf8];
     for (let i = 0; i < 5; i++) {
       const px = (i - 2) * 1.65;
@@ -184,19 +184,37 @@ export default function PlinkoNeoGame({
       clearcoat: 1.0
     });
 
+    const ballPool = new ObjectPool<PlinkoBall3D>(
+      () => {
+        const mesh = new THREE.Mesh(ballGeo, ballMat);
+        mesh.castShadow = true;
+        mesh.visible = false;
+        stage.scene.add(mesh);
+        return { mesh, x: 0, z: -5.8, vx: 0, vz: 0 };
+      },
+      (b) => {
+        b.mesh.visible = false;
+        b.mesh.position.set(0, -99, 0);
+        b.vx = 0;
+        b.vz = 0;
+      },
+      16
+    );
+
+    releaseBallsRef.current = () => {
+      ballPool.releaseAll();
+    };
+
     spawnBallFnRef.current = () => {
-      const mesh = new THREE.Mesh(ballGeo, ballMat);
+      const b = ballPool.acquire();
       const startX = (Math.random() - 0.5) * 2.2;
-      mesh.position.set(startX, 0.32, -5.8);
-      mesh.castShadow = true;
-      stage.scene.add(mesh);
-      activeBallsRef.current.push({
-        mesh,
-        x: startX,
-        z: -5.8,
-        vx: (Math.random() - 0.5) * 1.8,
-        vz: 1.5
-      });
+      b.x = startX;
+      b.z = -5.8;
+      b.vx = (Math.random() - 0.5) * 1.8;
+      b.vz = 1.5;
+      b.mesh.position.set(startX, 0.32, -5.8);
+      b.mesh.visible = true;
+      activeBallsRef.current.push(b);
     };
 
     stage.startLoop((dt) => {
@@ -208,7 +226,6 @@ export default function PlinkoNeoGame({
         b.x += b.vx * dt;
         b.z += b.vz * dt;
 
-        // Side rail bounce
         if (b.x < -4.2) {
           b.x = -4.2;
           b.vx = Math.abs(b.vx) * 0.75;
@@ -217,7 +234,6 @@ export default function PlinkoNeoGame({
           b.vx = -Math.abs(b.vx) * 0.75;
         }
 
-        // Peg collisions
         for (const p of pegs) {
           const dx = b.x - p.x;
           const dz = b.z - p.z;
@@ -231,15 +247,14 @@ export default function PlinkoNeoGame({
             b.vx = nx * 4.2 + jitter;
             b.vz = Math.max(1.2, Math.abs(b.vz) * 0.55);
             stage.particles.burst(p.x, 0.45, p.z, 6, 0xfacc15, 4);
-            audio.playClick?.();
+            audioController.playReflect();
           }
         }
 
         b.mesh.position.set(b.x, 0.32, b.z);
 
-        // Reached multiplier pockets
         if (b.z >= 5.0) {
-          stage.scene.remove(b.mesh);
+          ballPool.releaseItem(b);
           activeBallsRef.current.splice(i, 1);
 
           const slotIdx = Math.max(0, Math.min(4, Math.round(b.x / 1.65 + 2)));
@@ -249,10 +264,15 @@ export default function PlinkoNeoGame({
           addScore(pts);
           stage.particles.burst(b.x, 0.5, 5.2, 24, pocketColors[slotIdx], 7.5);
           stage.triggerTrauma(mult >= 10 ? 0.45 : 0.2);
-          if (mult >= 10) stage.kickFov(4);
-          audio.playCoin?.();
+          if (mult >= 10) {
+            stage.kickFov(4);
+            audioController.playWin();
+          } else {
+            audioController.playScore();
+          }
 
           if (plinkoRef.current.ballsRemaining === 0 && activeBallsRef.current.length === 0) {
+            audioController.playGameOver();
             triggerGameOver(scoreRef.current);
             return;
           }
@@ -261,20 +281,24 @@ export default function PlinkoNeoGame({
     });
 
     return () => {
+      releaseBallsRef.current();
+      releaseBallsRef.current = () => {};
+      activeBallsRef.current = [];
       stage.dispose();
       stageRef.current = null;
     };
   }, [addScore, scoreRef, triggerGameOver]);
 
   return (
-    <div
-      className="relative w-full h-full min-h-[460px] bg-slate-950 overflow-hidden rounded-2xl border border-amber-500/20"
-      onClick={dropBall}
-    >
-      <div ref={mountRef} className="absolute inset-0 w-full h-full cursor-pointer" />
+    <div className="relative w-full h-full min-h-[280px] sm:min-h-[380px] lg:min-h-[460px] bg-slate-950 overflow-hidden rounded-2xl border border-amber-500/20 touch-none select-none">
+      <div
+        ref={mountRef}
+        className="absolute inset-0 w-full h-full cursor-pointer touch-none"
+        onPointerDown={dropBall}
+      />
 
-      <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex flex-wrap items-center justify-between gap-2 p-3.5">
-        <div className="flex items-center gap-3 rounded-xl border border-white/10 bg-slate-950/85 px-3.5 py-2 text-xs text-slate-200 tabular-nums">
+      <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex flex-wrap items-center justify-between gap-2 p-3 sm:p-3.5">
+        <div className="flex items-center gap-2 sm:gap-3 rounded-xl border border-white/10 bg-slate-950/85 px-3 py-1.5 sm:px-3.5 sm:py-2 text-xs text-slate-200 tabular-nums">
           <span className="flex items-center gap-1 font-semibold text-amber-400">
             <Coins className="w-3.5 h-3.5" /> BOLA TERSISA: {ballsLeft}
           </span>
@@ -283,7 +307,7 @@ export default function PlinkoNeoGame({
         </div>
 
         {lastMulti !== null && (
-          <div className="flex items-center gap-1 rounded-xl border border-amber-500/30 bg-slate-950/85 px-3.5 py-2 text-xs font-semibold text-amber-400">
+          <div className="flex items-center gap-1 rounded-xl border border-amber-500/30 bg-slate-950/85 px-3 py-1.5 sm:px-3.5 sm:py-2 text-xs font-semibold text-amber-400 tabular-nums">
             <Sparkles className="w-3.5 h-3.5" /> JACKPOT {lastMulti}X!
           </div>
         )}
@@ -296,7 +320,7 @@ export default function PlinkoNeoGame({
         onCycleQuality={handleCycleQuality}
         extraControls={
           <span className="hidden sm:inline-flex items-center gap-1 text-[11px] text-slate-400 px-2 whitespace-nowrap shrink-0">
-            <Zap className="w-3 h-3 text-amber-400" /> Klik Layar / Tekan Space untuk Menjatuhkan Bola Emas 3D
+            <Zap className="w-3 h-3 text-amber-400" /> Ketuk Layar / Tekan Space untuk Menjatuhkan Bola Emas 3D
           </span>
         }
       />

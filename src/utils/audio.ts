@@ -4,11 +4,15 @@ import { logger } from './logger';
 class RetroAudio {
   private ctx: AudioContext | null = null;
   private isMuted: boolean = false;
+  private masterVolume: number = 1;
   private musicVolume: number = 0.5;
   private sfxVolume: number = 0.7;
   private isBgmPlaying: boolean = false;
+  private hasUserGesture: boolean = false;
+  private pendingBgm: boolean = false;
   private masterGain: GainNode | null = null;
   private activeNodes: Set<AudioNode> = new Set();
+  private listeners: Set<() => void> = new Set();
 
   // Lookahead Web Audio API Scheduler fields
   private bgmTimer: any = null;
@@ -25,13 +29,20 @@ class RetroAudio {
         if (savedMute !== null) {
           this.isMuted = savedMute === 'true';
         }
+        const savedMasterVol = localStorage.getItem('zigame_master_vol');
+        if (savedMasterVol !== null) {
+          const parsed = parseFloat(savedMasterVol);
+          if (!Number.isNaN(parsed)) this.masterVolume = Math.max(0, Math.min(1, parsed));
+        }
         const savedMusicVol = localStorage.getItem('zigame_music_vol');
         if (savedMusicVol !== null) {
-          this.musicVolume = parseFloat(savedMusicVol);
+          const parsed = parseFloat(savedMusicVol);
+          if (!Number.isNaN(parsed)) this.musicVolume = Math.max(0, Math.min(1, parsed));
         }
         const savedSfxVol = localStorage.getItem('zigame_sfx_vol');
         if (savedSfxVol !== null) {
-          this.sfxVolume = parseFloat(savedSfxVol);
+          const parsed = parseFloat(savedSfxVol);
+          if (!Number.isNaN(parsed)) this.sfxVolume = Math.max(0, Math.min(1, parsed));
         }
       } catch {
         // Quietly ignore storage access restrictions
@@ -40,7 +51,32 @@ class RetroAudio {
     this.setupMobileAutoUnlock();
   }
 
+  public subscribe(listener: () => void): () => void {
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
+  }
+
+  private notify(): void {
+    this.listeners.forEach((listener) => {
+      try {
+        listener();
+      } catch {
+        // Ignore subscriber errors
+      }
+    });
+  }
+
+  private applyMasterGain(): void {
+    if (this.masterGain && this.ctx) {
+      const target = this.isMuted ? 0 : this.masterVolume;
+      this.masterGain.gain.setValueAtTime(target, this.ctx.currentTime);
+    }
+  }
+
   public unlockAudio() {
+    this.hasUserGesture = true;
     this.initContext();
     if (this.ctx && this.ctx.state === 'suspended') {
       this.ctx.resume().catch(() => {});
@@ -52,6 +88,10 @@ class RetroAudio {
         source.connect(this.ctx.destination);
         source.start(0);
       } catch {}
+    }
+    if (this.pendingBgm && !this.isMuted && !this.isBgmPlaying && this.musicVolume > 0 && this.masterVolume > 0) {
+      this.pendingBgm = false;
+      this.startBGM();
     }
   }
 
@@ -73,26 +113,26 @@ class RetroAudio {
   }
 
   private initContext() {
-    if (!this.ctx) {
+    if (!this.ctx && typeof window !== 'undefined') {
       const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
       if (AudioCtx) {
         this.ctx = new AudioCtx();
         this.masterGain = this.ctx.createGain();
-        this.masterGain.gain.setValueAtTime(this.isMuted ? 0 : 1, this.ctx.currentTime);
+        this.masterGain.gain.setValueAtTime(this.isMuted ? 0 : this.masterVolume, this.ctx.currentTime);
         this.masterGain.connect(this.ctx.destination);
 
         if (typeof document !== 'undefined') {
           document.addEventListener('visibilitychange', () => {
             if (document.hidden && this.ctx && this.ctx.state === 'running') {
               this.ctx.suspend().catch(() => {});
-            } else if (!document.hidden && this.ctx && this.ctx.state === 'suspended' && !this.isMuted) {
+            } else if (!document.hidden && this.hasUserGesture && this.ctx && this.ctx.state === 'suspended' && !this.isMuted) {
               this.ctx.resume().catch(() => {});
             }
           });
         }
       }
     }
-    if (this.ctx && this.ctx.state === 'suspended') {
+    if (this.ctx && this.ctx.state === 'suspended' && this.hasUserGesture) {
       this.ctx.resume().catch(() => {});
     }
   }
@@ -169,26 +209,41 @@ class RetroAudio {
     this.activeNodes.clear();
   }
 
-  toggleMute(): boolean {
-    this.isMuted = !this.isMuted;
+  setMuted(muted: boolean): boolean {
+    this.isMuted = muted;
     try {
       localStorage.setItem('zigame_muted', String(this.isMuted));
     } catch {}
     if (this.isMuted) {
       this.stopBGM();
-      if (this.masterGain && this.ctx) {
-        this.masterGain.gain.setValueAtTime(0, this.ctx.currentTime);
-      }
-    } else {
-      if (this.masterGain && this.ctx) {
-        this.masterGain.gain.setValueAtTime(1, this.ctx.currentTime);
-      }
     }
+    this.applyMasterGain();
+    this.notify();
     return this.isMuted;
+  }
+
+  toggleMute(): boolean {
+    return this.setMuted(!this.isMuted);
   }
 
   getMuteState(): boolean {
     return this.isMuted;
+  }
+
+  setMasterVolume(vol: number) {
+    this.masterVolume = Math.max(0, Math.min(1, vol));
+    try {
+      localStorage.setItem('zigame_master_vol', String(this.masterVolume));
+    } catch {}
+    this.applyMasterGain();
+    if (this.masterVolume <= 0) {
+      this.stopBGM();
+    }
+    this.notify();
+  }
+
+  getMasterVolume(): number {
+    return this.masterVolume;
   }
 
   setMusicVolume(vol: number) {
@@ -196,6 +251,10 @@ class RetroAudio {
     try {
       localStorage.setItem('zigame_music_vol', String(this.musicVolume));
     } catch {}
+    if (this.musicVolume <= 0) {
+      this.stopBGM();
+    }
+    this.notify();
   }
 
   getMusicVolume(): number {
@@ -207,6 +266,7 @@ class RetroAudio {
     try {
       localStorage.setItem('zigame_sfx_vol', String(this.sfxVolume));
     } catch {}
+    this.notify();
   }
 
   getSfxVolume(): number {
@@ -214,7 +274,29 @@ class RetroAudio {
   }
 
   playClick() {
-    this.playCoin();
+    if (this.isMuted || this.sfxVolume <= 0 || this.masterVolume <= 0) return;
+    this.initContext();
+    if (!this.ctx) return;
+
+    try {
+      const now = this.ctx.currentTime;
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(760, now);
+      osc.frequency.exponentialRampToValueAtTime(380, now + 0.045);
+
+      gain.gain.setValueAtTime(0.08 * this.sfxVolume, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.045);
+
+      osc.connect(gain);
+      gain.connect(this.masterGain || this.ctx.destination);
+
+      this.trackNode(osc, gain);
+      osc.start(now);
+      osc.stop(now + 0.045);
+    } catch {}
   }
 
   playEat() {
@@ -523,11 +605,60 @@ class RetroAudio {
   }
 
   playLevelUp() {
-    this.playScore();
+    this.playWin();
+  }
+
+  playWin() {
+    if (this.isMuted || this.sfxVolume <= 0 || this.masterVolume <= 0) return;
+    this.initContext();
+    if (!this.ctx) return;
+
+    try {
+      const now = this.ctx.currentTime;
+      const notes = [523.25, 659.25, 783.99, 1046.5];
+      notes.forEach((freq, idx) => {
+        if (!this.ctx) return;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        const t = now + idx * 0.085;
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(freq, t);
+        gain.gain.setValueAtTime(0.14 * this.sfxVolume, t);
+        gain.gain.exponentialRampToValueAtTime(0.001, t + 0.22);
+        osc.connect(gain);
+        gain.connect(this.masterGain || this.ctx.destination);
+        this.trackNode(osc, gain);
+        osc.start(t);
+        osc.stop(t + 0.22);
+      });
+    } catch {}
   }
 
   playGameOver() {
-    this.playHit();
+    if (this.isMuted || this.sfxVolume <= 0 || this.masterVolume <= 0) return;
+    this.initContext();
+    if (!this.ctx) return;
+
+    try {
+      const now = this.ctx.currentTime;
+      const notes = [392.0, 329.63, 261.63, 196.0];
+      notes.forEach((freq, idx) => {
+        if (!this.ctx) return;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        const t = now + idx * 0.11;
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(freq, t);
+        osc.frequency.exponentialRampToValueAtTime(freq * 0.9, t + 0.14);
+        gain.gain.setValueAtTime(0.11 * this.sfxVolume, t);
+        gain.gain.exponentialRampToValueAtTime(0.001, t + 0.15);
+        osc.connect(gain);
+        gain.connect(this.masterGain || this.ctx.destination);
+        this.trackNode(osc, gain);
+        osc.start(t);
+        osc.stop(t + 0.15);
+      });
+    } catch {}
   }
 
   playError() {
@@ -692,10 +823,15 @@ class RetroAudio {
   }
 
   startBGM() {
-    if (this.isMuted || this.isBgmPlaying || this.musicVolume <= 0) return;
+    if (this.isMuted || this.isBgmPlaying || this.musicVolume <= 0 || this.masterVolume <= 0) return;
+    if (!this.hasUserGesture) {
+      this.pendingBgm = true;
+      return;
+    }
     this.initContext();
     if (!this.ctx) return;
 
+    this.pendingBgm = false;
     this.isBgmPlaying = true;
     this.bgmStep = 0;
     // Anchor next note time to current audio hardware clock + small initial buffer
@@ -717,6 +853,7 @@ class RetroAudio {
   }
 
   stopBGM() {
+    this.pendingBgm = false;
     if (this.bgmTimer) {
       clearInterval(this.bgmTimer);
       this.bgmTimer = null;

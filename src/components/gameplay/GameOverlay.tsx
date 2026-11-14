@@ -19,6 +19,7 @@ export interface GameOverlayProps {
   onOpenGameDrawer?: () => void;
   onNavigateHome?: () => void;
   instructions?: string;
+  controlsHint?: string;
   gameoverMessage?: string;
 }
 
@@ -35,6 +36,7 @@ export const GameOverlay: React.FC<GameOverlayProps> = ({
   onNavigateHome,
   description,
   instructions = description || 'Gunakan kontrol untuk mengarahkan permainan.',
+  controlsHint,
   gameoverMessage = 'Permainan Selesai'
 }) => {
   // Support quick replay with Space or Enter key when on game over
@@ -73,9 +75,14 @@ export const GameOverlay: React.FC<GameOverlayProps> = ({
           <h3 className="text-xl sm:text-2xl font-bold text-white mb-2 tracking-tight">
             Siap Bermain?
           </h3>
-          <p className="text-zinc-400 text-xs sm:text-sm mb-6 max-w-[320px] leading-relaxed bg-zinc-900/80 border border-white/[0.06] p-4 rounded-xl font-normal shadow-sm">
+          <p className="text-zinc-400 text-xs sm:text-sm mb-3 max-w-[340px] leading-relaxed bg-zinc-900/80 border border-white/[0.06] p-4 rounded-xl font-normal shadow-sm">
             {instructions}
           </p>
+          {controlsHint && (
+            <p className="text-[11px] text-indigo-300 mb-5 max-w-[340px] leading-snug">
+              {controlsHint}
+            </p>
+          )}
           <button
             onClick={(e) => { e.stopPropagation(); onStart(); }}
             className="bg-indigo-600 hover:bg-indigo-500 hover:scale-[1.02] active:scale-[0.98] focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:outline-hidden text-white min-h-[44px] px-8 py-2.5 rounded-xl font-semibold text-sm shadow-lg shadow-indigo-600/10 flex items-center justify-center gap-2 transition-all duration-150 ease-out cursor-pointer border border-indigo-500/20"
@@ -143,8 +150,8 @@ export const GameOverlay: React.FC<GameOverlayProps> = ({
             <div className="space-y-1 w-full flex flex-col items-center">
               {isNewRecord ? (
                 <div className="space-y-2.5 w-full flex flex-col items-center">
-                  <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/10 border border-amber-500/20 text-amber-300 text-xs font-semibold">
-                    <Sparkles size={13} className="text-amber-400 animate-pulse" /> Rekor Baru Tercapai!
+                  <div className="inline-flex items-center gap-1.5 text-amber-300 text-xs font-bold uppercase tracking-wider">
+                    <Sparkles size={13} className="text-amber-400" /> Rekor Baru Tercapai!
                   </div>
                   <div className="w-full bg-amber-500/[0.02] border border-amber-500/10 p-3.5 rounded-xl text-xs space-y-1">
                     <div className="text-zinc-500 font-medium font-sans">Melampaui Rekor Sebelumnya</div>

@@ -1,10 +1,11 @@
 import React, { useRef, useCallback, useEffect, useState } from 'react';
 import * as THREE from 'three';
-import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import { GameComponentProps } from '../../types';
-import { audio } from '../../utils/audio';
+import { audioController } from '../../sdk/audioController';
 import { useGameEngine } from '../../sdk';
-import { disposeThreeScene } from '../../utils/threeCleanup';
+import { inputManager } from '../../services/inputService';
+import { ThreeStageController } from '../../utils/threeStage';
 import { screenShake } from '../../utils/screenShake';
 import { GameOverlay } from '../gameplay/GameOverlay';
 import { Shield, Zap, Sparkles, Eye, ChevronDown, ChevronUp } from 'lucide-react';
@@ -22,11 +23,25 @@ interface SpaceHazard3D {
   rotSpeed: THREE.Vector3;
 }
 
+interface ExhaustSlot {
+  active: boolean;
+  x: number;
+  y: number;
+  z: number;
+  vz: number;
+  life: number;
+  maxLife: number;
+  warp: boolean;
+}
+
 const BOUNDS_X = 5.4;
 const BOUNDS_Y = 3.2;
+const EXHAUST_CAPACITY = 90;
 
-const _camPos = new THREE.Vector3();
-const _camLook = new THREE.Vector3();
+const _camTargetPos = new THREE.Vector3(0, 1.8, 6.8);
+const _camSmoothPos = new THREE.Vector3(0, 1.8, 6.8);
+const _camLook = new THREE.Vector3(0, 0, -18);
+const _dummy = new THREE.Object3D();
 
 function buildStarfighter(isSoftwareGl: boolean): {
   group: THREE.Group;
@@ -38,19 +53,25 @@ function buildStarfighter(isSoftwareGl: boolean): {
 
   const hullMat = new THREE.MeshPhysicalMaterial({
     color: 0xe2e8f0,
-    metalness: 0.75,
-    roughness: 0.22,
+    metalness: 0.78,
+    roughness: 0.2,
     clearcoat: 0.9
   });
   const wingMat = new THREE.MeshStandardMaterial({
     color: 0x06b6d4,
-    metalness: 0.65,
-    roughness: 0.28
+    metalness: 0.68,
+    roughness: 0.26
   });
   const darkMat = new THREE.MeshStandardMaterial({
     color: 0x0f172a,
-    metalness: 0.5,
-    roughness: 0.5
+    metalness: 0.55,
+    roughness: 0.45
+  });
+  const tipGlowMat = new THREE.MeshStandardMaterial({
+    color: 0x67e8f9,
+    emissive: 0x22d3ee,
+    emissiveIntensity: 1.9,
+    roughness: 0.15
   });
   const canopyMat = new THREE.MeshPhysicalMaterial({
     color: 0x38bdf8,
@@ -62,7 +83,7 @@ function buildStarfighter(isSoftwareGl: boolean): {
   });
 
   // 1. Sleek Fuselage Cone
-  const fuselage = new THREE.Mesh(new THREE.ConeGeometry(0.42, 2.5, 8), hullMat);
+  const fuselage = new THREE.Mesh(new THREE.ConeGeometry(0.42, 2.5, 10), hullMat);
   fuselage.rotation.x = -Math.PI / 2;
   fuselage.scale.set(1, 1, 0.55);
   group.add(fuselage);
@@ -73,29 +94,40 @@ function buildStarfighter(isSoftwareGl: boolean): {
   canopy.position.set(0, 0.18, -0.1);
   group.add(canopy);
 
-  // 3. Swept Delta Wings
-  const wing = new THREE.Mesh(new THREE.BoxGeometry(2.35, 0.06, 0.85), wingMat);
+  // 3. Sculpted Swept Delta Wings (RoundedBoxGeometry)
+  const wing = new THREE.Mesh(new RoundedBoxGeometry(2.38, 0.08, 0.88, 2, 0.025), wingMat);
   wing.position.set(0, 0, 0.35);
   group.add(wing);
 
   // 4. Vertical Stabilizer Fin
-  const fin = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.52, 0.65), wingMat);
+  const fin = new THREE.Mesh(new RoundedBoxGeometry(0.08, 0.54, 0.66, 2, 0.02), wingMat);
   fin.position.set(0, 0.28, 0.62);
   group.add(fin);
 
-  // 5. Wingtip Laser Pods
-  const podGeo = new THREE.CylinderGeometry(0.05, 0.05, 0.9, 8);
+  // 5. Wingtip Laser Pods + HDR Emitters
+  const podGeo = new THREE.CylinderGeometry(0.055, 0.055, 0.9, 10);
   podGeo.rotateX(Math.PI / 2);
   const podL = new THREE.Mesh(podGeo, darkMat);
   podL.position.set(-1.15, 0, 0.25);
   const podR = podL.clone();
   podR.position.x = 1.15;
-  group.add(podL, podR);
 
-  // 6. Twin Plasma Thruster Flames
-  const flameGeo = new THREE.ConeGeometry(0.14, 0.75, 8);
+  const emitterGeo = new THREE.SphereGeometry(0.055, 8, 8);
+  const emitterL = new THREE.Mesh(emitterGeo, tipGlowMat);
+  emitterL.position.set(-1.15, 0, -0.22);
+  const emitterR = emitterL.clone();
+  emitterR.position.x = 1.15;
+  group.add(podL, podR, emitterL, emitterR);
+
+  // 6. Twin HDR Plasma Thruster Flames
+  const flameGeo = new THREE.ConeGeometry(0.15, 0.78, 10);
   flameGeo.rotateX(Math.PI / 2);
-  const flameMat = new THREE.MeshBasicMaterial({ color: 0xf97316 });
+  const flameMat = new THREE.MeshStandardMaterial({
+    color: 0xfdba74,
+    emissive: 0xf97316,
+    emissiveIntensity: 2.4,
+    roughness: 0.1
+  });
   const thrusterL = new THREE.Mesh(flameGeo, flameMat);
   thrusterL.position.set(-0.24, 0, 1.45);
   const thrusterR = thrusterL.clone();
@@ -105,11 +137,13 @@ function buildStarfighter(isSoftwareGl: boolean): {
   // 7. Energy Shield Sphere
   const shieldMesh = new THREE.Mesh(
     new THREE.IcosahedronGeometry(1.45, 1),
-    new THREE.MeshBasicMaterial({
-      color: 0x06b6d4,
+    new THREE.MeshStandardMaterial({
+      color: 0x22d3ee,
+      emissive: 0x06b6d4,
+      emissiveIntensity: 1.45,
       wireframe: true,
       transparent: true,
-      opacity: 0.32
+      opacity: 0.42
     })
   );
   group.add(shieldMesh);
@@ -123,50 +157,61 @@ function buildHazardMesh(type: SpaceHazard3D['type']): THREE.Group {
     const rock = new THREE.Mesh(
       new THREE.DodecahedronGeometry(0.88, 1),
       new THREE.MeshStandardMaterial({
-        color: 0x64748b,
-        roughness: 0.75,
-        metalness: 0.2,
+        color: 0x475569,
+        roughness: 0.78,
+        metalness: 0.25,
         flatShading: true
       })
     );
     const core = new THREE.Mesh(
-      new THREE.DodecahedronGeometry(0.9, 0),
-      new THREE.MeshBasicMaterial({ color: 0xef4444, wireframe: true })
+      new THREE.DodecahedronGeometry(0.91, 0),
+      new THREE.MeshStandardMaterial({
+        color: 0xf87171,
+        emissive: 0xef4444,
+        emissiveIntensity: 1.65,
+        wireframe: true
+      })
     );
     g.add(rock, core);
   } else if (type === 'star') {
     const star = new THREE.Mesh(
       new THREE.OctahedronGeometry(0.55, 0),
       new THREE.MeshStandardMaterial({
-        color: 0xfacc15,
-        emissive: 0xeab308,
-        emissiveIntensity: 0.9,
+        color: 0xfef08a,
+        emissive: 0xfacc15,
+        emissiveIntensity: 2.0,
         roughness: 0.15
       })
     );
     const halo = new THREE.Mesh(
-      new THREE.TorusGeometry(0.72, 0.04, 8, 24),
-      new THREE.MeshBasicMaterial({ color: 0xfef08a })
+      new THREE.TorusGeometry(0.72, 0.045, 8, 24),
+      new THREE.MeshStandardMaterial({
+        color: 0xfef08a,
+        emissive: 0xf59e0b,
+        emissiveIntensity: 1.85,
+        roughness: 0.2
+      })
     );
     g.add(star, halo);
   } else if (type === 'shield') {
     const orb = new THREE.Mesh(
       new THREE.IcosahedronGeometry(0.52, 1),
       new THREE.MeshStandardMaterial({
-        color: 0x06b6d4,
-        emissive: 0x0891b2,
-        emissiveIntensity: 0.85
+        color: 0x67e8f9,
+        emissive: 0x06b6d4,
+        emissiveIntensity: 1.9,
+        roughness: 0.12
       })
     );
     g.add(orb);
   } else {
-    // Laser hazard ring
     const ring = new THREE.Mesh(
-      new THREE.TorusGeometry(1.25, 0.14, 10, 24),
+      new THREE.TorusGeometry(1.25, 0.14, 10, 28),
       new THREE.MeshStandardMaterial({
-        color: 0xf43f5e,
-        emissive: 0xe11d48,
-        emissiveIntensity: 0.85
+        color: 0xfb7185,
+        emissive: 0xf43f5e,
+        emissiveIntensity: 2.1,
+        roughness: 0.15
       })
     );
     g.add(ring);
@@ -183,8 +228,6 @@ export default function CosmicDodgeGame({ onScoreUpdate, onGameOver, highScore }
     startWithCountdown,
     resumeGame,
     countdown,
-    startLoop,
-    stopLoop,
     gameStateRef,
     scoreRef
   } = useGameEngine({
@@ -262,11 +305,10 @@ export default function CosmicDodgeGame({ onScoreUpdate, onGameOver, highScore }
     };
 
     startWithCountdown(() => {
-      audio.playClick();
+      audioController.playClick();
     });
   }, [startWithCountdown, updateScore]);
 
-  // Pointer drag navigation in 3D plane
   const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
     if (gameStateRef.current !== 'playing') return;
     const mount = canvasMountRef.current;
@@ -302,73 +344,78 @@ export default function CosmicDodgeGame({ onScoreUpdate, onGameOver, highScore }
     };
     window.addEventListener('keydown', handleKeyDown);
     window.addEventListener('keyup', handleKeyUp);
+    const unsub = inputManager.subscribe({
+      onActionDown: (action) => {
+        if (action === 'LEFT') keysRef.current['arrowleft'] = true;
+        if (action === 'RIGHT') keysRef.current['arrowright'] = true;
+        if (action === 'UP') keysRef.current['arrowup'] = true;
+        if (action === 'DOWN') keysRef.current['arrowdown'] = true;
+        if (action === 'PRIMARY' || action === 'ACTION_PRIMARY') shipStateRef.current.isWarping = true;
+      },
+      onActionUp: (action) => {
+        if (action === 'LEFT') keysRef.current['arrowleft'] = false;
+        if (action === 'RIGHT') keysRef.current['arrowright'] = false;
+        if (action === 'UP') keysRef.current['arrowup'] = false;
+        if (action === 'DOWN') keysRef.current['arrowdown'] = false;
+        if (action === 'PRIMARY' || action === 'ACTION_PRIMARY') shipStateRef.current.isWarping = false;
+      }
+    });
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
+      unsub();
     };
   }, []);
 
-  // Three.js 3D Deep Space Tunnel
+  // Unified ThreeStageController 3D Deep Space Tunnel
   useEffect(() => {
     const mount = canvasMountRef.current;
     if (!mount) return;
 
-    const isSoftwareGl = (() => {
-      const gl = document.createElement('canvas').getContext('webgl2');
-      if (!gl) return true;
-      const ext = gl.getExtension('WEBGL_debug_renderer_info');
-      const param = ext ? ext.UNMASKED_RENDERER_WEBGL : gl.RENDERER;
-      const gpu = String(gl.getParameter(param));
-      gl.getExtension('WEBGL_lose_context')?.loseContext();
-      return /SwiftShader|llvmpipe|softpipe|Software|Basic Render/i.test(gpu);
-    })();
+    let stage: ThreeStageController;
+    try {
+      stage = new ThreeStageController({
+        container: mount,
+        backgroundColor: 0x030611,
+        fogColor: 0x030611,
+        fogDensity: 0.015,
+        fov: 62,
+        near: 0.1,
+        far: 180,
+        manualCamera: true,
+        enableGridFloor: false,
+        enableShadows: false,
+        toneMappingExposure: 1.15,
+        bloom: {
+          enabled: true,
+          strength: 0.58,
+          radius: 0.45,
+          threshold: 0.78
+        }
+      });
+    } catch {
+      return;
+    }
 
-    const width = mount.clientWidth || 640;
-    const height = mount.clientHeight || 500;
-
-    const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x030611);
-    scene.fog = new THREE.FogExp2(0x030611, 0.015);
-
-    const camera = new THREE.PerspectiveCamera(62, width / height, 0.1, 180);
+    const { scene, camera } = stage;
     camera.position.set(0, 1.8, 6.8);
+    stage.rimLight.color.setHex(0xf43f5e);
+    stage.rimLight.position.set(-10, -8, -20);
 
-    const renderer = new THREE.WebGLRenderer({
-      antialias: !isSoftwareGl,
-      powerPreference: 'high-performance'
-    });
-    renderer.outputColorSpace = THREE.SRGBColorSpace;
-    renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.15;
-    renderer.setPixelRatio(isSoftwareGl ? 1 : Math.min(window.devicePixelRatio, 2));
-    renderer.setSize(width, height);
-    mount.appendChild(renderer.domElement);
-
-    const pmremGenerator = new THREE.PMREMGenerator(renderer);
-    scene.environment = pmremGenerator.fromScene(new RoomEnvironment(), 0.04).texture;
-    pmremGenerator.dispose();
-
-    const hemiLight = new THREE.HemisphereLight(0x38bdf8, 0x090d16, 0.85);
-    scene.add(hemiLight);
-
-    const keyLight = new THREE.DirectionalLight(0xfffbeb, 1.7);
-    keyLight.position.set(10, 16, 12);
-    scene.add(keyLight);
-
-    const rimLight = new THREE.DirectionalLight(0xf43f5e, 0.9);
-    rimLight.position.set(-10, -8, -20);
-    scene.add(rimLight);
-
-    // Instanced Starfield Tunnel (100 stars)
-    const starCount = 100;
+    // Instanced HDR Starfield Tunnel (120 stars)
+    const starCount = 120;
     const starInst = new THREE.InstancedMesh(
-      new THREE.BoxGeometry(0.08, 0.08, 1.6),
-      new THREE.MeshBasicMaterial({ color: 0x7dd3fc }),
+      new THREE.BoxGeometry(0.08, 0.08, 1.7),
+      new THREE.MeshStandardMaterial({
+        color: 0xbae6fd,
+        emissive: 0x38bdf8,
+        emissiveIntensity: 1.8,
+        roughness: 0.15
+      }),
       starCount
     );
     starInst.frustumCulled = false;
     const starPositions: { x: number; y: number; z: number }[] = [];
-    const dummy = new THREE.Object3D();
     for (let i = 0; i < starCount; i++) {
       const ang = Math.random() * Math.PI * 2;
       const rad = 8 + Math.random() * 14;
@@ -376,14 +423,64 @@ export default function CosmicDodgeGame({ onScoreUpdate, onGameOver, highScore }
       const sy = Math.sin(ang) * rad;
       const sz = -Math.random() * 140;
       starPositions.push({ x: sx, y: sy, z: sz });
-      dummy.position.set(sx, sy, sz);
-      dummy.updateMatrix();
-      starInst.setMatrixAt(i, dummy.matrix);
+      _dummy.position.set(sx, sy, sz);
+      _dummy.scale.set(1, 1, 1);
+      _dummy.updateMatrix();
+      starInst.setMatrixAt(i, _dummy.matrix);
     }
     scene.add(starInst);
 
-    const fighter = buildStarfighter(isSoftwareGl);
+    const fighter = buildStarfighter(stage.isSoftwareGl);
     scene.add(fighter.group);
+
+    // Instanced Twin Thruster Exhaust Pool
+    const exhaustInst = new THREE.InstancedMesh(
+      new THREE.OctahedronGeometry(0.08, 0),
+      new THREE.MeshStandardMaterial({
+        color: 0xfdba74,
+        emissive: 0xf97316,
+        emissiveIntensity: 2.2,
+        roughness: 0.1
+      }),
+      EXHAUST_CAPACITY
+    );
+    exhaustInst.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    exhaustInst.frustumCulled = false;
+    const exhaustSlots: ExhaustSlot[] = Array.from({ length: EXHAUST_CAPACITY }, () => ({
+      active: false,
+      x: 0,
+      y: -99,
+      z: 0,
+      vz: 12,
+      life: 0,
+      maxLife: 0.3,
+      warp: false
+    }));
+    let exhaustCursor = 0;
+
+    _dummy.position.set(0, -99, 0);
+    _dummy.scale.setScalar(0);
+    _dummy.updateMatrix();
+    for (let i = 0; i < EXHAUST_CAPACITY; i++) {
+      exhaustInst.setMatrixAt(i, _dummy.matrix);
+    }
+    exhaustInst.instanceMatrix.needsUpdate = true;
+    scene.add(exhaustInst);
+
+    const emitExhaust = (x: number, y: number, warp: boolean) => {
+      for (const offsetX of [-0.24, 0.24]) {
+        const slot = exhaustSlots[exhaustCursor];
+        exhaustCursor = (exhaustCursor + 1) % EXHAUST_CAPACITY;
+        slot.active = true;
+        slot.x = x + offsetX + (Math.random() - 0.5) * 0.06;
+        slot.y = y + (Math.random() - 0.5) * 0.06;
+        slot.z = 1.6;
+        slot.vz = warp ? 28 : 15;
+        slot.maxLife = warp ? 0.36 : 0.24;
+        slot.life = slot.maxLife;
+        slot.warp = warp;
+      }
+    };
 
     // Hazard & Collectible Pool (14 items)
     const hazardPool: SpaceHazard3D[] = [];
@@ -416,26 +513,12 @@ export default function CosmicDodgeGame({ onScoreUpdate, onGameOver, highScore }
       });
     });
 
-    const handleResize = () => {
-      if (!mount) return;
-      const w = mount.clientWidth || 640;
-      const h = mount.clientHeight || 500;
-      camera.aspect = w / h;
-      camera.updateProjectionMatrix();
-      renderer.setSize(w, h);
-    };
-    const resizeObserver = new ResizeObserver(handleResize);
-    resizeObserver.observe(mount);
-    window.addEventListener('resize', handleResize);
-
-    let elapsed = 0;
     let uiTimer = 0;
-    let swRenderAcc = 0;
-    let hasRenderedInitial = false;
+    let exhaustTimer = 0;
+    _camSmoothPos.set(0, 1.8, 6.8);
 
-    startLoop((_timestamp, deltaTimeMs) => {
-      const delta = Math.min(deltaTimeMs / 1000, 0.05);
-      elapsed += delta;
+    stage.startLoop((dt, elapsed) => {
+      const delta = Math.min(dt, 0.05);
       const st = shipStateRef.current;
 
       if (st.resetRequested) {
@@ -448,6 +531,8 @@ export default function CosmicDodgeGame({ onScoreUpdate, onGameOver, highScore }
         });
       }
 
+      const wantsWarp = gameStateRef.current === 'playing' && st.isWarping && st.warpEnergy > 1;
+
       if (gameStateRef.current === 'playing') {
         if (st.invulnTimer > 0) st.invulnTimer -= delta;
 
@@ -458,7 +543,6 @@ export default function CosmicDodgeGame({ onScoreUpdate, onGameOver, highScore }
         if (k['arrowup'] || k['w']) st.targetY = Math.min(BOUNDS_Y, st.targetY + moveSpd);
         if (k['arrowdown'] || k['s']) st.targetY = Math.max(-BOUNDS_Y, st.targetY - moveSpd);
 
-        const wantsWarp = st.isWarping && st.warpEnergy > 1;
         if (wantsWarp) {
           st.warpEnergy = Math.max(0, st.warpEnergy - 32 * delta);
         } else {
@@ -477,18 +561,24 @@ export default function CosmicDodgeGame({ onScoreUpdate, onGameOver, highScore }
         fighter.group.rotation.x = THREE.MathUtils.clamp(dy * 0.22, -0.45, 0.45);
         fighter.shieldMesh.visible = st.shields > 0 || wantsWarp;
         fighter.shieldMesh.rotation.y = elapsed * 1.8;
-        fighter.thrusterL.scale.setScalar(wantsWarp ? 1.5 : 0.9 + Math.sin(elapsed * 20) * 0.15);
-        fighter.thrusterR.scale.setScalar(wantsWarp ? 1.5 : 0.9 + Math.cos(elapsed * 20) * 0.15);
+        fighter.thrusterL.scale.setScalar(wantsWarp ? 1.65 : 0.9 + Math.sin(elapsed * 20) * 0.15);
+        fighter.thrusterR.scale.setScalar(wantsWarp ? 1.65 : 0.9 + Math.cos(elapsed * 20) * 0.15);
+
+        exhaustTimer += delta;
+        if (exhaustTimer >= (wantsWarp ? 0.018 : 0.036)) {
+          exhaustTimer = 0;
+          emitExhaust(st.x, st.y, wantsWarp);
+        }
 
         // Animate Starfield
         for (let i = 0; i < starCount; i++) {
           const sp = starPositions[i];
           sp.z += 55 * speedScale * delta;
           if (sp.z > 8) sp.z = -135;
-          dummy.position.set(sp.x, sp.y, sp.z);
-          dummy.scale.set(1, 1, wantsWarp ? 3.2 : 1);
-          dummy.updateMatrix();
-          starInst.setMatrixAt(i, dummy.matrix);
+          _dummy.position.set(sp.x, sp.y, sp.z);
+          _dummy.scale.set(1, 1, wantsWarp ? 3.5 : 1);
+          _dummy.updateMatrix();
+          starInst.setMatrixAt(i, _dummy.matrix);
         }
         starInst.instanceMatrix.needsUpdate = true;
 
@@ -503,19 +593,26 @@ export default function CosmicDodgeGame({ onScoreUpdate, onGameOver, highScore }
             const dist = Math.hypot(h.x - st.x, h.y - st.y);
             if (dist < h.radius + 0.55) {
               if (h.type === 'star') {
-                audio.playCoin();
                 st.combo = Math.min(8, st.combo + 1);
                 setCombo(st.combo);
+                if (st.combo > 1) {
+                  audioController.playCombo(st.combo);
+                } else {
+                  audioController.playScore();
+                }
                 const pts = 20 * st.combo;
                 updateScore(scoreRef.current + pts);
+                stage.particles.burst(h.x, h.y, 0, 18, 0xfacc15, 7);
+                stage.cameraRig.kickFov(2.5);
                 showBanner(`HYPER STAR +${pts} (x${st.combo})`);
                 h.z = -125 - Math.random() * 25;
                 h.x = (Math.random() - 0.5) * BOUNDS_X * 1.9;
                 h.y = (Math.random() - 0.5) * BOUNDS_Y * 1.9;
               } else if (h.type === 'shield') {
-                audio.playLevelUp();
+                audioController.playPowerup();
                 st.shields = Math.min(3, st.shields + 1);
                 setShields(st.shields);
+                stage.particles.burst(h.x, h.y, 0, 22, 0x22d3ee, 7);
                 showBanner('PERISAI PLASMA +1!');
                 h.z = -140;
               } else if (!wantsWarp && st.invulnTimer <= 0) {
@@ -525,13 +622,17 @@ export default function CosmicDodgeGame({ onScoreUpdate, onGameOver, highScore }
                   st.combo = 1;
                   setShields(st.shields);
                   setCombo(1);
-                  audio.playExplosion();
+                  audioController.playShield();
                   screenShake.trigger('medium');
+                  stage.cameraRig.addTrauma(0.65);
+                  stage.particles.burst(st.x, st.y, 0, 30, 0xef4444, 9);
                   showBanner('PERISAI MENAHAN METEOR!');
                   h.z = -130;
                 } else {
-                  audio.playExplosion();
+                  audioController.playGameOver();
                   screenShake.trigger('heavy');
+                  stage.cameraRig.addTrauma(0.95);
+                  stage.particles.burst(st.x, st.y, 0, 40, 0xf97316, 11);
                   triggerGameOver(scoreRef.current);
                   break;
                 }
@@ -557,49 +658,66 @@ export default function CosmicDodgeGame({ onScoreUpdate, onGameOver, highScore }
         }
       }
 
-      // Camera Choreography
+      // Update Thruster Exhaust InstancedMesh
+      let exhaustDirty = false;
+      for (let i = 0; i < EXHAUST_CAPACITY; i++) {
+        const es = exhaustSlots[i];
+        if (!es.active) continue;
+        exhaustDirty = true;
+        es.life -= delta;
+        if (es.life <= 0) {
+          es.active = false;
+          _dummy.position.set(0, -99, 0);
+          _dummy.scale.setScalar(0);
+          _dummy.updateMatrix();
+          exhaustInst.setMatrixAt(i, _dummy.matrix);
+        } else {
+          es.z += es.vz * delta;
+          const ratio = es.life / es.maxLife;
+          const rad = ratio * (es.warp ? 1.45 : 0.95);
+          _dummy.position.set(es.x, es.y, es.z);
+          _dummy.scale.set(rad, rad, rad * (es.warp ? 3.2 : 1.8));
+          _dummy.updateMatrix();
+          exhaustInst.setMatrixAt(i, _dummy.matrix);
+        }
+      }
+      if (exhaustDirty) {
+        exhaustInst.instanceMatrix.needsUpdate = true;
+      }
+
+      // Camera Choreography + Dynamic Warp FOV + Trauma Shake
       const view = camViewRef.current;
       if (view === 'chase') {
-        _camPos.set(st.x * 0.55, st.y * 0.55 + 1.65, 6.4);
+        _camTargetPos.set(st.x * 0.55, st.y * 0.55 + 1.65, 6.4);
         _camLook.set(st.x * 0.7, st.y * 0.7, -18);
       } else if (view === 'cockpit') {
-        _camPos.set(st.x, st.y + 0.35, -0.4);
+        _camTargetPos.set(st.x, st.y + 0.35, -0.4);
         _camLook.set(st.x, st.y, -25);
       } else {
-        _camPos.set(0, 9.5, 9.5);
+        _camTargetPos.set(0, 9.5, 9.5);
         _camLook.set(0, 0, -14);
       }
 
-      camera.position.x = THREE.MathUtils.damp(camera.position.x, _camPos.x, 9, delta);
-      camera.position.y = THREE.MathUtils.damp(camera.position.y, _camPos.y, 9, delta);
-      camera.position.z = THREE.MathUtils.damp(camera.position.z, _camPos.z, 9, delta);
-      camera.lookAt(_camLook);
+      _camSmoothPos.x = THREE.MathUtils.damp(_camSmoothPos.x, _camTargetPos.x, 9, delta);
+      _camSmoothPos.y = THREE.MathUtils.damp(_camSmoothPos.y, _camTargetPos.y, 9, delta);
+      _camSmoothPos.z = THREE.MathUtils.damp(_camSmoothPos.z, _camTargetPos.z, 9, delta);
 
-      if (!isSoftwareGl) {
-        renderer.render(scene, camera);
-      } else {
-        swRenderAcc += delta;
-        if (!hasRenderedInitial || swRenderAcc >= 0.06) {
-          hasRenderedInitial = true;
-          swRenderAcc = 0;
-          renderer.render(scene, camera);
-        }
-      }
+      const speedRatio = wantsWarp ? 0.95 : Math.min(0.45, scoreRef.current / 1200);
+      stage.cameraRig.updateDynamicFov(camera, 62, speedRatio, delta, 14);
+      stage.cameraRig.applyTraumaToCamera(camera, _camSmoothPos, delta, 0.45);
+      camera.lookAt(_camLook);
     });
 
     return () => {
-      stopLoop();
-      resizeObserver.disconnect();
-      window.removeEventListener('resize', handleResize);
-      disposeThreeScene(scene, renderer);
+      stage.dispose();
     };
-  }, [gameStateRef, scoreRef, showBanner, startLoop, stopLoop, triggerGameOver, updateScore]);
+  }, [gameStateRef, scoreRef, showBanner, triggerGameOver, updateScore]);
 
   return (
     <div
       onPointerDown={handlePointerMove}
       onPointerMove={handlePointerMove}
-      className="relative w-full h-full min-h-[480px] flex flex-col items-center justify-center bg-[#030611] overflow-hidden select-none touch-none"
+      className="relative w-full h-full min-h-[260px] sm:min-h-[380px] lg:min-h-[480px] flex flex-col items-center justify-center bg-[#030611] overflow-hidden select-none touch-none"
     >
       {/* Dedicated WebGL Mount */}
       <div ref={canvasMountRef} className="absolute inset-0 w-full h-full" />
@@ -686,7 +804,7 @@ export default function CosmicDodgeGame({ onScoreUpdate, onGameOver, highScore }
               onPointerLeave={() => {
                 shipStateRef.current.isWarping = false;
               }}
-              className="px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-mono font-bold whitespace-nowrap"
+              className="min-h-[44px] sm:min-h-[34px] px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-mono font-bold whitespace-nowrap"
             >
               Hyper-Warp
             </button>
