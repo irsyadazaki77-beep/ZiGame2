@@ -2,18 +2,18 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import { audioController, useGameEngine } from '../../sdk';
-import { ThreeStageController, followDirectionalShadow } from '../../utils/threeStage';
+import { ThreeStageController, followDirectionalShadow, type CameraPreset3D, type QualityLevel3D } from '../../utils/threeStage';
 import { screenShake } from '../../utils/screenShake';
+import { haptics } from '../../utils/haptics';
 import { GameOverlay } from '../gameplay/GameOverlay';
-import { Flag, Eye, Clock, RotateCcw, ChevronDown, ChevronUp } from 'lucide-react';
+import { ThreeDockOverlay } from '../gameplay/ThreeDockOverlay';
+import { Flag, Clock, RotateCcw } from 'lucide-react';
 
 interface GameProps {
   onGameOver: (score: number) => void;
   onScoreUpdate: (score: number) => void;
   highScore: number;
 }
-
-type GolfCamMode = 'follow' | 'overhead' | 'hole';
 
 interface BumperObstacle {
   x: number;
@@ -196,12 +196,13 @@ export default function PixelGolfGame({ onGameOver, onScoreUpdate, highScore }: 
   const [par, setPar] = useState(2);
   const [timeLeft, setTimeLeft] = useState(75);
   const [powerPct, setPowerPct] = useState(0);
-  const [camMode, setCamMode] = useState<GolfCamMode>('follow');
-  const [dockCollapsed, setDockCollapsed] = useState(false);
+  const [cameraPreset, setCameraPreset] = useState<CameraPreset3D>('chase');
+  const [quality, setQuality] = useState<QualityLevel3D>('ultra');
   const [bannerMsg, setBannerMsg] = useState<string | null>(null);
 
   const canvasMountRef = useRef<HTMLDivElement | null>(null);
-  const camModeRef = useRef<GolfCamMode>('follow');
+  const stageRef = useRef<ThreeStageController | null>(null);
+  const camModeRef = useRef<CameraPreset3D>('chase');
   const strokesRef = useRef(0);
   const holeNumRef = useRef(1);
   const timeLeftRef = useRef(75);
@@ -242,8 +243,15 @@ export default function PixelGolfGame({ onGameOver, onScoreUpdate, highScore }: 
   });
 
   useEffect(() => {
-    camModeRef.current = camMode;
-  }, [camMode]);
+    camModeRef.current = cameraPreset;
+  }, [cameraPreset]);
+
+  const cycleQuality = useCallback(() => {
+    const order: QualityLevel3D[] = ['ultra', 'balanced', 'performance'];
+    const next = order[(order.indexOf(quality) + 1) % order.length];
+    setQuality(next);
+    stageRef.current?.setQualityLevel(next);
+  }, [quality]);
 
   useEffect(() => {
     return () => {
@@ -358,6 +366,7 @@ export default function PixelGolfGame({ onGameOver, onScoreUpdate, highScore }: 
       lastPowerPctRef.current = 0;
       setPowerPct(0);
       audioController.playJump();
+      haptics.trigger('medium');
     } else if (lastPowerPctRef.current !== 0) {
       lastPowerPctRef.current = 0;
       setPowerPct(0);
@@ -395,6 +404,8 @@ export default function PixelGolfGame({ onGameOver, onScoreUpdate, highScore }: 
     }
 
     const { scene, camera, renderer } = stage;
+    stageRef.current = stage;
+    setQuality(stage.getQualityLevel());
     camera.position.set(0, 9.5, 11.5);
     stage.hemiLight.color.setHex(0x6ee7b7);
     stage.rimLight.color.setHex(0x38bdf8);
@@ -855,10 +866,10 @@ export default function PixelGolfGame({ onGameOver, onScoreUpdate, highScore }: 
       }
 
       const mode = camModeRef.current;
-      if (mode === 'follow') {
+      if (mode === 'chase') {
         _camTargetPos.set(st.ballX * 0.6, 7.2, st.ballZ + 6.4);
         _camLook.set(st.ballX * 0.4, 0, st.ballZ - 2.2);
-      } else if (mode === 'overhead') {
+      } else if (mode === 'diorama') {
         _camTargetPos.set(0, 16.5, 0.01);
         _camLook.set(0, 0, 0);
       } else {
@@ -876,6 +887,7 @@ export default function PixelGolfGame({ onGameOver, onScoreUpdate, highScore }: 
     });
 
     return () => {
+      stageRef.current = null;
       turfTex.dispose();
       stage.dispose();
     };
@@ -921,45 +933,18 @@ export default function PixelGolfGame({ onGameOver, onScoreUpdate, highScore }: 
         </div>
       )}
 
-      {/* Unified Collapsible Bottom Control Dock */}
-      <div
-        onPointerDown={(e) => e.stopPropagation()}
-        className="absolute bottom-3 left-1/2 -translate-x-1/2 z-10 w-[94%] max-w-[640px] transition-transform duration-200 pointer-events-auto pb-[env(safe-area-inset-bottom)]"
-        style={{ transform: `translate(-50%, ${dockCollapsed ? 'calc(100% - 28px)' : '0px'})` }}
-      >
-        <div className="flex justify-center mb-1">
-          <button
-            onClick={() => setDockCollapsed((prev) => !prev)}
-            className="px-3 min-h-[36px] sm:min-h-0 py-1 rounded-t-lg bg-slate-950/90 border border-b-0 border-white/10 text-[11px] font-mono text-slate-300 hover:text-white flex items-center gap-1 whitespace-nowrap"
-          >
-            {dockCollapsed ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
-            {dockCollapsed ? 'Tampilkan Kontrol' : 'Sembunyikan Kontrol'}
-          </button>
-        </div>
-
-        <div className="bg-slate-950/95 border border-white/10 rounded-xl px-3 sm:px-4 py-2 sm:py-2.5 flex flex-wrap items-center justify-between gap-2 text-xs">
-          <div className="flex items-center gap-1.5 sm:gap-2">
-            <Eye className="w-4 h-4 text-emerald-400 shrink-0" />
-            {(['follow', 'overhead', 'hole'] as GolfCamMode[]).map((m) => (
-              <button
-                key={m}
-                onClick={() => {
-                  audioController.playClick();
-                  setCamMode(m);
-                }}
-                className={`px-2.5 min-h-[44px] sm:min-h-0 py-1 rounded-md font-medium capitalize transition-colors whitespace-nowrap ${
-                  camMode === m
-                    ? 'bg-emerald-500 text-slate-950 font-semibold'
-                    : 'bg-slate-900 text-slate-300 hover:text-white'
-                }`}
-              >
-                {m}
-              </button>
-            ))}
-          </div>
-
+      <ThreeDockOverlay
+        cameraPreset={cameraPreset}
+        onSelectPreset={(preset) => {
+          audioController.playClick();
+          setCameraPreset(preset);
+        }}
+        quality={quality}
+        onCycleQuality={cycleQuality}
+        presetLabels={{ chase: 'Follow', isometric: 'Hole', diorama: 'Overhead' }}
+        extraControls={
           <div className="flex items-center gap-2 sm:gap-3">
-            <div className="flex items-center gap-2 font-mono">
+            <div className="flex items-center gap-2 font-mono text-xs">
               <span className="text-slate-400">POWER</span>
               <div className="w-16 sm:w-20 h-2 bg-slate-800 rounded-full overflow-hidden">
                 <div
@@ -971,15 +956,16 @@ export default function PixelGolfGame({ onGameOver, onScoreUpdate, highScore }: 
             </div>
 
             <button
+              type="button"
               onClick={resetBallToTee}
-              className="px-2.5 min-h-[44px] sm:min-h-0 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white flex items-center gap-1 whitespace-nowrap"
+              className="px-2.5 min-h-[44px] sm:min-h-0 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white text-xs flex items-center gap-1 whitespace-nowrap border border-white/10"
             >
               <RotateCcw className="w-3.5 h-3.5" />
               <span>Reset Tee</span>
             </button>
           </div>
-        </div>
-      </div>
+        }
+      />
 
       <GameOverlay
         gameState={gameState}

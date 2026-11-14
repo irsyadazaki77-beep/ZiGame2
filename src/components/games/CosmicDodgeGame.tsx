@@ -5,12 +5,11 @@ import { GameComponentProps } from '../../types';
 import { audioController } from '../../sdk/audioController';
 import { useGameEngine } from '../../sdk';
 import { inputManager } from '../../services/inputService';
-import { ThreeStageController } from '../../utils/threeStage';
+import { ThreeStageController, type CameraPreset3D, type QualityLevel3D } from '../../utils/threeStage';
 import { screenShake } from '../../utils/screenShake';
 import { GameOverlay } from '../gameplay/GameOverlay';
-import { Shield, Zap, Sparkles, Eye, ChevronDown, ChevronUp } from 'lucide-react';
-
-type SpaceCamView = 'chase' | 'cockpit' | 'tactical';
+import { ThreeDockOverlay } from '../gameplay/ThreeDockOverlay';
+import { Shield, Zap, Sparkles } from 'lucide-react';
 
 interface SpaceHazard3D {
   mesh: THREE.Group;
@@ -239,12 +238,13 @@ export default function CosmicDodgeGame({ onScoreUpdate, onGameOver, highScore }
   const [shields, setShields] = useState(1);
   const [combo, setCombo] = useState(1);
   const [warpCharge, setWarpCharge] = useState(100);
-  const [camView, setCamView] = useState<SpaceCamView>('chase');
-  const [dockCollapsed, setDockCollapsed] = useState(false);
+  const [cameraPreset, setCameraPreset] = useState<CameraPreset3D>('chase');
+  const [quality, setQuality] = useState<QualityLevel3D>('ultra');
   const [bannerText, setBannerText] = useState<string | null>(null);
 
   const canvasMountRef = useRef<HTMLDivElement | null>(null);
-  const camViewRef = useRef<SpaceCamView>('chase');
+  const stageRef = useRef<ThreeStageController | null>(null);
+  const camViewRef = useRef<CameraPreset3D>('chase');
   const keysRef = useRef<Record<string, boolean>>({});
   const lastWarpPctRef = useRef(100);
   const bannerTimerRef = useRef<number | null>(null);
@@ -263,8 +263,15 @@ export default function CosmicDodgeGame({ onScoreUpdate, onGameOver, highScore }
   });
 
   useEffect(() => {
-    camViewRef.current = camView;
-  }, [camView]);
+    camViewRef.current = cameraPreset;
+  }, [cameraPreset]);
+
+  const cycleQuality = useCallback(() => {
+    const order: QualityLevel3D[] = ['ultra', 'balanced', 'performance'];
+    const next = order[(order.indexOf(quality) + 1) % order.length];
+    setQuality(next);
+    stageRef.current?.setQualityLevel(next);
+  }, [quality]);
 
   useEffect(() => {
     return () => {
@@ -322,12 +329,8 @@ export default function CosmicDodgeGame({ onScoreUpdate, onGameOver, highScore }
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'h' || e.key === 'H') {
-        setDockCollapsed((prev) => !prev);
-        return;
-      }
       if (e.key === 'c' || e.key === 'C') {
-        setCamView((prev) => (prev === 'chase' ? 'cockpit' : prev === 'cockpit' ? 'tactical' : 'chase'));
+        setCameraPreset((prev) => (prev === 'chase' ? 'isometric' : prev === 'isometric' ? 'diorama' : 'chase'));
         return;
       }
       keysRef.current[e.key.toLowerCase()] = true;
@@ -398,6 +401,8 @@ export default function CosmicDodgeGame({ onScoreUpdate, onGameOver, highScore }
     }
 
     const { scene, camera } = stage;
+    stageRef.current = stage;
+    setQuality(stage.getQualityLevel());
     camera.position.set(0, 1.8, 6.8);
     stage.rimLight.color.setHex(0xf43f5e);
     stage.rimLight.position.set(-10, -8, -20);
@@ -690,7 +695,7 @@ export default function CosmicDodgeGame({ onScoreUpdate, onGameOver, highScore }
       if (view === 'chase') {
         _camTargetPos.set(st.x * 0.55, st.y * 0.55 + 1.65, 6.4);
         _camLook.set(st.x * 0.7, st.y * 0.7, -18);
-      } else if (view === 'cockpit') {
+      } else if (view === 'isometric') {
         _camTargetPos.set(st.x, st.y + 0.35, -0.4);
         _camLook.set(st.x, st.y, -25);
       } else {
@@ -709,6 +714,7 @@ export default function CosmicDodgeGame({ onScoreUpdate, onGameOver, highScore }
     });
 
     return () => {
+      stageRef.current = null;
       stage.dispose();
     };
   }, [gameStateRef, scoreRef, showBanner, triggerGameOver, updateScore]);
@@ -749,52 +755,25 @@ export default function CosmicDodgeGame({ onScoreUpdate, onGameOver, highScore }
         </div>
       )}
 
-      {/* Unified Collapsible Bottom Control Dock */}
-      <div
-        onPointerDown={(e) => e.stopPropagation()}
-        className="absolute bottom-3 left-1/2 -translate-x-1/2 z-10 w-[94%] max-w-[640px] transition-transform duration-200 pointer-events-auto"
-        style={{ transform: `translate(-50%, ${dockCollapsed ? 'calc(100% - 28px)' : '0px'})` }}
-      >
-        <div className="flex justify-center mb-1">
-          <button
-            onClick={() => setDockCollapsed((prev) => !prev)}
-            className="px-3 py-1 rounded-t-lg bg-slate-950/90 border border-b-0 border-white/10 text-[11px] font-mono text-slate-300 hover:text-white flex items-center gap-1 whitespace-nowrap"
-          >
-            {dockCollapsed ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
-            {dockCollapsed ? 'Tampilkan Kontrol' : 'Sembunyikan Kontrol'}
-          </button>
-        </div>
-
-        <div className="bg-slate-950/95 border border-white/10 rounded-xl px-4 py-2.5 flex flex-wrap items-center justify-between gap-3 text-xs">
-          <div className="flex items-center gap-2">
-            <Eye className="w-4 h-4 text-cyan-400 shrink-0" />
-            {(['chase', 'cockpit', 'tactical'] as SpaceCamView[]).map((v) => (
-              <button
-                key={v}
-                onClick={() => setCamView(v)}
-                className={`px-2.5 py-1 rounded-md font-medium capitalize transition-colors whitespace-nowrap ${
-                  camView === v
-                    ? 'bg-cyan-500 text-slate-950 font-semibold'
-                    : 'bg-slate-900 text-slate-300 hover:text-white'
-                }`}
-              >
-                {v}
-              </button>
-            ))}
-          </div>
-
-          <div className="flex items-center gap-3">
+      <ThreeDockOverlay
+        cameraPreset={cameraPreset}
+        onSelectPreset={setCameraPreset}
+        quality={quality}
+        onCycleQuality={cycleQuality}
+        presetLabels={{ chase: 'Chase', isometric: 'Cockpit', diorama: 'Tactical' }}
+        extraControls={
+          <div className="flex items-center gap-2.5">
             <div className="flex items-center gap-2 font-mono">
               <Zap className="w-3.5 h-3.5 text-amber-400" />
-              <div className="w-20 h-2 bg-slate-800 rounded-full overflow-hidden">
+              <div className="w-16 sm:w-20 h-2 bg-slate-800 rounded-full overflow-hidden">
                 <div
                   className="h-full bg-gradient-to-r from-cyan-400 to-amber-400"
                   style={{ width: `${warpCharge}%` }}
                 />
               </div>
             </div>
-
             <button
+              type="button"
               onPointerDown={() => {
                 shipStateRef.current.isWarping = true;
               }}
@@ -804,13 +783,16 @@ export default function CosmicDodgeGame({ onScoreUpdate, onGameOver, highScore }
               onPointerLeave={() => {
                 shipStateRef.current.isWarping = false;
               }}
-              className="min-h-[44px] sm:min-h-[34px] px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-mono font-bold whitespace-nowrap"
+              onPointerCancel={() => {
+                shipStateRef.current.isWarping = false;
+              }}
+              className="min-h-[44px] sm:min-h-[32px] px-3 py-1 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-mono text-xs font-bold whitespace-nowrap"
             >
               Hyper-Warp
             </button>
           </div>
-        </div>
-      </div>
+        }
+      />
 
       <GameOverlay
         gameState={gameState}

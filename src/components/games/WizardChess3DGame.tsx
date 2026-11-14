@@ -2,13 +2,19 @@ import React, { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { useGameEngine } from '../../sdk';
-import { ThreeStageController, createStoneCathedralMaps } from '../../utils/threeStage';
+import {
+  ThreeStageController,
+  CameraPreset3D,
+  QualityLevel3D,
+  createStoneCathedralMaps
+} from '../../utils/threeStage';
 import { audioController } from '../../sdk/audioController';
 import { screenShake } from '../../utils/screenShake';
+import { haptics } from '../../utils/haptics';
+import { ThreeDockOverlay } from '../gameplay/ThreeDockOverlay';
 import { performanceService } from '../../services/performanceService';
 import {
   ArcaneSpellType,
-  CameraPreset,
   ChessMove,
   ChessPiece,
   GameMode,
@@ -34,9 +40,6 @@ import {
   Crown,
   Swords,
   RotateCcw,
-  Eye,
-  ChevronDown,
-  ChevronUp,
   Sparkles,
   ShieldAlert,
   Play,
@@ -72,7 +75,6 @@ interface CaptureCinematics {
 
 const _camTargetPos = new THREE.Vector3();
 const _camLookTarget = new THREE.Vector3();
-const PRESET_ORDER: CameraPreset[] = ['orbit', 'white', 'top', 'black'];
 
 export default function WizardChess3DGame({ onScoreUpdate, onGameOver, highScore }: GameProps) {
   const mountRef = useRef<HTMLDivElement | null>(null);
@@ -89,14 +91,14 @@ export default function WizardChess3DGame({ onScoreUpdate, onGameOver, highScore
   });
 
   const [gameMode, setGameMode] = useState<GameMode>('ai-medium');
-  const [cameraPreset, setCameraPreset] = useState<CameraPreset>('orbit');
+  const [cameraPreset, setCameraPreset] = useState<CameraPreset3D>('isometric');
+  const [quality, setQuality] = useState<QualityLevel3D>('ultra');
   const [turn, setTurn] = useState<PieceColor>('w');
   const [statusMessage, setStatusMessage] = useState<string>('Giliran Putih — Pilih bidak untuk melangkah');
   const [inCheckColor, setInCheckColor] = useState<PieceColor | null>(null);
   const [, setMoveCount] = useState<number>(0);
   const [capturedByWhite, setCapturedByWhite] = useState<PieceType[]>([]);
   const [capturedByBlack, setCapturedByBlack] = useState<PieceType[]>([]);
-  const [dockCollapsed, setDockCollapsed] = useState<boolean>(false);
   const [matchEnded, setMatchEnded] = useState<{ winner: string; reason: string } | null>(null);
 
   const [spellEnergy, setSpellEnergy] = useState<number>(100);
@@ -122,7 +124,8 @@ export default function WizardChess3DGame({ onScoreUpdate, onGameOver, highScore
   const highlightMeshesRef = useRef<THREE.Mesh[]>([]);
   const fragmentsRef = useRef<ShatterFragment[]>([]);
   const captureSequenceRef = useRef<CaptureCinematics | null>(null);
-  const cameraPresetRef = useRef<CameraPreset>('orbit');
+  const stageRef = useRef<ThreeStageController | null>(null);
+  const cameraPresetRef = useRef<CameraPreset3D>('isometric');
   const activeCameraTransitionRef = useRef<boolean>(false);
   const aiTimeoutRef = useRef<number | null>(null);
 
@@ -136,28 +139,18 @@ export default function WizardChess3DGame({ onScoreUpdate, onGameOver, highScore
   }, [cameraPreset]);
 
   useEffect(() => {
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'h' || e.key === 'H') {
-        setDockCollapsed((prev) => !prev);
-      }
-    };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, []);
-
-  useEffect(() => {
     setGameState('playing');
   }, [setGameState]);
 
   const rebuildScenePiecesRef = useRef<(() => void) | null>(null);
   const clearHighlightsRef = useRef<(() => void) | null>(null);
 
-  const cycleCameraPreset = useCallback(() => {
-    setCameraPreset((prev) => {
-      const idx = PRESET_ORDER.indexOf(prev);
-      return PRESET_ORDER[(idx + 1) % PRESET_ORDER.length];
+  const cycleQuality = useCallback(() => {
+    setQuality((prev) => {
+      const next: QualityLevel3D = prev === 'ultra' ? 'balanced' : prev === 'balanced' ? 'performance' : 'ultra';
+      stageRef.current?.setQualityLevel(next);
+      return next;
     });
-    audioController.playClick();
   }, []);
 
   const resetMatch = useCallback((newMode?: GameMode) => {
@@ -278,6 +271,7 @@ export default function WizardChess3DGame({ onScoreUpdate, onGameOver, highScore
           threshold: 0.85
         }
       });
+      stageRef.current = stage;
     } catch {
       return;
     }
@@ -876,9 +870,8 @@ export default function WizardChess3DGame({ onScoreUpdate, onGameOver, highScore
 
       if (activeCameraTransitionRef.current) {
         const preset = cameraPresetRef.current;
-        if (preset === 'white') _camTargetPos.set(0, 7.2, 8.6);
-        else if (preset === 'black') _camTargetPos.set(0, 7.2, -8.6);
-        else if (preset === 'top') _camTargetPos.set(0, 11.8, 0.01);
+        if (preset === 'chase') _camTargetPos.set(0, 7.2, 8.6);
+        else if (preset === 'diorama') _camTargetPos.set(0, 11.8, 0.01);
         else _camTargetPos.set(-4.2, 7.5, 7.8);
 
         _camLookTarget.set(0, 0.2, 0);
@@ -909,6 +902,7 @@ export default function WizardChess3DGame({ onScoreUpdate, onGameOver, highScore
       runeFrameTex.dispose();
       fragGeos.forEach((g) => g.dispose());
       stage.dispose();
+      stageRef.current = null;
     };
   }, [gameStateRef, triggerGameOver, updateScore]);
 
@@ -991,61 +985,49 @@ export default function WizardChess3DGame({ onScoreUpdate, onGameOver, highScore
         </div>
       )}
 
-      {/* Unified Collapsible Bottom Control Dock & Arcane Spells */}
-      <div className="absolute bottom-3 pb-[env(safe-area-inset-bottom)] left-1/2 -translate-x-1/2 z-10 w-[min(940px,95vw)] flex flex-col items-center pointer-events-auto">
-        <button
-          onClick={() => setDockCollapsed((prev) => !prev)}
-          className="mb-1 min-h-[44px] sm:min-h-0 px-3 py-1 rounded-t-lg bg-zinc-950/90 border border-b-0 border-white/15 text-[11px] font-medium text-zinc-300 hover:text-white flex items-center gap-1 whitespace-nowrap transition-colors"
-        >
-          {dockCollapsed ? (
-            <>
-              <ChevronUp className="w-3.5 h-3.5" />
-              Tampilkan Kontrol (H)
-            </>
-          ) : (
-            <>
-              <ChevronDown className="w-3.5 h-3.5" />
-              Sembunyikan Kontrol (H)
-            </>
-          )}
-        </button>
-
-        {!dockCollapsed && (
-          <div className="w-full px-3 sm:px-4 py-2.5 rounded-2xl bg-zinc-950/95 border border-white/15 shadow-2xl flex flex-wrap items-center justify-between gap-2 sm:gap-3">
-            {/* Arcane Spell Cards */}
-            <div className="flex flex-wrap items-center gap-1.5 bg-zinc-900 p-1 rounded-xl border border-cyan-500/20">
-              <button
-                onClick={() => handleCastSpell('timeFreeze')}
-                disabled={spellEnergy < 35}
-                className="min-h-[44px] sm:min-h-0 px-2.5 py-1.5 rounded-lg text-xs font-bold text-cyan-300 bg-cyan-950/60 hover:bg-cyan-900/80 disabled:opacity-40 flex items-center gap-1 transition-colors"
-              >
-                <Snowflake className="w-3.5 h-3.5" />
-                Time Freeze (35 SP)
-              </button>
-              <button
-                onClick={() => handleCastSpell('shieldAegis')}
-                disabled={spellEnergy < 40}
-                className="min-h-[44px] sm:min-h-0 px-2.5 py-1.5 rounded-lg text-xs font-bold text-emerald-300 bg-emerald-950/60 hover:bg-emerald-900/80 disabled:opacity-40 flex items-center gap-1 transition-colors"
-              >
-                <Shield className="w-3.5 h-3.5" />
-                Perisai Aegis (40 SP)
-              </button>
-            </div>
-
-            {/* Mode Selector */}
-            <div className="flex flex-wrap items-center gap-1 bg-zinc-900 p-1 rounded-xl border border-white/5">
+      <ThreeDockOverlay
+        cameraPreset={cameraPreset}
+        onSelectPreset={setCameraPreset}
+        quality={quality}
+        onCycleQuality={cycleQuality}
+        presetLabels={{ chase: 'Putih', isometric: 'Orbit', diorama: 'Atas' }}
+        extraControls={
+          <div className="flex flex-wrap items-center gap-1.5">
+            <button
+              onClick={() => {
+                haptics.trigger('light');
+                handleCastSpell('timeFreeze');
+              }}
+              disabled={spellEnergy < 35}
+              className="min-h-[36px] px-2.5 py-1 rounded-lg text-xs font-bold text-cyan-300 bg-cyan-950/60 hover:bg-cyan-900/80 disabled:opacity-40 flex items-center gap-1 transition-colors"
+            >
+              <Snowflake className="w-3.5 h-3.5" />
+              Freeze (35)
+            </button>
+            <button
+              onClick={() => {
+                haptics.trigger('light');
+                handleCastSpell('shieldAegis');
+              }}
+              disabled={spellEnergy < 40}
+              className="min-h-[36px] px-2.5 py-1 rounded-lg text-xs font-bold text-emerald-300 bg-emerald-950/60 hover:bg-emerald-900/80 disabled:opacity-40 flex items-center gap-1 transition-colors"
+            >
+              <Shield className="w-3.5 h-3.5" />
+              Aegis (40)
+            </button>
+            <div className="flex items-center gap-1 bg-zinc-900 p-0.5 rounded-lg border border-white/5">
               {(
                 [
-                  { id: 'ai-easy', label: 'AI Mudah' },
-                  { id: 'ai-medium', label: 'AI Sedang' },
-                  { id: 'ai-hard', label: 'AI Sulit' },
-                  { id: 'local-2p', label: '2 Pemain' }
+                  { id: 'ai-easy', label: 'Mudah' },
+                  { id: 'ai-medium', label: 'Sedang' },
+                  { id: 'ai-hard', label: 'Sulit' },
+                  { id: 'local-2p', label: '2P' }
                 ] as { id: GameMode; label: string }[]
               ).map((m) => (
                 <button
                   key={m.id}
                   onClick={() => resetMatch(m.id)}
-                  className={`min-h-[44px] sm:min-h-0 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-colors whitespace-nowrap shrink-0 ${
+                  className={`min-h-[32px] px-2 py-1 rounded-md text-[11px] font-semibold transition-colors whitespace-nowrap ${
                     gameMode === m.id
                       ? 'bg-amber-500 text-zinc-950'
                       : 'text-zinc-300 hover:text-white hover:bg-zinc-800'
@@ -1055,36 +1037,30 @@ export default function WizardChess3DGame({ onScoreUpdate, onGameOver, highScore
                 </button>
               ))}
             </div>
-
-            {/* Match Utility Actions */}
-            <div className="flex flex-wrap items-center gap-2">
-              <button
-                onClick={cycleCameraPreset}
-                className="min-h-[44px] sm:min-h-0 px-3 py-1.5 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-xs font-medium text-zinc-200 border border-white/10 flex items-center gap-1.5 whitespace-nowrap shrink-0 transition-colors"
-                title="Ganti Sudut Kamera"
-              >
-                <Eye className="w-3.5 h-3.5 text-amber-400" />
-                {cameraPreset === 'orbit' ? 'Orbit' : cameraPreset === 'white' ? 'Putih' : cameraPreset === 'top' ? 'Atas' : 'Hitam'}
-              </button>
-              <button
-                onClick={handleUndoMove}
-                disabled={historyRef.current.length === 0}
-                className="min-h-[44px] sm:min-h-0 px-3 py-1.5 rounded-xl bg-zinc-900 hover:bg-zinc-800 disabled:opacity-40 text-xs font-medium text-zinc-200 border border-white/10 flex items-center gap-1.5 whitespace-nowrap shrink-0 transition-colors"
-              >
-                <RotateCcw className="w-3.5 h-3.5" />
-                Undo
-              </button>
-              <button
-                onClick={() => resetMatch()}
-                className="min-h-[44px] sm:min-h-0 px-3 py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/30 text-xs font-semibold flex items-center gap-1.5 whitespace-nowrap shrink-0 transition-colors"
-              >
-                <Sparkles className="w-3.5 h-3.5" />
-                Reset
-              </button>
-            </div>
+            <button
+              onClick={() => {
+                haptics.trigger('light');
+                handleUndoMove();
+              }}
+              disabled={historyRef.current.length === 0}
+              className="min-h-[36px] px-2.5 py-1 rounded-lg bg-zinc-900 hover:bg-zinc-800 disabled:opacity-40 text-xs font-medium text-zinc-200 border border-white/10 flex items-center gap-1 whitespace-nowrap transition-colors"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+              Undo
+            </button>
+            <button
+              onClick={() => {
+                haptics.trigger('light');
+                resetMatch();
+              }}
+              className="min-h-[36px] px-2.5 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/30 text-xs font-semibold flex items-center gap-1 whitespace-nowrap transition-colors"
+            >
+              <Sparkles className="w-3.5 h-3.5" />
+              Reset
+            </button>
           </div>
-        )}
-      </div>
+        }
+      />
     </div>
   );
 }

@@ -6,19 +6,21 @@ import { inputManager } from '../../services/inputService';
 import {
   ThreeStageController,
   createWetAsphaltMaps,
-  followDirectionalShadow
+  followDirectionalShadow,
+  type CameraPreset3D,
+  type QualityLevel3D
 } from '../../utils/threeStage';
 import { screenShake } from '../../utils/screenShake';
+import { haptics } from '../../utils/haptics';
 import { GameOverlay } from '../gameplay/GameOverlay';
-import { Target, Wind, Sparkles, Eye, ChevronDown, ChevronUp, Crosshair } from 'lucide-react';
+import { ThreeDockOverlay } from '../gameplay/ThreeDockOverlay';
+import { Target, Wind, Sparkles, Crosshair } from 'lucide-react';
 
 interface GameProps {
   onGameOver: (score: number) => void;
   onScoreUpdate: (score: number) => void;
   highScore: number;
 }
-
-type ArcheryCamMode = 'archer' | 'arrow' | 'side';
 
 interface FlyingArrow3D {
   mesh: THREE.Group;
@@ -224,12 +226,13 @@ export default function ArcheryNeoGame({ onGameOver, onScoreUpdate, highScore }:
   const [combo, setCombo] = useState(1);
   const [windSpeed, setWindSpeed] = useState(0);
   const [drawPct, setDrawPct] = useState(0);
-  const [camMode, setCamMode] = useState<ArcheryCamMode>('archer');
-  const [dockCollapsed, setDockCollapsed] = useState(false);
+  const [cameraPreset, setCameraPreset] = useState<CameraPreset3D>('chase');
+  const [quality, setQuality] = useState<QualityLevel3D>('ultra');
   const [hitBanner, setHitBanner] = useState<string | null>(null);
 
   const canvasMountRef = useRef<HTMLDivElement | null>(null);
-  const camModeRef = useRef<ArcheryCamMode>('archer');
+  const stageRef = useRef<ThreeStageController | null>(null);
+  const camModeRef = useRef<CameraPreset3D>('chase');
   const arrowsLeftRef = useRef(12);
   const stageNumRef = useRef(1);
   const comboRef = useRef(1);
@@ -255,8 +258,15 @@ export default function ArcheryNeoGame({ onGameOver, onScoreUpdate, highScore }:
   });
 
   useEffect(() => {
-    camModeRef.current = camMode;
-  }, [camMode]);
+    camModeRef.current = cameraPreset;
+  }, [cameraPreset]);
+
+  const cycleQuality = useCallback(() => {
+    const order: QualityLevel3D[] = ['ultra', 'balanced', 'performance'];
+    const next = order[(order.indexOf(quality) + 1) % order.length];
+    setQuality(next);
+    stageRef.current?.setQualityLevel(next);
+  }, [quality]);
 
   useEffect(() => {
     return () => {
@@ -343,6 +353,7 @@ export default function ArcheryNeoGame({ onGameOver, onScoreUpdate, highScore }:
     st.isDrawing = false;
     if (st.drawTension > 0.25 && arrowsLeftRef.current > 0) {
       st.fireRequested = true;
+      haptics.trigger('medium');
     } else {
       st.drawTension = 0;
       lastDrawPctRef.current = 0;
@@ -353,12 +364,8 @@ export default function ArcheryNeoGame({ onGameOver, onScoreUpdate, highScore }:
   // Keyboard & InputManager support
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'h' || e.key === 'H') {
-        setDockCollapsed((prev) => !prev);
-        return;
-      }
       if (e.key === 'c' || e.key === 'C') {
-        setCamMode((prev) => (prev === 'archer' ? 'arrow' : prev === 'arrow' ? 'side' : 'archer'));
+        setCameraPreset((prev) => (prev === 'chase' ? 'isometric' : prev === 'isometric' ? 'diorama' : 'chase'));
         return;
       }
       if (gameStateRef.current !== 'playing') return;
@@ -433,6 +440,8 @@ export default function ArcheryNeoGame({ onGameOver, onScoreUpdate, highScore }:
     }
 
     const { scene, camera, renderer } = stageCtrl;
+    stageRef.current = stageCtrl;
+    setQuality(stageCtrl.getQualityLevel());
     camera.position.set(0, 2.1, 3.2);
     stageCtrl.rimLight.color.setHex(0xa855f7);
     stageCtrl.rimLight.position.set(-8, 8, -20);
@@ -837,10 +846,10 @@ export default function ArcheryNeoGame({ onGameOver, onScoreUpdate, highScore }:
       const activeList = arrowPool.getActiveItems();
       const latestArrow = activeList[activeList.length - 1];
 
-      if (mode === 'arrow' && latestArrow) {
+      if (mode === 'isometric' && latestArrow) {
         _camTargetPos.set(latestArrow.pos.x, latestArrow.pos.y + 0.45, latestArrow.pos.z + 2.4);
         _camLook.copy(latestArrow.pos);
-      } else if (mode === 'side') {
+      } else if (mode === 'diorama') {
         _camTargetPos.set(7.5, 3.2, -9);
         _camLook.set(0, 2.2, -16);
       } else {
@@ -865,6 +874,7 @@ export default function ArcheryNeoGame({ onGameOver, onScoreUpdate, highScore }:
     });
 
     return () => {
+      stageRef.current = null;
       targetTex.dispose();
       floorMaps.dispose();
       clearArrows();
@@ -922,47 +932,20 @@ export default function ArcheryNeoGame({ onGameOver, onScoreUpdate, highScore }:
         </div>
       )}
 
-      {/* Unified Collapsible Bottom Control Dock */}
-      <div
-        onPointerDown={(e) => e.stopPropagation()}
-        className="absolute bottom-3 left-1/2 -translate-x-1/2 z-10 w-[94%] max-w-[640px] transition-transform duration-200 pointer-events-auto pb-[env(safe-area-inset-bottom)]"
-        style={{ transform: `translate(-50%, ${dockCollapsed ? 'calc(100% - 28px)' : '0px'})` }}
-      >
-        <div className="flex justify-center mb-1">
-          <button
-            onClick={() => setDockCollapsed((prev) => !prev)}
-            className="px-3 min-h-[36px] sm:min-h-0 py-1 rounded-t-lg bg-slate-950/90 border border-b-0 border-white/10 text-[11px] font-mono text-slate-300 hover:text-white flex items-center gap-1 whitespace-nowrap"
-          >
-            {dockCollapsed ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
-            {dockCollapsed ? 'Tampilkan Kontrol' : 'Sembunyikan Kontrol'}
-          </button>
-        </div>
-
-        <div className="bg-slate-950/95 border border-white/10 rounded-xl px-3 sm:px-4 py-2 sm:py-2.5 flex flex-wrap items-center justify-between gap-2.5 text-xs">
-          <div className="flex items-center gap-1.5 sm:gap-2">
-            <Eye className="w-4 h-4 text-cyan-400 shrink-0" />
-            {(['archer', 'arrow', 'side'] as ArcheryCamMode[]).map((m) => (
-              <button
-                key={m}
-                onClick={() => {
-                  audioController.playClick();
-                  setCamMode(m);
-                }}
-                className={`px-2.5 min-h-[44px] sm:min-h-0 py-1 rounded-md font-medium capitalize transition-colors whitespace-nowrap ${
-                  camMode === m
-                    ? 'bg-cyan-500 text-slate-950 font-semibold'
-                    : 'bg-slate-900 text-slate-300 hover:text-white'
-                }`}
-              >
-                {m}
-              </button>
-            ))}
-          </div>
-
-          <div className="flex items-center gap-2 sm:gap-3 font-mono">
+      <ThreeDockOverlay
+        cameraPreset={cameraPreset}
+        onSelectPreset={(preset) => {
+          audioController.playClick();
+          setCameraPreset(preset);
+        }}
+        quality={quality}
+        onCycleQuality={cycleQuality}
+        presetLabels={{ chase: 'Archer', isometric: 'Arrow', diorama: 'Side' }}
+        extraControls={
+          <div className="flex items-center gap-2 font-mono text-xs">
             <span className="text-slate-400 hidden sm:inline">TARIKAN BUSUR</span>
             <span className="text-slate-400 sm:hidden">POWER</span>
-            <div className="w-20 sm:w-24 h-2 bg-slate-800 rounded-full overflow-hidden">
+            <div className="w-16 sm:w-24 h-2 bg-slate-800 rounded-full overflow-hidden">
               <div
                 className="h-full bg-gradient-to-r from-cyan-400 via-amber-400 to-rose-500"
                 style={{ width: `${drawPct}%` }}
@@ -970,8 +953,8 @@ export default function ArcheryNeoGame({ onGameOver, onScoreUpdate, highScore }:
             </div>
             <span className="text-white w-9 text-right tabular-nums">{drawPct}%</span>
           </div>
-        </div>
-      </div>
+        }
+      />
 
       <GameOverlay
         gameState={gameState}

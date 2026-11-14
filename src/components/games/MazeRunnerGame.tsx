@@ -5,13 +5,17 @@ import { audioController, useGameEngine } from '../../sdk';
 import { inputManager } from '../../services/inputService';
 import {
   ThreeStageController,
+  CameraPreset3D,
+  QualityLevel3D,
   createStoneCathedralMaps,
   createEmissiveGridTexture,
   followDirectionalShadow
 } from '../../utils/threeStage';
 import { screenShake } from '../../utils/screenShake';
+import { haptics } from '../../utils/haptics';
 import { GameOverlay } from '../gameplay/GameOverlay';
-import { Eye, Zap, Clock, Compass, ChevronDown, ChevronUp, ArrowUp, ArrowDown, ArrowLeft, ArrowRight } from 'lucide-react';
+import { ThreeDockOverlay } from '../gameplay/ThreeDockOverlay';
+import { Eye, Zap, Clock, ArrowUp, ArrowDown, ArrowLeft, ArrowRight } from 'lucide-react';
 
 interface GameProps {
   onGameOver: (score: number) => void;
@@ -20,7 +24,6 @@ interface GameProps {
 }
 
 type MazeCell = 'wall' | 'path' | 'start' | 'goal' | 'orb' | 'phase';
-type CameraPreset = 'chase' | 'isometric' | 'overhead';
 
 interface PendingEffect {
   type: 'bump' | 'break' | 'orb' | 'phase' | 'goal';
@@ -209,12 +212,13 @@ export default function MazeRunnerGame({ onGameOver, onScoreUpdate, highScore }:
   const [combo, setCombo] = useState(1);
   const [phaseCharges, setPhaseCharges] = useState(1);
   const [phaseActive, setPhaseActive] = useState(false);
-  const [cameraPreset, setCameraPreset] = useState<CameraPreset>('chase');
-  const [dockCollapsed, setDockCollapsed] = useState(false);
+  const [cameraPreset, setCameraPreset] = useState<CameraPreset3D>('chase');
+  const [quality, setQuality] = useState<QualityLevel3D>('ultra');
   const [statusBanner, setStatusBanner] = useState<string | null>(null);
 
   const canvasMountRef = useRef<HTMLDivElement | null>(null);
-  const cameraPresetRef = useRef<CameraPreset>('chase');
+  const stageRef = useRef<ThreeStageController | null>(null);
+  const cameraPresetRef = useRef<CameraPreset3D>('chase');
   const phaseChargesRef = useRef(1);
   const phaseActiveRef = useRef(false);
   const comboRef = useRef(1);
@@ -321,8 +325,17 @@ export default function MazeRunnerGame({ onGameOver, onScoreUpdate, highScore }:
     phaseActiveRef.current = true;
     setPhaseActive(true);
     audioController.playLaser();
+    haptics.trigger('light');
     showBanner('PHASE BREAKER SIAP: TEMBUS 1 DINDING!');
   }, [gameStateRef, showBanner]);
+
+  const cycleQuality = useCallback(() => {
+    setQuality((prev) => {
+      const next: QualityLevel3D = prev === 'ultra' ? 'balanced' : prev === 'balanced' ? 'performance' : 'ultra';
+      stageRef.current?.setQualityLevel(next);
+      return next;
+    });
+  }, []);
 
   const movePlayer = useCallback(
     (dr: number, dc: number) => {
@@ -357,11 +370,13 @@ export default function MazeRunnerGame({ onGameOver, onScoreUpdate, highScore }:
           st.fxQueue.push({ type: 'break', x: nc - half, z: nr - half });
           audioController.playExplosion();
           screenShake.trigger('medium');
+          haptics.trigger('medium');
           addScore(40 * comboRef.current);
           showBanner('DINDING DITEMBUS! +40');
         } else {
           audioController.playHit();
           screenShake.trigger('light');
+          haptics.trigger('light');
           st.fxQueue.push({ type: 'bump', x: nc - half, z: nr - half });
           comboRef.current = 1;
           setCombo(1);
@@ -399,6 +414,7 @@ export default function MazeRunnerGame({ onGameOver, onScoreUpdate, highScore }:
       } else if (cell === 'goal') {
         audioController.playWin();
         screenShake.trigger('medium');
+        haptics.trigger('success');
         st.fxQueue.push({ type: 'goal', x: nc - half, z: nr - half });
         const nextLvl = levelRef.current + 1;
         const clearBonus = (120 + levelRef.current * 30) * comboRef.current;
@@ -421,10 +437,8 @@ export default function MazeRunnerGame({ onGameOver, onScoreUpdate, highScore }:
   // Keyboard & InputManager controls
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'h' || e.key === 'H') {
-        setDockCollapsed((prev) => !prev);
-      } else if (e.key === 'c' || e.key === 'C') {
-        setCameraPreset((prev) => (prev === 'chase' ? 'isometric' : prev === 'isometric' ? 'overhead' : 'chase'));
+      if (e.key === 'c' || e.key === 'C') {
+        setCameraPreset((prev) => (prev === 'chase' ? 'isometric' : prev === 'isometric' ? 'diorama' : 'chase'));
       }
     };
 
@@ -479,6 +493,7 @@ export default function MazeRunnerGame({ onGameOver, onScoreUpdate, highScore }:
           threshold: 0.8
         }
       });
+      stageRef.current = stage;
     } catch {
       return;
     }
@@ -748,6 +763,7 @@ export default function MazeRunnerGame({ onGameOver, onScoreUpdate, highScore }:
       wallMaps.dispose();
       floorTex.dispose();
       stage.dispose();
+      stageRef.current = null;
     };
   }, [gameStateRef, scoreRef, triggerGameOver]);
 
@@ -808,7 +824,7 @@ export default function MazeRunnerGame({ onGameOver, onScoreUpdate, highScore }:
         <div
           onPointerDown={(e) => e.stopPropagation()}
           onPointerUp={(e) => e.stopPropagation()}
-          className={`absolute ${dockCollapsed ? 'bottom-12' : 'bottom-28 sm:bottom-24'} left-3 z-10 flex flex-col items-center gap-1 md:hidden pointer-events-auto touch-none transition-all`}
+          className="absolute bottom-28 sm:bottom-24 left-3 z-10 flex flex-col items-center gap-1 md:hidden pointer-events-auto touch-none transition-all"
         >
           <button
             onPointerDown={(e) => {
@@ -855,49 +871,17 @@ export default function MazeRunnerGame({ onGameOver, onScoreUpdate, highScore }:
         </div>
       )}
 
-      {/* Unified Collapsible Bottom Control Dock */}
-      <div
-        onPointerDown={(e) => e.stopPropagation()}
-        onPointerUp={(e) => e.stopPropagation()}
-        className="absolute bottom-3 left-1/2 -translate-x-1/2 z-10 w-[94%] max-w-[640px] transition-transform duration-200 pointer-events-auto pb-[env(safe-area-inset-bottom)]"
-        style={{ transform: `translate(-50%, ${dockCollapsed ? 'calc(100% - 28px)' : '0px'})` }}
-      >
-        <div className="flex justify-center mb-1">
-          <button
-            onClick={() => setDockCollapsed((prev) => !prev)}
-            className="px-3 min-h-[36px] sm:min-h-0 py-1 rounded-t-lg bg-slate-950/90 border border-b-0 border-white/10 text-[11px] font-mono text-slate-300 hover:text-white flex items-center gap-1 whitespace-nowrap"
-          >
-            {dockCollapsed ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
-            {dockCollapsed ? 'Tampilkan Kontrol' : 'Sembunyikan Kontrol'}
-          </button>
-        </div>
-
-        <div className="bg-slate-950/95 border border-white/10 rounded-xl px-3 sm:px-4 py-2 sm:py-2.5 flex flex-wrap items-center justify-between gap-2 text-xs">
-          <div className="flex items-center gap-1.5 sm:gap-2">
-            <Compass className="w-4 h-4 text-cyan-400 shrink-0" />
-            <span className="text-slate-400 hidden sm:inline">Kamera:</span>
-            {(['chase', 'isometric', 'overhead'] as CameraPreset[]).map((preset) => (
-              <button
-                key={preset}
-                onClick={() => {
-                  audioController.playClick();
-                  setCameraPreset(preset);
-                }}
-                className={`px-2.5 min-h-[44px] sm:min-h-0 py-1 rounded-md font-medium capitalize transition-colors whitespace-nowrap ${
-                  cameraPreset === preset
-                    ? 'bg-cyan-500 text-slate-950 font-semibold'
-                    : 'bg-slate-900 text-slate-300 hover:text-white'
-                }`}
-              >
-                {preset}
-              </button>
-            ))}
-          </div>
-
+      <ThreeDockOverlay
+        cameraPreset={cameraPreset}
+        onSelectPreset={setCameraPreset}
+        quality={quality}
+        onCycleQuality={cycleQuality}
+        presetLabels={{ chase: 'Chase', isometric: 'Isometric', diorama: 'Overhead' }}
+        extraControls={
           <button
             onClick={activatePhaseMode}
             disabled={phaseCharges <= 0 || phaseActive}
-            className={`px-3 min-h-[44px] sm:min-h-0 py-1.5 rounded-lg font-mono font-semibold flex items-center gap-1.5 transition-colors whitespace-nowrap ${
+            className={`px-3 min-h-[36px] py-1 rounded-lg font-mono font-semibold text-xs flex items-center gap-1.5 transition-colors whitespace-nowrap ${
               phaseActive
                 ? 'bg-pink-500 text-white'
                 : phaseCharges > 0
@@ -908,8 +892,8 @@ export default function MazeRunnerGame({ onGameOver, onScoreUpdate, highScore }:
             <Zap className="w-3.5 h-3.5" />
             <span>Phase ({phaseCharges})</span>
           </button>
-        </div>
-      </div>
+        }
+      />
 
       <GameOverlay
         gameState={gameState}

@@ -561,6 +561,16 @@ export function createStoneCathedralMaps(
 }
 
 /**
+ * Widens vertical FOV smoothly on narrow portrait screens (aspect < 1) so left/right arena bounds are never clipped.
+ */
+export function computeAdaptiveAspectFov(baseFov: number, aspect: number, minAspect = 0.62): number {
+  if (!Number.isFinite(aspect) || aspect >= 1 || aspect <= 0) return baseFov;
+  const clampedAspect = Math.max(minAspect, aspect);
+  const scale = Math.min(1.42, 1 + (1 - clampedAspect) * 0.65);
+  return Math.min(95, baseFov * scale);
+}
+
+/**
  * 3D Game-Feel Camera Rig Helper:
  * - Decayed quadratic trauma screen shake
  * - Smooth speed-driven dynamic FOV kicks
@@ -645,7 +655,8 @@ export class CameraRigHelper {
     const clampedDt = Math.min(Math.max(dt, 0), 0.1);
     this.fovOffset = THREE.MathUtils.damp(this.fovOffset, 0, 7.5, clampedDt);
     const clampedRatio = THREE.MathUtils.clamp(speedRatio, -0.25, 1.35);
-    const desiredFov = baseFov + clampedRatio * maxBoostDegrees + this.fovOffset;
+    const adaptiveBase = computeAdaptiveAspectFov(baseFov, camera.aspect);
+    const desiredFov = adaptiveBase + clampedRatio * maxBoostDegrees + this.fovOffset;
     const nextFov = THREE.MathUtils.damp(camera.fov, desiredFov, 8.5, clampedDt);
     if (Math.abs(camera.fov - nextFov) > 0.03) {
       camera.fov = nextFov;
@@ -654,12 +665,13 @@ export class CameraRigHelper {
   }
 
   /**
-   * Recovers manual FOV kicks back toward baseFov when no speedRatio is driving it.
+   * Recovers manual FOV kicks back toward baseFov (with portrait aspect adaptation) when no speedRatio is driving it.
    */
   public stepFovRecovery(camera: THREE.PerspectiveCamera, baseFov: number, dt: number): void {
     const clampedDt = Math.min(Math.max(dt, 0), 0.1);
     this.fovOffset = THREE.MathUtils.damp(this.fovOffset, 0, 7.5, clampedDt);
-    const targetFov = baseFov + this.fovOffset;
+    const adaptiveBase = computeAdaptiveAspectFov(baseFov, camera.aspect);
+    const targetFov = adaptiveBase + this.fovOffset;
     if (Math.abs(camera.fov - targetFov) > 0.05) {
       camera.fov = targetFov;
       camera.updateProjectionMatrix();
@@ -1211,7 +1223,14 @@ export class ThreeStageController {
     if (this.disposed || !this.container) return;
     const w = Math.max(300, this.container.clientWidth || 800);
     const h = Math.max(220, this.container.clientHeight || 500);
-    this.camera.aspect = w / h;
+    const aspect = w / h;
+    this.camera.aspect = aspect;
+    if (!this.manualCamera) {
+      const cfg = this.presets[this.currentPreset];
+      if (cfg) {
+        this.camera.fov = computeAdaptiveAspectFov(cfg.fov, aspect);
+      }
+    }
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(w, h);
     if (this.composer) {

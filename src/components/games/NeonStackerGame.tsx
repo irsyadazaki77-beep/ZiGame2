@@ -4,18 +4,18 @@ import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeom
 import { audioController } from '../../sdk/audioController';
 import { useGameEngine } from '../../sdk';
 import { inputManager } from '../../services/inputService';
-import { ThreeStageController, followDirectionalShadow } from '../../utils/threeStage';
+import { ThreeStageController, followDirectionalShadow, type CameraPreset3D, type QualityLevel3D } from '../../utils/threeStage';
 import { screenShake } from '../../utils/screenShake';
+import { haptics } from '../../utils/haptics';
 import { GameOverlay } from '../gameplay/GameOverlay';
-import { Layers, Sparkles, Eye, Zap, ChevronDown, ChevronUp } from 'lucide-react';
+import { ThreeDockOverlay } from '../gameplay/ThreeDockOverlay';
+import { Layers, Sparkles, Zap } from 'lucide-react';
 
 interface NeonStackerGameProps {
   onGameOver: (score: number) => void;
   onScoreUpdate: (score: number) => void;
   highScore: number;
 }
-
-type CameraAngle = 'isometric' | 'front' | 'orbit';
 
 interface FallingCutPiece {
   mesh: THREE.Mesh;
@@ -70,12 +70,13 @@ export default function NeonStackerGame({ onGameOver, onScoreUpdate, highScore }
   const [combo, setCombo] = useState(1);
   const [slowMoCharges, setSlowMoCharges] = useState(1);
   const [slowMoActive, setSlowMoActive] = useState(false);
-  const [cameraAngle, setCameraAngle] = useState<CameraAngle>('isometric');
-  const [dockCollapsed, setDockCollapsed] = useState(false);
+  const [cameraPreset, setCameraPreset] = useState<CameraPreset3D>('isometric');
+  const [quality, setQuality] = useState<QualityLevel3D>('ultra');
   const [bannerText, setBannerText] = useState<string | null>(null);
 
   const canvasMountRef = useRef<HTMLDivElement | null>(null);
-  const cameraAngleRef = useRef<CameraAngle>('isometric');
+  const stageRef = useRef<ThreeStageController | null>(null);
+  const cameraAngleRef = useRef<CameraPreset3D>('isometric');
   const slowMoActiveRef = useRef(false);
   const slowMoTimerRef = useRef(0);
   const slowMoChargesRef = useRef(1);
@@ -137,8 +138,15 @@ export default function NeonStackerGame({ onGameOver, onScoreUpdate, highScore }
   });
 
   useEffect(() => {
-    cameraAngleRef.current = cameraAngle;
-  }, [cameraAngle]);
+    cameraAngleRef.current = cameraPreset;
+  }, [cameraPreset]);
+
+  const cycleQuality = useCallback(() => {
+    const order: QualityLevel3D[] = ['ultra', 'balanced', 'performance'];
+    const next = order[(order.indexOf(quality) + 1) % order.length];
+    setQuality(next);
+    stageRef.current?.setQualityLevel(next);
+  }, [quality]);
 
   useEffect(() => {
     return () => {
@@ -229,6 +237,7 @@ export default function NeonStackerGame({ onGameOver, onScoreUpdate, highScore }
       });
       st.traumaToTrigger = 0.8;
       audioController.playGameOver();
+      haptics.trigger('heavy');
       screenShake.trigger('heavy');
       triggerGameOver();
       return;
@@ -247,6 +256,7 @@ export default function NeonStackerGame({ onGameOver, onScoreUpdate, highScore }
       });
       st.traumaToTrigger = 0.8;
       audioController.playGameOver();
+      haptics.trigger('heavy');
       screenShake.trigger('heavy');
       triggerGameOver();
       return;
@@ -357,12 +367,8 @@ export default function NeonStackerGame({ onGameOver, onScoreUpdate, highScore }
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'h' || e.key === 'H') {
-        setDockCollapsed((prev) => !prev);
-        return;
-      }
       if (e.key === 'c' || e.key === 'C') {
-        setCameraAngle((prev) => (prev === 'isometric' ? 'front' : prev === 'front' ? 'orbit' : 'isometric'));
+        setCameraPreset((prev) => (prev === 'isometric' ? 'chase' : prev === 'chase' ? 'diorama' : 'isometric'));
         return;
       }
       if (gameStateRef.current !== 'playing') return;
@@ -421,6 +427,8 @@ export default function NeonStackerGame({ onGameOver, onScoreUpdate, highScore }
     }
 
     const { scene, camera } = stage;
+    stageRef.current = stage;
+    setQuality(stage.getQualityLevel());
     camera.position.set(7.5, 8.5, 7.5);
     stage.rimLight.color.setHex(0xec4899);
     stage.rimLight.position.set(-9, 10, -8);
@@ -678,7 +686,7 @@ export default function NeonStackerGame({ onGameOver, onScoreUpdate, highScore }
       const mode = cameraAngleRef.current;
       if (mode === 'isometric') {
         _camTargetPos.set(7.2, towerTopY + 6.2, 7.2);
-      } else if (mode === 'front') {
+      } else if (mode === 'chase') {
         _camTargetPos.set(0, towerTopY + 5.2, 9.8);
       } else {
         const orbAngle = elapsed * 0.45;
@@ -696,6 +704,7 @@ export default function NeonStackerGame({ onGameOver, onScoreUpdate, highScore }
     });
 
     return () => {
+      stageRef.current = null;
       clearTower();
       stage.dispose();
     };
@@ -736,46 +745,19 @@ export default function NeonStackerGame({ onGameOver, onScoreUpdate, highScore }
         </div>
       )}
 
-      {/* Unified Collapsible Bottom Control Dock */}
-      <div
-        onPointerDown={(e) => e.stopPropagation()}
-        onClick={(e) => e.stopPropagation()}
-        className="absolute bottom-3 left-1/2 -translate-x-1/2 z-10 w-[94%] max-w-[640px] transition-transform duration-200 pointer-events-auto"
-        style={{ transform: `translate(-50%, ${dockCollapsed ? 'calc(100% - 28px)' : '0px'})` }}
-      >
-        <div className="flex justify-center mb-1">
-          <button
-            onClick={() => setDockCollapsed((prev) => !prev)}
-            className="px-3 py-1 rounded-t-lg bg-slate-950/90 border border-b-0 border-white/10 text-[11px] font-mono text-slate-300 hover:text-white flex items-center gap-1 whitespace-nowrap"
-          >
-            {dockCollapsed ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
-            {dockCollapsed ? 'Tampilkan Kontrol' : 'Sembunyikan Kontrol'}
-          </button>
-        </div>
-
-        <div className="bg-slate-950/95 border border-white/10 rounded-xl px-4 py-2.5 flex flex-wrap items-center justify-between gap-3 text-xs">
-          <div className="flex items-center gap-2">
-            <Eye className="w-4 h-4 text-cyan-400 shrink-0" />
-            {(['isometric', 'front', 'orbit'] as CameraAngle[]).map((angle) => (
-              <button
-                key={angle}
-                onClick={() => setCameraAngle(angle)}
-                className={`px-2.5 py-1 rounded-md font-medium capitalize transition-colors whitespace-nowrap ${
-                  cameraAngle === angle
-                    ? 'bg-cyan-500 text-slate-950 font-semibold'
-                    : 'bg-slate-900 text-slate-300 hover:text-white'
-                }`}
-              >
-                {angle}
-              </button>
-            ))}
-          </div>
-
+      <ThreeDockOverlay
+        cameraPreset={cameraPreset}
+        onSelectPreset={setCameraPreset}
+        quality={quality}
+        onCycleQuality={cycleQuality}
+        presetLabels={{ chase: 'Front', isometric: 'Isometric', diorama: 'Orbit' }}
+        extraControls={
           <div className="flex items-center gap-2">
             <button
+              type="button"
               onClick={activateSlowMo}
               disabled={slowMoCharges <= 0 || slowMoActive}
-              className={`min-h-[44px] sm:min-h-[34px] px-3 py-1.5 rounded-lg font-mono font-semibold flex items-center gap-1.5 transition-colors whitespace-nowrap ${
+              className={`min-h-[44px] sm:min-h-0 px-3 py-1.5 rounded-lg font-mono text-xs font-semibold flex items-center gap-1.5 transition-colors whitespace-nowrap ${
                 slowMoActive
                   ? 'bg-amber-500 text-slate-950'
                   : slowMoCharges > 0
@@ -786,19 +768,19 @@ export default function NeonStackerGame({ onGameOver, onScoreUpdate, highScore }
               <Zap className="w-3.5 h-3.5" />
               <span>Slow-Mo ({slowMoCharges})</span>
             </button>
-
             <button
+              type="button"
               onPointerDown={(e) => {
                 e.stopPropagation();
                 handleStack();
               }}
-              className="min-h-[44px] sm:min-h-[34px] px-4 py-1.5 rounded-lg bg-pink-600 hover:bg-pink-500 text-white font-semibold tracking-wide whitespace-nowrap touch-none"
+              className="min-h-[44px] sm:min-h-0 px-4 py-1.5 rounded-lg bg-pink-600 hover:bg-pink-500 text-white text-xs font-semibold tracking-wide whitespace-nowrap touch-none"
             >
               Tumpuk Balok
             </button>
           </div>
-        </div>
-      </div>
+        }
+      />
 
       <GameOverlay
         gameState={gameState}

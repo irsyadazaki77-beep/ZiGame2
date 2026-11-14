@@ -2,19 +2,19 @@ import React, { useRef, useEffect, useState, useCallback } from 'react';
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import { useGameEngine, audioController } from '../../sdk';
-import { ThreeStageController, createWetAsphaltMaps } from '../../utils/threeStage';
+import { ThreeStageController, createWetAsphaltMaps, type CameraPreset3D, type QualityLevel3D } from '../../utils/threeStage';
 import { screenShake } from '../../utils/screenShake';
+import { haptics } from '../../utils/haptics';
 import { inputManager } from '../../services/inputService';
 import { GameOverlay } from '../gameplay/GameOverlay';
-import { Flame, Sparkles, Shield, Eye, Gauge, ChevronDown, ChevronUp } from 'lucide-react';
+import { ThreeDockOverlay } from '../gameplay/ThreeDockOverlay';
+import { Flame, Sparkles, Shield, Gauge } from 'lucide-react';
 
 interface GameProps {
   onScoreUpdate: (score: number) => void;
   onGameOver: (score: number) => void;
   highScore: number;
 }
-
-type CameraView = 'chase' | 'cockpit' | 'aerial';
 
 interface TrafficCar3D {
   mesh: THREE.Group;
@@ -48,6 +48,7 @@ interface TrailSlot {
 
 const LANES_X = [-3.6, 0, 3.6];
 const _camPos = new THREE.Vector3();
+const _dampedCamPos = new THREE.Vector3();
 const _camTarget = new THREE.Vector3();
 const _trailDummy = new THREE.Object3D();
 const _trailColor = new THREE.Color();
@@ -339,12 +340,13 @@ export default function VaporwaveRacerGame({ onScoreUpdate, onGameOver, highScor
   const [combo, setCombo] = useState(1);
   const [shields, setShields] = useState(1);
   const [speedKmh, setSpeedKmh] = useState(180);
-  const [cameraView, setCameraView] = useState<CameraView>('chase');
-  const [dockCollapsed, setDockCollapsed] = useState(false);
+  const [cameraPreset, setCameraPreset] = useState<CameraPreset3D>('chase');
+  const [quality, setQuality] = useState<QualityLevel3D>('ultra');
   const [toastMsg, setToastMsg] = useState<string | null>(null);
 
   const canvasMountRef = useRef<HTMLDivElement | null>(null);
-  const cameraViewRef = useRef<CameraView>('chase');
+  const stageRef = useRef<ThreeStageController | null>(null);
+  const cameraViewRef = useRef<CameraPreset3D>('chase');
   const toastTimerRef = useRef<number | null>(null);
   const swipeStartXRef = useRef<number | null>(null);
   const lastBoostShownRef = useRef(100);
@@ -366,8 +368,15 @@ export default function VaporwaveRacerGame({ onScoreUpdate, onGameOver, highScor
   });
 
   useEffect(() => {
-    cameraViewRef.current = cameraView;
-  }, [cameraView]);
+    cameraViewRef.current = cameraPreset;
+  }, [cameraPreset]);
+
+  const cycleQuality = useCallback(() => {
+    const order: QualityLevel3D[] = ['ultra', 'balanced', 'performance'];
+    const next = order[(order.indexOf(quality) + 1) % order.length];
+    setQuality(next);
+    stageRef.current?.setQualityLevel(next);
+  }, [quality]);
 
   const showToast = useCallback((msg: string) => {
     setToastMsg(msg);
@@ -380,6 +389,7 @@ export default function VaporwaveRacerGame({ onScoreUpdate, onGameOver, highScor
     if (raceStateRef.current.laneIdx > 0) {
       raceStateRef.current.laneIdx -= 1;
       audioController.playLaser();
+      haptics.trigger('light');
       inputManager.vibrateGamepad(25, 0.2);
     }
   }, [gameStateRef]);
@@ -389,6 +399,7 @@ export default function VaporwaveRacerGame({ onScoreUpdate, onGameOver, highScor
     if (raceStateRef.current.laneIdx < 2) {
       raceStateRef.current.laneIdx += 1;
       audioController.playLaser();
+      haptics.trigger('light');
       inputManager.vibrateGamepad(25, 0.2);
     }
   }, [gameStateRef]);
@@ -424,10 +435,8 @@ export default function VaporwaveRacerGame({ onScoreUpdate, onGameOver, highScor
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'h' || e.key === 'H') {
-        setDockCollapsed((prev) => !prev);
-      } else if (e.key === 'c' || e.key === 'C') {
-        setCameraView((prev) => (prev === 'chase' ? 'cockpit' : prev === 'cockpit' ? 'aerial' : 'chase'));
+      if (e.key === 'c' || e.key === 'C') {
+        setCameraPreset((prev) => (prev === 'chase' ? 'isometric' : prev === 'isometric' ? 'diorama' : 'chase'));
       }
     };
     window.addEventListener('keydown', handleKeyDown);
@@ -484,6 +493,8 @@ export default function VaporwaveRacerGame({ onScoreUpdate, onGameOver, highScor
     }
 
     const { scene, camera, renderer, isSoftwareGl } = stage;
+    stageRef.current = stage;
+    setQuality(stage.getQualityLevel());
     camera.position.set(0, 2.8, 6.2);
 
     // Synthwave Lighting Rig
@@ -907,7 +918,7 @@ export default function VaporwaveRacerGame({ onScoreUpdate, onGameOver, highScor
       if (view === 'chase') {
         _camPos.set(st.visualX * 0.65, 2.65, 6.2 + (activelyBoosting ? 0.55 : 0));
         _camTarget.set(st.visualX * 0.8, 1.1, -18);
-      } else if (view === 'cockpit') {
+      } else if (view === 'isometric') {
         _camPos.set(st.visualX, 0.95, -0.5);
         _camTarget.set(st.visualX, 0.9, -30);
       } else {
@@ -915,18 +926,21 @@ export default function VaporwaveRacerGame({ onScoreUpdate, onGameOver, highScor
         _camTarget.set(st.visualX * 0.4, 0, -16);
       }
 
-      camera.position.x = THREE.MathUtils.damp(camera.position.x, _camPos.x, 10, delta);
-      camera.position.y = THREE.MathUtils.damp(camera.position.y, _camPos.y, 10, delta);
-      camera.position.z = THREE.MathUtils.damp(camera.position.z, _camPos.z, 10, delta);
-      stage.cameraRig.applyTraumaToCamera(camera, camera.position.clone(), delta, 0.42);
+      _dampedCamPos.set(
+        THREE.MathUtils.damp(camera.position.x, _camPos.x, 10, delta),
+        THREE.MathUtils.damp(camera.position.y, _camPos.y, 10, delta),
+        THREE.MathUtils.damp(camera.position.z, _camPos.z, 10, delta)
+      );
+      stage.cameraRig.applyTraumaToCamera(camera, _dampedCamPos, delta, 0.42);
       camera.lookAt(_camTarget);
-      if (view !== 'aerial') {
+      if (view !== 'diorama') {
         camera.rotateZ(st.camRoll);
       }
     });
 
     return () => {
       if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+      stageRef.current = null;
       roadTex.dispose();
       wetMaps.dispose();
       sunTex.dispose();
@@ -1032,53 +1046,25 @@ export default function VaporwaveRacerGame({ onScoreUpdate, onGameOver, highScor
         </div>
       )}
 
-      {/* Unified Collapsible Bottom Control Dock */}
-      <div
-        className="absolute bottom-2 left-1/2 -translate-x-1/2 z-10 w-[94%] max-w-[640px] transition-transform duration-200 pointer-events-auto pb-[env(safe-area-inset-bottom)]"
-        style={{ transform: `translate(-50%, ${dockCollapsed ? 'calc(100% - 28px)' : '0px'})` }}
-      >
-        <div className="flex justify-center mb-1">
-          <button
-            type="button"
-            onClick={() => setDockCollapsed((prev) => !prev)}
-            className="min-h-[36px] sm:min-h-0 px-3 py-1 rounded-t-lg bg-slate-950/90 border border-b-0 border-white/10 text-[11px] font-mono text-slate-300 hover:text-white flex items-center gap-1 whitespace-nowrap"
-          >
-            {dockCollapsed ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
-            {dockCollapsed ? 'Tampilkan Kontrol' : 'Sembunyikan Kontrol'}
-          </button>
-        </div>
-
-        <div className="bg-slate-950/95 border border-white/10 rounded-xl px-3 sm:px-4 py-2 sm:py-2.5 flex flex-wrap items-center justify-between gap-2 sm:gap-3 text-xs">
-          <div className="flex items-center gap-1.5 sm:gap-2">
-            <Eye className="w-4 h-4 text-fuchsia-400 shrink-0" />
-            {(['chase', 'cockpit', 'aerial'] as CameraView[]).map((view) => (
-              <button
-                key={view}
-                type="button"
-                onClick={() => setCameraView(view)}
-                className={`min-h-[40px] sm:min-h-0 px-2.5 py-1 rounded-md font-medium capitalize transition-colors whitespace-nowrap ${
-                  cameraView === view
-                    ? 'bg-fuchsia-500 text-white font-semibold'
-                    : 'bg-slate-900 text-slate-300 hover:text-white'
-                }`}
-              >
-                {view}
-              </button>
-            ))}
-          </div>
-
-          <div className="flex items-center gap-2.5 tabular-nums">
-            <Flame className="w-4 h-4 text-cyan-400" />
-            <span className="text-slate-400 font-mono">TURBO</span>
-            <div className="w-20 sm:w-24 h-2 bg-slate-800 rounded-full overflow-hidden">
+      <ThreeDockOverlay
+        cameraPreset={cameraPreset}
+        onSelectPreset={setCameraPreset}
+        quality={quality}
+        onCycleQuality={cycleQuality}
+        presetLabels={{ chase: 'Chase 3D', isometric: 'Cockpit', diorama: 'Aerial' }}
+        extraControls={
+          <div className="flex items-center gap-2 rounded-lg bg-slate-900 px-2.5 py-1.5 tabular-nums border border-white/10">
+            <Flame className="w-3.5 h-3.5 text-cyan-400" />
+            <span className="text-[11px] text-slate-400 font-mono">TURBO</span>
+            <div className="w-16 sm:w-20 h-2 bg-slate-800 rounded-full overflow-hidden">
               <div
                 className="h-full bg-gradient-to-r from-fuchsia-500 to-cyan-400 transition-all duration-100"
                 style={{ width: `${boostEnergy}%` }}
               />
             </div>
           </div>
-        </div>
-      </div>
+        }
+      />
 
       <GameOverlay
         gameState={gameState}

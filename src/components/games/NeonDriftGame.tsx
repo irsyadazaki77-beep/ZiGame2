@@ -3,14 +3,15 @@ import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import { audioController, useGameEngine } from '../../sdk';
 import { inputManager } from '../../services/inputService';
-import { ThreeStageController, createWetAsphaltMaps } from '../../utils/threeStage';
+import { ThreeStageController, createWetAsphaltMaps, type CameraPreset3D, type QualityLevel3D } from '../../utils/threeStage';
 import { screenShake } from '../../utils/screenShake';
+import { haptics } from '../../utils/haptics';
 import { GameOverlay } from '../gameplay/GameOverlay';
+import { ThreeDockOverlay } from '../gameplay/ThreeDockOverlay';
 import {
   Zap,
   Shield,
   Gauge,
-  Eye,
   Trophy,
   Sparkles,
 } from 'lucide-react';
@@ -20,8 +21,6 @@ interface GameProps {
   onGameOver: (score: number) => void;
   highScore: number;
 }
-
-type CameraMode = 'chase' | 'hood' | 'topdown';
 
 export type CyberPowerUpType = 'emp' | 'shield' | 'double';
 
@@ -62,6 +61,7 @@ interface DriftParticleSlot {
 }
 
 const _camPos = new THREE.Vector3();
+const _dampedCamPos = new THREE.Vector3();
 const _camTarget = new THREE.Vector3();
 const _trailDummy = new THREE.Object3D();
 const _trailColor = new THREE.Color();
@@ -339,6 +339,7 @@ export default function NeonDriftGame({ onScoreUpdate, onGameOver, highScore }: 
     updateScore,
     triggerGameOver,
     startWithCountdown,
+    resumeGame,
     countdown,
     scoreRef,
   } = useGameEngine({
@@ -347,6 +348,7 @@ export default function NeonDriftGame({ onScoreUpdate, onGameOver, highScore }: 
     onScoreUpdate,
   });
 
+  const stageRef = useRef<ThreeStageController | null>(null);
   const gameStateRef = useRef(gameState);
   const updateScoreRef = useRef(updateScore);
   const triggerGameOverRef = useRef(triggerGameOver);
@@ -362,7 +364,8 @@ export default function NeonDriftGame({ onScoreUpdate, onGameOver, highScore }: 
   const [nitro, setNitro] = useState(45);
   const [shields, setShields] = useState(3);
   const [combo, setCombo] = useState(1);
-  const [cameraMode, setCameraMode] = useState<CameraMode>('chase');
+  const [cameraPreset, setCameraPreset] = useState<CameraPreset3D>('chase');
+  const [quality, setQuality] = useState<QualityLevel3D>('ultra');
   const [nearMissToast, setNearMissToast] = useState<{ id: number; text: string; multiplier: number } | null>(null);
 
   const inputStateRef = useRef({ left: false, right: false, drift: false, boost: false });
@@ -383,15 +386,22 @@ export default function NeonDriftGame({ onScoreUpdate, onGameOver, highScore }: 
     isBoosting: false,
   });
 
-  const cameraModeRef = useRef<CameraMode>('chase');
-  cameraModeRef.current = cameraMode;
+  const cameraModeRef = useRef<CameraPreset3D>('chase');
+  cameraModeRef.current = cameraPreset;
 
   const trafficCarsRef = useRef<TrafficCar[]>([]);
   const powerUpsRef = useRef<PowerUpItem[]>([]);
 
   const toggleCameraMode = useCallback(() => {
-    setCameraMode((prev) => (prev === 'chase' ? 'hood' : prev === 'hood' ? 'topdown' : 'chase'));
+    setCameraPreset((prev) => (prev === 'chase' ? 'isometric' : prev === 'isometric' ? 'diorama' : 'chase'));
   }, []);
+
+  const cycleQuality = useCallback(() => {
+    const order: QualityLevel3D[] = ['ultra', 'balanced', 'performance'];
+    const next = order[(order.indexOf(quality) + 1) % order.length];
+    setQuality(next);
+    stageRef.current?.setQualityLevel(next);
+  }, [quality]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -457,6 +467,8 @@ export default function NeonDriftGame({ onScoreUpdate, onGameOver, highScore }: 
     }
 
     const { scene, camera, renderer, isSoftwareGl } = stage;
+    stageRef.current = stage;
+    setQuality(stage.getQualityLevel());
     camera.position.set(0, 3.2, 5.8);
 
     stage.hemiLight.color.setHex(0x38bdf8);
@@ -826,6 +838,7 @@ export default function NeonDriftGame({ onScoreUpdate, onGameOver, highScore }: 
             scoreRef.current = nextScore;
             updateScoreRef.current(nextScore);
             audioController.playNearMiss();
+            haptics.trigger('light');
             screenShake.trigger('medium');
             stage.cameraRig.kickFov(3.5);
 
@@ -841,6 +854,7 @@ export default function NeonDriftGame({ onScoreUpdate, onGameOver, highScore }: 
 
           if (pState.invulnerableTimer <= 0 && dz < 2.5 && dx < 1.45) {
             audioController.playExplosion();
+            haptics.trigger('heavy');
             screenShake.trigger('heavy');
             stage.cameraRig.addTrauma(0.75);
             stage.particles.burst(pState.x, 0.7, 0, isSoftwareGl ? 10 : 30, 0xf97316, 8, 1.3, 12);
@@ -953,7 +967,7 @@ export default function NeonDriftGame({ onScoreUpdate, onGameOver, highScore }: 
           5.6 + (pState.isBoosting ? 0.8 : 0)
         );
         _camTarget.set(pState.x * 0.85, 1.1, -12);
-      } else if (activeMode === 'hood') {
+      } else if (activeMode === 'isometric') {
         _camPos.set(pState.x, 0.95, -0.6);
         _camTarget.set(pState.x + pState.driftAngle * 4, 0.85, -25);
       } else {
@@ -961,16 +975,17 @@ export default function NeonDriftGame({ onScoreUpdate, onGameOver, highScore }: 
         _camTarget.set(pState.x * 0.4, 0, -18);
       }
 
-      camera.position.lerp(_camPos, Math.min(1, 14 * delta));
-      stage.cameraRig.applyTraumaToCamera(camera, camera.position.clone(), delta, 0.48);
+      _dampedCamPos.copy(camera.position).lerp(_camPos, Math.min(1, 14 * delta));
+      stage.cameraRig.applyTraumaToCamera(camera, _dampedCamPos, delta, 0.48);
       camera.lookAt(_camTarget);
-      if (activeMode !== 'topdown') {
+      if (activeMode !== 'diorama') {
         camera.rotateZ(pState.camRoll);
       }
     });
 
     return () => {
       if (toastTimeout) clearTimeout(toastTimeout);
+      stageRef.current = null;
       roadTexture.dispose();
       wetMaps.dispose();
       stage.dispose();
@@ -1135,60 +1150,44 @@ export default function NeonDriftGame({ onScoreUpdate, onGameOver, highScore }: 
         </div>
       )}
 
-      {/* BOTTOM DOCK */}
-      <div className="absolute bottom-3 inset-x-3 flex flex-wrap items-end justify-between gap-2 pointer-events-none z-10 pb-[env(safe-area-inset-bottom)]">
-        <div className="bg-zinc-950/90 border border-zinc-800 px-3 py-2 sm:p-3 rounded-xl flex flex-wrap items-center gap-2.5 sm:gap-4 text-white tabular-nums">
-          <div className="flex items-center gap-1.5 sm:gap-2">
-            <Gauge className="w-4 h-4 sm:w-5 sm:h-5 text-cyan-400" />
-            <div>
-              <div className="text-[9px] sm:text-[10px] text-zinc-400 font-semibold uppercase">KECEPATAN</div>
-              <div className="text-sm sm:text-xl font-mono font-black text-white">
-                {speedKmh} <span className="text-[10px] sm:text-xs text-zinc-400 font-normal">KM/H</span>
-              </div>
+      {/* TELEMETRY & UNIFIED 3D DOCK */}
+      <ThreeDockOverlay
+        cameraPreset={cameraPreset}
+        onSelectPreset={setCameraPreset}
+        quality={quality}
+        onCycleQuality={cycleQuality}
+        presetLabels={{ chase: 'Chase 3D', isometric: 'Hood Cam', diorama: 'Top Down' }}
+        extraControls={
+          <div className="flex items-center gap-2.5 rounded-lg bg-slate-900 px-2.5 py-1.5 text-white tabular-nums border border-white/10">
+            <div className="flex items-center gap-1 text-xs font-mono font-bold">
+              <Gauge className="w-3.5 h-3.5 text-cyan-400" />
+              <span>{speedKmh}</span>
+              <span className="text-[10px] text-slate-400 font-normal">KM/H</span>
             </div>
-          </div>
-          <div className="hidden sm:block h-8 w-px bg-zinc-800" />
-          <div className="flex items-center gap-1.5 sm:gap-2">
-            <Zap className="w-4 h-4 sm:w-5 sm:h-5 text-amber-400" />
-            <div>
-              <div className="text-[9px] sm:text-[10px] text-zinc-400 font-semibold uppercase">NITRO</div>
-              <div className="w-16 sm:w-24 h-2 bg-zinc-800 rounded-full overflow-hidden mt-1">
+            <div className="h-3.5 w-px bg-white/10" />
+            <div className="flex items-center gap-1.5">
+              <Zap className="w-3.5 h-3.5 text-amber-400" />
+              <div className="w-12 sm:w-16 h-1.5 bg-slate-800 rounded-full overflow-hidden">
                 <div className="h-full bg-gradient-to-r from-amber-500 to-pink-500" style={{ width: `${nitro}%` }} />
               </div>
             </div>
-          </div>
-          <div className="hidden sm:block h-8 w-px bg-zinc-800" />
-          <div className="flex items-center gap-1.5 sm:gap-2">
-            <Shield className="w-4 h-4 sm:w-5 sm:h-5 text-emerald-400" />
-            <div>
-              <div className="text-[9px] sm:text-[10px] text-zinc-400 font-semibold uppercase">HULL</div>
-              <div className="flex items-center gap-1 mt-1">
+            <div className="h-3.5 w-px bg-white/10" />
+            <div className="flex items-center gap-1">
+              <Shield className="w-3.5 h-3.5 text-emerald-400" />
+              <div className="flex items-center gap-0.5">
                 {Array.from({ length: 4 }).map((_, i) => (
                   <div
                     key={i}
-                    className={`w-2.5 sm:w-3.5 h-2 rounded-sm ${
-                      i < shields ? 'bg-emerald-400 shadow-[0_0_8px_rgba(16,185,129,0.5)]' : 'bg-zinc-800'
+                    className={`w-2 h-1.5 rounded-sm ${
+                      i < shields ? 'bg-emerald-400 shadow-[0_0_6px_rgba(16,185,129,0.5)]' : 'bg-slate-800'
                     }`}
                   />
                 ))}
               </div>
             </div>
           </div>
-        </div>
-
-        <div className="pointer-events-auto flex items-center gap-2">
-          <button
-            onClick={() => {
-              audioController.playClick();
-              toggleCameraMode();
-            }}
-            className="px-3 min-h-[44px] sm:min-h-0 py-2.5 sm:p-3 bg-zinc-950/90 hover:bg-zinc-900 border border-zinc-800 text-zinc-300 hover:text-white rounded-xl transition-colors flex items-center gap-2 text-xs font-semibold cursor-pointer whitespace-nowrap"
-          >
-            <Eye className="w-4 h-4 text-cyan-400" />
-            <span className="hidden sm:inline">Kamera:</span> {cameraMode.toUpperCase()}
-          </button>
-        </div>
-      </div>
+        }
+      />
 
       <GameOverlay
         gameState={gameState}
@@ -1197,6 +1196,7 @@ export default function NeonDriftGame({ onScoreUpdate, onGameOver, highScore }: 
         countdown={countdown}
         onStart={handleStartGame}
         onRestart={handleStartGame}
+        onResume={resumeGame}
         gameTitle="NEON DRIFT 3D"
         instructions="Navigasi: A/D atau Panah Kiri/Kanan. Drift: SHIFT. Boost Nitro: SPASI / W."
       />

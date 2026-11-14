@@ -47,7 +47,11 @@ export const ThreeDockOverlay: React.FC<ThreeDockOverlayProps> = ({
     >
       <button
         type="button"
-        onClick={() => setCollapsed((c) => !c)}
+        onPointerDown={(e) => e.stopPropagation()}
+        onClick={(e) => {
+          e.stopPropagation();
+          setCollapsed((c) => !c);
+        }}
         className="pointer-events-auto mb-1 min-h-[44px] sm:min-h-0 flex items-center gap-1.5 rounded-t-lg border border-white/10 bg-slate-950/90 px-3 py-1 text-[11px] font-medium text-slate-300 transition-colors hover:bg-slate-900 hover:text-white whitespace-nowrap shrink-0"
         title="Sembunyikan atau tampilkan dock kontrol 3D (Shortcut: H)"
       >
@@ -56,7 +60,11 @@ export const ThreeDockOverlay: React.FC<ThreeDockOverlayProps> = ({
       </button>
 
       {!collapsed && (
-        <div className="pointer-events-auto flex flex-wrap items-center justify-center gap-2 rounded-xl border border-white/10 bg-slate-950/90 px-3.5 py-2 shadow-xl max-w-[94vw]">
+        <div
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={(e) => e.stopPropagation()}
+          className="pointer-events-auto flex flex-wrap items-center justify-center gap-2 rounded-xl border border-white/10 bg-slate-950/90 px-3.5 py-2 shadow-xl max-w-[94vw]"
+        >
           <div className="flex flex-wrap items-center gap-1 rounded-lg bg-slate-900 p-1">
             <span className="flex items-center gap-1 px-2 text-[11px] font-medium text-slate-400 whitespace-nowrap shrink-0">
               <Eye className="h-3.5 w-3.5 text-cyan-400" />

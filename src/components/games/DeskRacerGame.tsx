@@ -6,9 +6,12 @@ import { inputManager } from '../../services/inputService';
 import {
   ThreeStageController,
   createWetAsphaltMaps,
-  followDirectionalShadow
+  followDirectionalShadow,
+  type CameraPreset3D,
+  type QualityLevel3D
 } from '../../utils/threeStage';
 import { screenShake } from '../../utils/screenShake';
+import { ThreeDockOverlay } from '../gameplay/ThreeDockOverlay';
 import {
   DeskPowerUpType,
   TRACK_CONTROL_POINTS,
@@ -24,9 +27,6 @@ import {
   Flag,
   Gauge,
   RotateCcw,
-  Eye,
-  ChevronDown,
-  ChevronUp,
   Ghost,
   Zap,
   Play,
@@ -40,8 +40,6 @@ interface GameProps {
   onGameOver: (score: number) => void;
   highScore: number;
 }
-
-type CameraMode = 'chase' | 'hood' | 'overhead';
 
 interface GhostSample {
   timeMs: number;
@@ -77,6 +75,7 @@ const _tangent = new THREE.Vector3();
 const _right = new THREE.Vector3();
 const _up = new THREE.Vector3(0, 1, 0);
 const _camDesired = new THREE.Vector3();
+const _dampedCamPos = new THREE.Vector3();
 const _camLook = new THREE.Vector3();
 const _hoodOffset = new THREE.Vector3(0, 0.82, 0);
 const _overheadOffset = new THREE.Vector3(0, 14, 6);
@@ -97,14 +96,14 @@ export default function DeskRacerGame({ onScoreUpdate, onGameOver, highScore }: 
     onGameOver
   });
 
-  const [cameraMode, setCameraMode] = useState<CameraMode>('chase');
+  const [cameraPreset, setCameraPreset] = useState<CameraPreset3D>('chase');
+  const [quality, setQuality] = useState<QualityLevel3D>('ultra');
   const [lap, setLap] = useState<number>(1);
   const [speedKmh, setSpeedKmh] = useState<number>(0);
   const [boostPct, setBoostPct] = useState<number>(100);
   const [currentLapMs, setCurrentLapMs] = useState<number>(0);
   const [bestLapMs, setBestLapMs] = useState<number | null>(null);
   const [ghostEnabled, setGhostEnabled] = useState<boolean>(true);
-  const [dockCollapsed, setDockCollapsed] = useState<boolean>(false);
   const [raceFinished, setRaceFinished] = useState<{
     totalTimeMs: number;
     bestLapMs: number;
@@ -118,7 +117,8 @@ export default function DeskRacerGame({ onScoreUpdate, onGameOver, highScore }: 
   const [comboMultiplier, setComboMultiplier] = useState<number>(1);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
-  const cameraModeRef = useRef<CameraMode>('chase');
+  const stageRef = useRef<ThreeStageController | null>(null);
+  const cameraModeRef = useRef<CameraPreset3D>('chase');
   const ghostEnabledRef = useRef<boolean>(true);
   const keysRef = useRef<{ up: boolean; down: boolean; left: boolean; right: boolean; boost: boolean }>({
     up: false,
@@ -131,8 +131,15 @@ export default function DeskRacerGame({ onScoreUpdate, onGameOver, highScore }: 
   const resetRaceFnRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
-    cameraModeRef.current = cameraMode;
-  }, [cameraMode]);
+    cameraModeRef.current = cameraPreset;
+  }, [cameraPreset]);
+
+  const cycleQuality = useCallback(() => {
+    const order: QualityLevel3D[] = ['ultra', 'balanced', 'performance'];
+    const next = order[(order.indexOf(quality) + 1) % order.length];
+    setQuality(next);
+    stageRef.current?.setQualityLevel(next);
+  }, [quality]);
 
   useEffect(() => {
     ghostEnabledRef.current = ghostEnabled;
@@ -185,6 +192,8 @@ export default function DeskRacerGame({ onScoreUpdate, onGameOver, highScore }: 
     }
 
     const { scene, camera, renderer, isSoftwareGl } = stage;
+    stageRef.current = stage;
+    setQuality(stage.getQualityLevel());
     camera.position.set(0, 2.4, 16.5);
 
     // Studio Desk Lighting + RGB Keyboard Backlight
@@ -533,7 +542,6 @@ export default function DeskRacerGame({ onScoreUpdate, onGameOver, highScore }: 
 
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.code === 'KeyR') resetRaceState();
-      if (e.code === 'KeyH') setDockCollapsed((p) => !p);
     };
 
     const unsubInput = inputManager.subscribe({
@@ -838,16 +846,16 @@ export default function DeskRacerGame({ onScoreUpdate, onGameOver, highScore }: 
         stage.cameraRig.updateDynamicFov(camera, 58, speedRatio + (isBoosting ? 0.25 : 0), dt, 10);
 
         const cMode = cameraModeRef.current;
-        if (cMode === 'hood') {
+        if (cMode === 'isometric') {
           _camDesired.copy(playerCar.position).add(_hoodOffset);
           _camLook.copy(playerCar.position).addScaledVector(_tangent, 8);
-          camera.position.lerp(_camDesired, 0.45);
-          stage.cameraRig.applyTraumaToCamera(camera, camera.position.clone(), dt, 0.28);
+          _dampedCamPos.copy(camera.position).lerp(_camDesired, 0.45);
+          stage.cameraRig.applyTraumaToCamera(camera, _dampedCamPos, dt, 0.28);
           camera.lookAt(_camLook);
-        } else if (cMode === 'overhead') {
+        } else if (cMode === 'diorama') {
           _camDesired.copy(playerCar.position).add(_overheadOffset);
-          camera.position.lerp(_camDesired, 0.15);
-          stage.cameraRig.applyTraumaToCamera(camera, camera.position.clone(), dt, 0.3);
+          _dampedCamPos.copy(camera.position).lerp(_camDesired, 0.15);
+          stage.cameraRig.applyTraumaToCamera(camera, _dampedCamPos, dt, 0.3);
           camera.lookAt(playerCar.position);
         } else {
           _camDesired
@@ -855,10 +863,12 @@ export default function DeskRacerGame({ onScoreUpdate, onGameOver, highScore }: 
             .addScaledVector(_tangent, -4.2)
             .add(_chaseOffset);
           _camLook.copy(playerCar.position).addScaledVector(_tangent, 5.5);
-          camera.position.x = THREE.MathUtils.damp(camera.position.x, _camDesired.x, 8, dt);
-          camera.position.y = THREE.MathUtils.damp(camera.position.y, _camDesired.y, 8, dt);
-          camera.position.z = THREE.MathUtils.damp(camera.position.z, _camDesired.z, 8, dt);
-          stage.cameraRig.applyTraumaToCamera(camera, camera.position.clone(), dt, 0.35);
+          _dampedCamPos.set(
+            THREE.MathUtils.damp(camera.position.x, _camDesired.x, 8, dt),
+            THREE.MathUtils.damp(camera.position.y, _camDesired.y, 8, dt),
+            THREE.MathUtils.damp(camera.position.z, _camDesired.z, 8, dt)
+          );
+          stage.cameraRig.applyTraumaToCamera(camera, _dampedCamPos, dt, 0.35);
           camera.lookAt(_camLook);
         }
 
@@ -889,6 +899,7 @@ export default function DeskRacerGame({ onScoreUpdate, onGameOver, highScore }: 
 
     return () => {
       if (toastTimer) clearTimeout(toastTimer);
+      stageRef.current = null;
       unsubInput();
       window.removeEventListener('keydown', onKeyDown);
       deskMaps.dispose();
@@ -1026,7 +1037,7 @@ export default function DeskRacerGame({ onScoreUpdate, onGameOver, highScore }: 
 
       {/* Mobile Touch Steering & Nitro Controls */}
       <div
-        className={`md:hidden absolute ${dockCollapsed ? 'bottom-12' : 'bottom-28'} inset-x-3 z-10 flex items-center justify-between gap-2 pointer-events-auto touch-none transition-all`}
+        className="md:hidden absolute bottom-24 inset-x-3 z-10 flex items-center justify-between gap-2 pointer-events-auto touch-none transition-all"
       >
         <div className="flex items-center gap-2">
           <button
@@ -1112,88 +1123,43 @@ export default function DeskRacerGame({ onScoreUpdate, onGameOver, highScore }: 
         </div>
       )}
 
-      {/* Unified Collapsible Bottom Dock */}
-      <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-10 w-[min(860px,95vw)] flex flex-col items-center pointer-events-auto pb-[env(safe-area-inset-bottom)]">
-        <button
-          onClick={() => setDockCollapsed((prev) => !prev)}
-          className="mb-1 px-3 min-h-[36px] sm:min-h-0 py-1 rounded-t-lg bg-zinc-950/90 border border-b-0 border-white/15 text-[11px] font-medium text-zinc-300 hover:text-white flex items-center gap-1 whitespace-nowrap transition-colors"
-        >
-          {dockCollapsed ? (
-            <>
-              <ChevronUp className="w-3.5 h-3.5" />
-              Tampilkan Kontrol (H)
-            </>
-          ) : (
-            <>
-              <ChevronDown className="w-3.5 h-3.5" />
-              Sembunyikan Kontrol (H)
-            </>
-          )}
-        </button>
-
-        {!dockCollapsed && (
-          <div className="w-full px-3 sm:px-4 py-2 rounded-2xl bg-zinc-950/95 border border-white/15 shadow-2xl flex flex-wrap items-center justify-between gap-2 sm:gap-3">
-            {/* Camera Switcher */}
-            <div className="flex items-center gap-1 bg-zinc-900 p-1 rounded-xl border border-white/5">
-              <Eye className="w-3.5 h-3.5 text-zinc-400 ml-1.5 mr-1 shrink-0" />
-              {(
-                [
-                  { id: 'chase', label: 'Chase' },
-                  { id: 'hood', label: 'Kokpit' },
-                  { id: 'overhead', label: 'Top' }
-                ] as { id: CameraMode; label: string }[]
-              ).map((c) => (
-                <button
-                  key={c.id}
-                  onClick={() => {
-                    audioController.playClick();
-                    setCameraMode(c.id);
-                  }}
-                  className={`px-2.5 min-h-[44px] sm:min-h-0 py-1.5 rounded-lg text-xs font-medium transition-colors whitespace-nowrap shrink-0 ${
-                    cameraMode === c.id
-                      ? 'bg-red-600 text-white'
-                      : 'text-zinc-400 hover:text-white'
-                  }`}
-                >
-                  {c.label}
-                </button>
-              ))}
-            </div>
-
-            {/* Controls Hint */}
-            <div className="hidden lg:flex items-center gap-2 text-xs text-zinc-400 whitespace-nowrap">
-              <span>Kemudi: WASD / Panah</span>
-              <span aria-hidden="true">·</span>
-              <span>Nitro Boost: Spasi</span>
-            </div>
-
-            {/* Ghost & Reset Actions */}
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => {
-                  audioController.playClick();
-                  setGhostEnabled((g) => !g);
-                }}
-                className={`px-3 min-h-[44px] sm:min-h-0 py-1.5 rounded-xl text-xs font-medium border flex items-center gap-1.5 whitespace-nowrap shrink-0 transition-colors ${
-                  ghostEnabled
-                    ? 'bg-cyan-500/20 text-cyan-300 border-cyan-500/30'
-                    : 'bg-zinc-900 text-zinc-400 border-white/10'
-                }`}
-              >
-                <Ghost className="w-3.5 h-3.5" />
-                {ghostEnabled ? 'Ghost: On' : 'Ghost: Off'}
-              </button>
-              <button
-                onClick={handleRestartRace}
-                className="px-3 min-h-[44px] sm:min-h-0 py-1.5 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-xs font-medium text-zinc-200 border border-white/10 flex items-center gap-1.5 whitespace-nowrap shrink-0 transition-colors"
-              >
-                <RotateCcw className="w-3.5 h-3.5" />
-                Ulang
-              </button>
-            </div>
+      <ThreeDockOverlay
+        cameraPreset={cameraPreset}
+        onSelectPreset={(preset) => {
+          audioController.playClick();
+          setCameraPreset(preset);
+        }}
+        quality={quality}
+        onCycleQuality={cycleQuality}
+        presetLabels={{ chase: 'Chase', isometric: 'Kokpit', diorama: 'Top' }}
+        extraControls={
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                audioController.playClick();
+                setGhostEnabled((g) => !g);
+              }}
+              className={`px-3 min-h-[44px] sm:min-h-0 py-1.5 rounded-lg text-xs font-medium border flex items-center gap-1.5 whitespace-nowrap shrink-0 transition-colors ${
+                ghostEnabled
+                  ? 'bg-cyan-500/20 text-cyan-300 border-cyan-500/30'
+                  : 'bg-slate-900 text-slate-400 border-white/10'
+              }`}
+            >
+              <Ghost className="w-3.5 h-3.5" />
+              {ghostEnabled ? 'Ghost: On' : 'Ghost: Off'}
+            </button>
+            <button
+              type="button"
+              onClick={handleRestartRace}
+              className="px-3 min-h-[44px] sm:min-h-0 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-xs font-medium text-slate-200 border border-white/10 flex items-center gap-1.5 whitespace-nowrap shrink-0 transition-colors"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+              Ulang
+            </button>
           </div>
-        )}
-      </div>
+        }
+      />
     </div>
   );
 }
