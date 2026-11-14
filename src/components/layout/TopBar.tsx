@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Gamepad2, PanelLeft, Sparkles, Store, Sun, Moon } from 'lucide-react';
+import { Gamepad2, PanelLeft, Sun, Moon, CloudOff, Cloud } from 'lucide-react';
 import { useGameContext } from '../../contexts/GameContext';
+import { useAuth } from '../../contexts/AuthContext';
 import { formatNumber } from '../../utils/format';
 import { audio } from '../../utils/audio';
 
@@ -18,6 +19,7 @@ export const TopBar: React.FC<TopBarProps> = ({
 }) => {
   const navigate = useNavigate();
   const { profile, theme, toggleTheme } = useGameContext();
+  const { isFirebaseUser } = useAuth();
   const [systemTime, setSystemTime] = useState<string>(() => {
     return new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
   });
@@ -62,12 +64,24 @@ export const TopBar: React.FC<TopBarProps> = ({
             </button>
           )}
 
-          <div className="flex items-center gap-2 text-xs text-text-secondary font-medium">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block shrink-0" />
-            <span className="text-text-secondary">Server Ready</span>
-            <span className="text-text-muted">•</span>
-            <span className="text-text-secondary font-mono text-[11px]">{systemTime}</span>
-          </div>
+          {isFirebaseUser ? (
+            <div className="flex items-center gap-2 text-xs text-text-secondary font-medium">
+              <Cloud size={13} className="text-emerald-400 shrink-0" />
+              <span className="text-emerald-400 font-semibold">Cloud Sync Aktif</span>
+              <span className="text-text-muted">•</span>
+              <span className="text-text-secondary font-mono text-[11px]">{systemTime}</span>
+            </div>
+          ) : (
+            <button
+              onClick={() => navigate('/profile')}
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-500/10 hover:bg-amber-500/15 border border-amber-500/25 text-amber-400 text-[11px] font-mono transition cursor-pointer"
+              title="Mode Tamu Offline — Ranked leaderboard dan sinkronisasi dompet cloud memerlukan login"
+            >
+              <CloudOff size={12} className="shrink-0" />
+              <span className="font-bold">Mode Tamu Offline</span>
+              <span className="hidden lg:inline text-amber-300/80">• Masuk untuk Ranked & Cloud Wallet</span>
+            </button>
+          )}
         </div>
       </div>
 

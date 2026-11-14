@@ -11,7 +11,7 @@ import {
   StoredEconomyTransaction,
   TransactionType
 } from './db';
-import { isValidIdempotencyKey, getProcessedAction, setProcessedAction } from './idempotency';
+import { isValidIdempotencyKey, getProcessedAction } from './idempotency';
 
 export type { TransactionType, StoredEconomy, StoredEconomyTransaction };
 
@@ -63,7 +63,6 @@ export function buildDoubleEntryLedgerEntry(params: {
     createdAt: params.createdAt
   };
 }
-
 
 export async function getUserEconomy(userId: string): Promise<StoredEconomy> {
   assertPersistenceOperational();
@@ -119,30 +118,32 @@ export async function executeShopPurchase(
     throw ApiError.badRequest('Kunci idempotency tidak valid.', 'INVALID_IDEMPOTENCY_KEY');
   }
 
-  // Check idempotency cache first
-  const existing = await getProcessedAction(`buy_${userId}_${idempotencyKey}`);
-  if (existing) {
-    return existing;
-  }
-
   // Authoritative catalog check
   const catalogItem = getAuthoritativeCatalogItem(itemId);
   if (!catalogItem) {
     throw ApiError.notFound(`Item ${itemId} tidak ditemukan dalam katalog toko.`, 'ITEM_NOT_FOUND');
   }
 
+  const actionKey = `buy_${userId}_${idempotencyKey}`;
   const transactionId = `tx_${Date.now()}_${crypto.randomBytes(8).toString('hex')}`;
-  const nowIso = new Date().toISOString();
+  const nowMs = Date.now();
+  const nowIso = new Date(nowMs).toISOString();
 
   if (isFirestoreAvailable()) {
     const db = getDb();
     const ecoRef = db.collection('userEconomy').doc(userId);
     const itemRef = db.collection('userInventory').doc(userId).collection('items').doc(catalogItem.id);
     const ledgerRef = db.collection('economyTransactions').doc(transactionId);
-    const actionRef = db.collection('processedActions').doc(`buy_${userId}_${idempotencyKey}`);
+    const actionRef = db.collection('processedActions').doc(actionKey);
 
     return await db.runTransaction(async (tx) => {
-      // 1. Check duplicate purchase for non-stackables
+      // 1. Atomic Idempotency Check inside transaction
+      const actionDoc = await tx.get(actionRef);
+      if (actionDoc.exists) {
+        return actionDoc.data()?.result;
+      }
+
+      // 2. Check duplicate purchase for non-stackables
       if (!catalogItem.stackable) {
         const itemDoc = await tx.get(itemRef);
         if (itemDoc.exists) {
@@ -150,27 +151,33 @@ export async function executeShopPurchase(
         }
       }
 
-      // 2. Check user balance
+      // 3. Check user balance (bootstrap starter balance atomically if doc does not exist yet)
       const ecoDoc = await tx.get(ecoRef);
-      if (!ecoDoc.exists) {
-        throw new ApiError(400, 'INSUFFICIENT_FUNDS', 'Saldo koin tidak mencukupi.');
-      }
-      const ecoData = ecoDoc.data() as StoredEconomy;
+      const ecoData: StoredEconomy = ecoDoc.exists
+        ? (ecoDoc.data() as StoredEconomy)
+        : {
+            userId,
+            coins: ECONOMY_BALANCE_CONFIG.starterCoins,
+            totalEarned: ECONOMY_BALANCE_CONFIG.starterCoins,
+            totalSpent: 0,
+            lastUpdated: nowMs
+          };
+
       if (ecoData.coins < catalogItem.cost) {
         throw new ApiError(400, 'INSUFFICIENT_FUNDS', 'Saldo koin tidak mencukupi untuk membeli item ini.');
       }
 
-      // 3. Debit balance
+      // 4. Debit balance atomically
       const updatedEco: StoredEconomy = {
         userId,
         coins: ecoData.coins - catalogItem.cost,
         totalEarned: ecoData.totalEarned,
         totalSpent: ecoData.totalSpent + catalogItem.cost,
-        lastUpdated: Date.now()
+        lastUpdated: nowMs
       };
       tx.set(ecoRef, updatedEco);
 
-      // 4. Record item ownership
+      // 5. Record item ownership
       tx.set(itemRef, {
         itemId: catalogItem.id,
         name: catalogItem.name,
@@ -179,7 +186,7 @@ export async function executeShopPurchase(
         purchasedAt: nowIso
       });
 
-      // 5. Record immutable double-entry ledger
+      // 6. Record immutable double-entry ledger
       const ledgerEntry = buildDoubleEntryLedgerEntry({
         transactionId,
         userId,
@@ -202,13 +209,17 @@ export async function executeShopPurchase(
         transactionId
       };
 
-      // 6. Record idempotency
-      tx.set(actionRef, { result, timestamp: Date.now() });
+      // 7. Record idempotency inside transaction
+      tx.set(actionRef, { result, timestamp: nowMs });
 
       return result;
     });
   } else {
-    // Memory store transaction equivalent
+    const existing = await getProcessedAction(actionKey);
+    if (existing) {
+      return existing;
+    }
+
     const userItems = memoryStore.inventory.get(userId) || new Set<string>();
     if (!catalogItem.stackable && userItems.has(catalogItem.id)) {
       throw new ApiError(400, 'ITEM_ALREADY_OWNED', 'Item ini sudah Anda miliki.');
@@ -222,7 +233,7 @@ export async function executeShopPurchase(
     const balanceBefore = currentEco.coins;
     currentEco.coins -= catalogItem.cost;
     currentEco.totalSpent += catalogItem.cost;
-    currentEco.lastUpdated = Date.now();
+    currentEco.lastUpdated = nowMs;
     memoryStore.economies.set(userId, currentEco);
 
     userItems.add(catalogItem.id);
@@ -250,7 +261,7 @@ export async function executeShopPurchase(
       transactionId
     };
 
-    memoryStore.processedActions.set(`buy_${userId}_${idempotencyKey}`, { result, timestamp: Date.now() });
+    memoryStore.processedActions.set(actionKey, { result, timestamp: nowMs });
     return result;
   }
 }
@@ -286,14 +297,22 @@ export async function getSpinCooldown(userId: string): Promise<{ canSpin: boolea
   }
 }
 
-export async function executeDailySpin(userId: string): Promise<{
+export async function executeDailySpin(userId: string, idempotencyKey?: string): Promise<{
   success: boolean;
   prize: number;
   newCoinBalance: number;
   transactionId: string;
 }> {
   assertPersistenceOperational();
-  const todayStr = new Date().toISOString().split('T')[0];
+  const nowMs = Date.now();
+  const todayStr = new Date(nowMs).toISOString().split('T')[0];
+  const nowIso = new Date(nowMs).toISOString();
+
+  if (idempotencyKey !== undefined && !isValidIdempotencyKey(idempotencyKey)) {
+    throw ApiError.badRequest('Kunci idempotency putaran harian tidak valid.', 'INVALID_IDEMPOTENCY_KEY');
+  }
+
+  const actionKey = idempotencyKey ? `spin_${userId}_${idempotencyKey}` : null;
   const totalWeight = DAILY_SPIN_PRIZES.reduce((acc, p) => acc + p.weight, 0);
 
   // Secure Cryptographic RNG (crypto.randomInt)
@@ -308,48 +327,58 @@ export async function executeDailySpin(userId: string): Promise<{
     }
   }
 
-  const transactionId = `tx_${Date.now()}_${crypto.randomBytes(8).toString('hex')}`;
-  const nowIso = new Date().toISOString();
+  const transactionId = `tx_${nowMs}_${crypto.randomBytes(8).toString('hex')}`;
 
   if (isFirestoreAvailable()) {
     const db = getDb();
     const cooldownRef = db.collection('spinCooldowns').doc(userId);
     const ecoRef = db.collection('userEconomy').doc(userId);
     const ledgerRef = db.collection('economyTransactions').doc(transactionId);
+    const actionRef = actionKey ? db.collection('processedActions').doc(actionKey) : null;
 
     return await db.runTransaction(async (tx) => {
-      // Atomic cooldown verification
+      if (actionRef) {
+        const actionDoc = await tx.get(actionRef);
+        if (actionDoc.exists) {
+          return actionDoc.data()?.result;
+        }
+      }
+
+      // Atomic server-side cooldown verification
       const cdDoc = await tx.get(cooldownRef);
       if (cdDoc.exists && cdDoc.data()?.lastSpinDate === todayStr) {
         throw new ApiError(429, 'SPIN_COOLDOWN', 'Putaran harian sudah digunakan hari ini. Silakan kembali besok.');
       }
 
-      // Read current economy
+      // Read current economy inside transaction
       const ecoDoc = await tx.get(ecoRef);
       const current: StoredEconomy = ecoDoc.exists
         ? (ecoDoc.data() as StoredEconomy)
-        : { userId, coins: ECONOMY_BALANCE_CONFIG.starterCoins, totalEarned: ECONOMY_BALANCE_CONFIG.starterCoins, totalSpent: 0, lastUpdated: Date.now() };
+        : {
+            userId,
+            coins: ECONOMY_BALANCE_CONFIG.starterCoins,
+            totalEarned: ECONOMY_BALANCE_CONFIG.starterCoins,
+            totalSpent: 0,
+            lastUpdated: nowMs
+          };
 
       const updatedEco: StoredEconomy = {
         userId,
         coins: current.coins + selectedPrize,
         totalEarned: current.totalEarned + selectedPrize,
         totalSpent: current.totalSpent,
-        lastUpdated: Date.now()
+        lastUpdated: nowMs
       };
 
-      // Set cooldown atomically
       tx.set(cooldownRef, {
         userId,
         lastSpinDate: todayStr,
-        updatedAt: Date.now()
+        updatedAt: nowMs
       });
 
-      // Update economy atomically
       tx.set(ecoRef, updatedEco);
 
-      // Record transaction ledger
-      const ledgerEntry: StoredEconomyTransaction = {
+      const ledgerEntry = buildDoubleEntryLedgerEntry({
         transactionId,
         userId,
         type: 'DAILY_SPIN',
@@ -359,18 +388,28 @@ export async function executeDailySpin(userId: string): Promise<{
         reason: 'DAILY_SPIN_WHEEL',
         referenceId: todayStr,
         createdAt: nowIso
-      };
+      });
       tx.set(ledgerRef, ledgerEntry);
 
-      return {
+      const result = {
         success: true,
         prize: selectedPrize,
         newCoinBalance: updatedEco.coins,
         transactionId
       };
+
+      if (actionRef) {
+        tx.set(actionRef, { result, timestamp: nowMs });
+      }
+
+      return result;
     });
   } else {
-    // In-memory atomic check
+    if (actionKey) {
+      const cached = await getProcessedAction(actionKey);
+      if (cached) return cached;
+    }
+
     const existing = memoryStore.spins.get(userId);
     if (existing && existing.lastSpinDate === todayStr) {
       throw new ApiError(429, 'SPIN_COOLDOWN', 'Putaran harian sudah digunakan hari ini. Silakan kembali besok.');
@@ -379,14 +418,14 @@ export async function executeDailySpin(userId: string): Promise<{
     memoryStore.spins.set(userId, {
       lastSpinDate: todayStr,
       count: (existing?.count || 0) + 1,
-      updatedAt: Date.now()
+      updatedAt: nowMs
     });
 
     const currentEco = await getUserEconomy(userId);
     const balanceBefore = currentEco.coins;
     currentEco.coins += selectedPrize;
     currentEco.totalEarned += selectedPrize;
-    currentEco.lastUpdated = Date.now();
+    currentEco.lastUpdated = nowMs;
     memoryStore.economies.set(userId, currentEco);
 
     const ledgerEntry = buildDoubleEntryLedgerEntry({
@@ -402,12 +441,18 @@ export async function executeDailySpin(userId: string): Promise<{
     });
     memoryStore.ledger.push(ledgerEntry);
 
-    return {
+    const result = {
       success: true,
       prize: selectedPrize,
       newCoinBalance: currentEco.coins,
       transactionId
     };
+
+    if (actionKey) {
+      memoryStore.processedActions.set(actionKey, { result, timestamp: nowMs });
+    }
+
+    return result;
   }
 }
 
@@ -426,7 +471,6 @@ export async function executeGamble(
 }> {
   assertPersistenceOperational();
 
-  // STRICT NUMERIC SAFETY AUDIT (Priority 14, 16 & 17)
   if (
     typeof bet !== 'number' ||
     !Number.isInteger(bet) ||
@@ -443,9 +487,6 @@ export async function executeGamble(
     throw ApiError.badRequest('Kunci idempotency valid wajib disertakan untuk taruhan.', 'INVALID_IDEMPOTENCY_KEY');
   }
 
-  const existing = await getProcessedAction(`gamble_${userId}_${idempotencyKey}`);
-  if (existing) return existing;
-
   const validBets = ECONOMY_BALANCE_CONFIG.gamble.validBets;
   if (!validBets.includes(bet)) {
     throw ApiError.badRequest('Nilai taruhan koin harus salah satu dari pilihan yang tersedia.', 'INVALID_BET_AMOUNT');
@@ -455,27 +496,38 @@ export async function executeGamble(
     throw ApiError.badRequest('Pilihan lempar koin harus "heads" atau "tails".', 'INVALID_CHOICE');
   }
 
-  // Cryptographically secure RNG with custom configured probability
+  const actionKey = `gamble_${userId}_${idempotencyKey}`;
   const randNum = crypto.randomInt(0, 100);
   const isWin = randNum < (ECONOMY_BALANCE_CONFIG.gamble.winProbability * 100);
   const outcomeSide: 'heads' | 'tails' = isWin ? choice : (choice === 'heads' ? 'tails' : 'heads');
   const change = isWin ? bet : -bet;
-  const transactionId = `tx_${Date.now()}_${crypto.randomBytes(8).toString('hex')}`;
-  const nowIso = new Date().toISOString();
-
-  let remainingCoins = 0;
+  const nowMs = Date.now();
+  const transactionId = `tx_${nowMs}_${crypto.randomBytes(8).toString('hex')}`;
+  const nowIso = new Date(nowMs).toISOString();
 
   if (isFirestoreAvailable()) {
     const db = getDb();
     const ecoRef = db.collection('userEconomy').doc(userId);
     const ledgerRef = db.collection('economyTransactions').doc(transactionId);
+    const actionRef = db.collection('processedActions').doc(actionKey);
 
-    await db.runTransaction(async (tx) => {
-      const ecoDoc = await tx.get(ecoRef);
-      if (!ecoDoc.exists) {
-        throw new ApiError(400, 'INSUFFICIENT_FUNDS', 'Saldo koin tidak mencukupi.');
+    return await db.runTransaction(async (tx) => {
+      const actionDoc = await tx.get(actionRef);
+      if (actionDoc.exists) {
+        return actionDoc.data()?.result;
       }
-      const current = ecoDoc.data() as StoredEconomy;
+
+      const ecoDoc = await tx.get(ecoRef);
+      const current: StoredEconomy = ecoDoc.exists
+        ? (ecoDoc.data() as StoredEconomy)
+        : {
+            userId,
+            coins: ECONOMY_BALANCE_CONFIG.starterCoins,
+            totalEarned: ECONOMY_BALANCE_CONFIG.starterCoins,
+            totalSpent: 0,
+            lastUpdated: nowMs
+          };
+
       if (current.coins < bet) {
         throw new ApiError(400, 'INSUFFICIENT_FUNDS', 'Saldo koin tidak mencukupi untuk bertaruh.');
       }
@@ -486,12 +538,12 @@ export async function executeGamble(
         coins: updatedCoins,
         totalEarned: isWin ? current.totalEarned + bet : current.totalEarned,
         totalSpent: !isWin ? current.totalSpent + bet : current.totalSpent,
-        lastUpdated: Date.now()
+        lastUpdated: nowMs
       };
 
       tx.set(ecoRef, updatedEco);
 
-      const ledgerEntry: StoredEconomyTransaction = {
+      const ledgerEntry = buildDoubleEntryLedgerEntry({
         transactionId,
         userId,
         type: isWin ? 'QUEST_REWARD' : 'PURCHASE',
@@ -501,12 +553,25 @@ export async function executeGamble(
         reason: isWin ? `GAMBLE_WIN_${bet}` : `GAMBLE_LOSS_${bet}`,
         referenceId: choice,
         createdAt: nowIso
-      };
+      });
       tx.set(ledgerRef, ledgerEntry);
 
-      remainingCoins = updatedCoins;
+      const result = {
+        success: true,
+        won: isWin,
+        outcomeSide,
+        remainingCoins: updatedCoins,
+        changeCoins: change,
+        transactionId
+      };
+
+      tx.set(actionRef, { result, timestamp: nowMs });
+      return result;
     });
   } else {
+    const existing = await getProcessedAction(actionKey);
+    if (existing) return existing;
+
     const current = await getUserEconomy(userId);
     if (current.coins < bet) {
       throw new ApiError(400, 'INSUFFICIENT_FUNDS', 'Saldo koin tidak mencukupi untuk bertaruh.');
@@ -519,7 +584,7 @@ export async function executeGamble(
     } else {
       current.totalSpent += bet;
     }
-    current.lastUpdated = Date.now();
+    current.lastUpdated = nowMs;
     memoryStore.economies.set(userId, current);
 
     const ledgerEntry = buildDoubleEntryLedgerEntry({
@@ -534,23 +599,19 @@ export async function executeGamble(
       createdAt: nowIso
     });
     memoryStore.ledger.push(ledgerEntry);
-    remainingCoins = current.coins;
+
+    const result = {
+      success: true,
+      won: isWin,
+      outcomeSide,
+      remainingCoins: current.coins,
+      changeCoins: change,
+      transactionId
+    };
+
+    memoryStore.processedActions.set(actionKey, { result, timestamp: nowMs });
+    return result;
   }
-
-  const result = {
-    success: true,
-    won: isWin,
-    outcomeSide,
-    remainingCoins,
-    changeCoins: change,
-    transactionId
-  };
-
-  if (idempotencyKey) {
-    await setProcessedAction(`gamble_${userId}_${idempotencyKey}`, result);
-  }
-
-  return result;
 }
 
 export const GACHA_CATALOG_ITEMS = [
@@ -583,39 +644,43 @@ export async function executeGacha(
     throw ApiError.badRequest('Kunci idempotency valid wajib disertakan untuk gacha.', 'INVALID_IDEMPOTENCY_KEY');
   }
 
-  const existing = await getProcessedAction(`gacha_${userId}_${idempotencyKey}`);
-  if (existing) return existing;
-
-  // Secure random item selection
+  const actionKey = `gacha_${userId}_${idempotencyKey}`;
   const randIdx = crypto.randomInt(0, GACHA_CATALOG_ITEMS.length);
   const picked = GACHA_CATALOG_ITEMS[randIdx];
-  const transactionId = `tx_${Date.now()}_${crypto.randomBytes(8).toString('hex')}`;
-  const nowIso = new Date().toISOString();
-
-  let remainingCoins = 0;
-  let isDuplicate = false;
+  const nowMs = Date.now();
+  const transactionId = `tx_${nowMs}_${crypto.randomBytes(8).toString('hex')}`;
+  const nowIso = new Date(nowMs).toISOString();
 
   if (isFirestoreAvailable()) {
     const db = getDb();
     const ecoRef = db.collection('userEconomy').doc(userId);
     const itemRef = db.collection('userInventory').doc(userId).collection('items').doc(picked.id);
     const ledgerRef = db.collection('economyTransactions').doc(transactionId);
+    const actionRef = db.collection('processedActions').doc(actionKey);
 
-    await db.runTransaction(async (tx) => {
-      const ecoDoc = await tx.get(ecoRef);
-      if (!ecoDoc.exists) {
-        throw new ApiError(400, 'INSUFFICIENT_FUNDS', 'Saldo koin tidak mencukupi.');
+    return await db.runTransaction(async (tx) => {
+      const actionDoc = await tx.get(actionRef);
+      if (actionDoc.exists) {
+        return actionDoc.data()?.result;
       }
-      const current = ecoDoc.data() as StoredEconomy;
+
+      const ecoDoc = await tx.get(ecoRef);
+      const current: StoredEconomy = ecoDoc.exists
+        ? (ecoDoc.data() as StoredEconomy)
+        : {
+            userId,
+            coins: ECONOMY_BALANCE_CONFIG.starterCoins,
+            totalEarned: ECONOMY_BALANCE_CONFIG.starterCoins,
+            totalSpent: 0,
+            lastUpdated: nowMs
+          };
+
       if (current.coins < GACHA_COST) {
         throw new ApiError(400, 'INSUFFICIENT_FUNDS', `Saldo koin tidak mencukupi untuk menarik gacha (${GACHA_COST} koin diperlukan).`);
       }
 
-      // Check duplicate cosmetics
       const itemDoc = await tx.get(itemRef);
-      isDuplicate = itemDoc.exists;
-
-      // Duplicate pull refund conversion rule: refund 25 coins
+      const isDuplicate = itemDoc.exists;
       const refundCoins = isDuplicate ? ECONOMY_BALANCE_CONFIG.gachaDuplicateRefund : 0;
       const finalCoinDiff = -GACHA_COST + refundCoins;
 
@@ -624,7 +689,7 @@ export async function executeGacha(
         coins: current.coins + finalCoinDiff,
         totalEarned: current.totalEarned + refundCoins,
         totalSpent: current.totalSpent + GACHA_COST,
-        lastUpdated: Date.now()
+        lastUpdated: nowMs
       };
 
       tx.set(ecoRef, updatedEco);
@@ -639,7 +704,7 @@ export async function executeGacha(
         });
       }
 
-      const ledgerEntry: StoredEconomyTransaction = {
+      const ledgerEntry = buildDoubleEntryLedgerEntry({
         transactionId,
         userId,
         type: isDuplicate ? 'REFUND' : 'PURCHASE',
@@ -649,19 +714,32 @@ export async function executeGacha(
         reason: isDuplicate ? `GACHA_PULL_DUPLICATE_REFUND_${picked.id.toUpperCase()}` : `GACHA_PULL_${picked.id.toUpperCase()}`,
         referenceId: picked.id,
         createdAt: nowIso
-      };
+      });
       tx.set(ledgerRef, ledgerEntry);
 
-      remainingCoins = updatedEco.coins;
+      const result = {
+        success: true,
+        rewardId: picked.id,
+        item: picked,
+        remainingCoins: updatedEco.coins,
+        transactionId,
+        isDuplicate
+      };
+
+      tx.set(actionRef, { result, timestamp: nowMs });
+      return result;
     });
   } else {
+    const existing = await getProcessedAction(actionKey);
+    if (existing) return existing;
+
     const current = await getUserEconomy(userId);
     if (current.coins < GACHA_COST) {
       throw new ApiError(400, 'INSUFFICIENT_FUNDS', `Saldo koin tidak mencukupi untuk menarik gacha (${GACHA_COST} koin diperlukan).`);
     }
 
     const userItems = memoryStore.inventory.get(userId) || new Set<string>();
-    isDuplicate = userItems.has(picked.id);
+    const isDuplicate = userItems.has(picked.id);
 
     const refundCoins = isDuplicate ? ECONOMY_BALANCE_CONFIG.gachaDuplicateRefund : 0;
     const finalCoinDiff = -GACHA_COST + refundCoins;
@@ -670,7 +748,7 @@ export async function executeGacha(
     current.coins += finalCoinDiff;
     current.totalSpent += GACHA_COST;
     current.totalEarned += refundCoins;
-    current.lastUpdated = Date.now();
+    current.lastUpdated = nowMs;
     memoryStore.economies.set(userId, current);
 
     if (!isDuplicate) {
@@ -690,21 +768,17 @@ export async function executeGacha(
       createdAt: nowIso
     });
     memoryStore.ledger.push(ledgerEntry);
-    remainingCoins = current.coins;
+
+    const result = {
+      success: true,
+      rewardId: picked.id,
+      item: picked,
+      remainingCoins: current.coins,
+      transactionId,
+      isDuplicate
+    };
+
+    memoryStore.processedActions.set(actionKey, { result, timestamp: nowMs });
+    return result;
   }
-
-  const result = {
-    success: true,
-    rewardId: picked.id,
-    item: picked,
-    remainingCoins,
-    transactionId,
-    isDuplicate
-  };
-
-  if (idempotencyKey) {
-    await setProcessedAction(`gacha_${userId}_${idempotencyKey}`, result);
-  }
-
-  return result;
 }

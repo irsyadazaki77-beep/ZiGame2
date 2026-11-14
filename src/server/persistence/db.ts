@@ -1,3 +1,5 @@
+import fs from 'fs';
+import path from 'path';
 import { getApps } from 'firebase-admin/app';
 import { getFirestore, Firestore } from 'firebase-admin/firestore';
 import { serverLogger } from '../logger';
@@ -195,11 +197,32 @@ export class InMemoryStore {
 
 export const memoryStore = new InMemoryStore();
 
-import fs from 'fs';
-import firebaseAppletConfig from '../../../firebase-applet-config.json';
+interface LocalAppletConfig {
+  projectId?: string;
+  firestoreDatabaseId?: string;
+}
+
+function readLocalAppletConfig(): LocalAppletConfig {
+  const configPath = path.resolve(process.cwd(), 'firebase-applet-config.json');
+  if (!fs.existsSync(configPath)) return {};
+  try {
+    const parsed = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+    if (parsed?.projectId && String(parsed.projectId).includes('YOUR_FIREBASE_PROJECT_ID')) {
+      return {};
+    }
+    return parsed || {};
+  } catch {
+    return {};
+  }
+}
 
 let firestoreDevDisabled = false;
+let firestoreProdReachable = true;
 const configuredDbs = new WeakSet<Firestore>();
+
+function isMemoryModePermitted(): boolean {
+  return process.env.NODE_ENV === 'test' || process.env.NODE_ENV === 'development' || Boolean(process.env.VITEST);
+}
 
 function hasValidServiceAccountJson(raw: string | undefined): boolean {
   if (!raw || typeof raw !== 'string') return false;
@@ -232,24 +255,19 @@ export function isFirestoreAvailable(): boolean {
   if (process.env.NODE_ENV === 'test' || process.env.VITEST) return false;
   if (getApps().length === 0) return false;
 
-  if (process.env.NODE_ENV !== 'production') {
-    if (firestoreDevDisabled) return false;
-    const hasSa = hasValidServiceAccountJson(process.env.FIREBASE_SERVICE_ACCOUNT);
-    const hasGac = hasValidAdcFile(process.env.GOOGLE_APPLICATION_CREDENTIALS);
-    if (!hasSa && !hasGac) {
-      return false;
-    }
-  } else {
-    if (!process.env.FIREBASE_SERVICE_ACCOUNT && !process.env.GOOGLE_APPLICATION_CREDENTIALS) {
-      // Production can still use Cloud Run implicit ADC when app is initialized
-      return getApps().length > 0;
-    }
+  if (process.env.NODE_ENV === 'production') {
+    return firestoreProdReachable && getApps().length > 0;
   }
-  return true;
+
+  if (firestoreDevDisabled) return false;
+  const hasSa = hasValidServiceAccountJson(process.env.FIREBASE_SERVICE_ACCOUNT);
+  const hasGac = hasValidAdcFile(process.env.GOOGLE_APPLICATION_CREDENTIALS);
+  return hasSa || hasGac;
 }
 
 export function getDb(): Firestore {
-  const dbId = process.env.VITE_FIRESTORE_DATABASE_ID || firebaseAppletConfig.firestoreDatabaseId;
+  const localConfig = readLocalAppletConfig();
+  const dbId = process.env.FIRESTORE_DATABASE_ID || process.env.VITE_FIRESTORE_DATABASE_ID || localConfig.firestoreDatabaseId;
   const db = dbId && dbId !== '(default)'
     ? getFirestore(getApps()[0], dbId)
     : getFirestore();
@@ -267,10 +285,43 @@ export function getDb(): Firestore {
 }
 
 export async function probeFirestoreAvailability(timeoutMs: number = 3000): Promise<boolean> {
-  if (process.env.NODE_ENV === 'production' || process.env.NODE_ENV === 'test' || process.env.VITEST) {
-    return isFirestoreAvailable();
+  if (process.env.NODE_ENV === 'test' || process.env.VITEST) {
+    return false;
   }
+
+  if (process.env.NODE_ENV === 'production') {
+    if (getApps().length === 0) {
+      firestoreProdReachable = false;
+      serverLogger.fatal('PRODUCTION_FIREBASE_UNINITIALIZED', 'Firebase Admin SDK is not initialized in production.');
+      return false;
+    }
+    try {
+      const db = getDb();
+      await Promise.race([
+        db.collection('seasons').limit(1).get(),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('FIRESTORE_PROD_PROBE_TIMEOUT')), timeoutMs)
+        )
+      ]);
+      firestoreProdReachable = true;
+      return true;
+    } catch (err) {
+      firestoreProdReachable = false;
+      serverLogger.fatal(
+        'PRODUCTION_FIRESTORE_UNREACHABLE',
+        'Firestore connectivity probe failed in production; ephemeral memoryStore fallback is forbidden.',
+        err,
+        { errorMessage: err instanceof Error ? err.message : String(err) }
+      );
+      return false;
+    }
+  }
+
   if (!isFirestoreAvailable()) {
+    serverLogger.warn(
+      'PERSISTENCE_DEV_MEMORY',
+      'Development/Test mode: Firebase Admin credentials missing; using ephemeral InMemoryStore (never permitted in production).'
+    );
     return false;
   }
 
@@ -287,20 +338,23 @@ export async function probeFirestoreAvailability(timeoutMs: number = 3000): Prom
     firestoreDevDisabled = true;
     serverLogger.warn(
       'PERSISTENCE_DEV_FALLBACK',
-      'Firestore unreachable or lacks permissions in dev; falling back to InMemoryStore.',
+      'Firestore unreachable or lacks permissions in dev; falling back to ephemeral InMemoryStore.',
       { error: err instanceof Error ? err.message : String(err) }
     );
     return false;
   }
 }
 
-export function assertPersistenceOperational() {
-  if (process.env.NODE_ENV === 'production' && !isFirestoreAvailable()) {
-    if (process.env.ALLOW_IN_MEMORY_PROD === 'true') {
-      serverLogger.warn('PERSISTENCE_OVERRIDE', 'InMemoryStore fallback permitted in production via explicit ALLOW_IN_MEMORY_PROD=true flag.');
-      return;
-    }
-    serverLogger.security('FIREBASE_FAILURE', 'Database persistence unavailable in production: InMemoryStore prohibited without ALLOW_IN_MEMORY_PROD=true');
+export function assertPersistenceOperational(): void {
+  if (isFirestoreAvailable()) {
+    return;
+  }
+
+  if (!isMemoryModePermitted()) {
+    serverLogger.security(
+      'FIREBASE_FAILURE',
+      'Database persistence unavailable in production: ephemeral InMemoryStore fallback is strictly prohibited.'
+    );
     throw ApiError.serviceUnavailable('Database persistence service unavailable.');
   }
 }
@@ -313,27 +367,22 @@ export function getPersistenceHealthStatus(): { status: 'ok' | 'degraded' | 'una
     return { status: 'ok', persistence: 'firestore' };
   }
   if (process.env.NODE_ENV === 'production') {
-    if (process.env.ALLOW_IN_MEMORY_PROD === 'true') {
-      return { status: 'ok', persistence: 'degraded' };
-    }
-    return { status: 'degraded', persistence: 'unavailable' };
+    return { status: 'unavailable', persistence: 'unavailable' };
   }
   return { status: 'ok', persistence: 'degraded' };
 }
 
 export function isPersistenceReady(): boolean {
   if (process.env.NODE_ENV === 'production') {
-    if (process.env.ALLOW_IN_MEMORY_PROD === 'true') {
-      return true;
-    }
     return isFirestoreAvailable();
   }
-  return true;
+  return isMemoryModePermitted();
 }
 
 // Explicit environment notification for persistence store
-if (process.env.NODE_ENV !== 'production' && !process.env.VITEST && process.env.NODE_ENV !== 'test') {
-  serverLogger.info('PERSISTENCE_DEV', 'Running in development mode: utilizing InMemoryStore adapter with stateful cache.');
-} else if (process.env.NODE_ENV === 'production' && process.env.ALLOW_IN_MEMORY_PROD === 'true') {
-  serverLogger.warn('PERSISTENCE_PROD_OVERRIDE', 'Production running with InMemoryStore override (ALLOW_IN_MEMORY_PROD=true).');
+if (process.env.NODE_ENV === 'development' && !process.env.VITEST) {
+  serverLogger.warn(
+    'PERSISTENCE_DEV_NOTICE',
+    'Running in development mode: InMemoryStore fallback is permitted if Firestore is unconfigured or unreachable.'
+  );
 }

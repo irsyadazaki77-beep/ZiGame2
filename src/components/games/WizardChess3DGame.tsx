@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import { useGameEngine } from '../../hooks/useGameEngine';
+import { useGameEngine } from '../../sdk';
 import { disposeThreeScene } from '../../utils/threeCleanup';
 import { audio } from '../../utils/audio';
 import { screenShake } from '../../utils/screenShake';
@@ -620,7 +620,9 @@ export default function WizardChess3DGame({ onScoreUpdate, onGameOver, highScore
     triggerGameOver,
     setGameState,
     gameState,
-    gameStateRef
+    gameStateRef,
+    startLoop,
+    stopLoop
   } = useGameEngine({
     gameId: 'wizard-chess',
     onScoreUpdate,
@@ -838,9 +840,10 @@ export default function WizardChess3DGame({ onScoreUpdate, onGameOver, highScore
     controls.minDistance = 4.5;
     controls.maxDistance = 16;
     controls.target.set(0, 0.2, 0);
-    controls.addEventListener('start', () => {
+    const onControlsStart = () => {
       activeCameraTransitionRef.current = false;
-    });
+    };
+    controls.addEventListener('start', onControlsStart);
 
     const hemiLight = new THREE.HemisphereLight(0xfde68a, 0x1e293b, 0.65);
     scene.add(hemiLight);
@@ -1254,39 +1257,13 @@ export default function WizardChess3DGame({ onScoreUpdate, onGameOver, highScore
       renderer.compile(scene, camera);
     }
 
-    const clock = new THREE.Clock();
-    let frameId = 0;
     let isDisposed = false;
+    let swRenderAcc = 0;
+    let hasRenderedInitial = false;
 
-    function afterDraw(cb: () => void) {
-      const gl = renderer.getContext() as WebGL2RenderingContext;
-      if (!gl || !gl.fenceSync) {
-        frameId = window.setTimeout(cb, 80);
-        return;
-      }
-      const sync = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
-      gl.flush();
-      const poll = () => {
-        if (isDisposed) return;
-        const state = sync && gl.getSyncParameter(sync, gl.SYNC_STATUS);
-        if (state === gl.UNSIGNALED) {
-          frameId = window.setTimeout(poll, 5);
-        } else {
-          if (sync) gl.deleteSync(sync);
-          frameId = window.setTimeout(cb, 80);
-        }
-      };
-      frameId = window.setTimeout(poll, 5);
-    }
-
-    let fpsCounter = 0;
-    let fpsTimer = performance.now();
-
-    function tick() {
+    startLoop((_timestamp, deltaTimeMs) => {
       if (isDisposed) return;
-      const tickStart = performance.now();
-      const dt = Math.min(clock.getDelta(), 0.1);
-      const now = performance.now();
+      const dt = Math.min(deltaTimeMs / 1000, 0.05);
       const isPlaying = (gameStateRef.current as string)?.toLowerCase() === 'playing';
 
       if (isPlaying) {
@@ -1369,24 +1346,17 @@ export default function WizardChess3DGame({ onScoreUpdate, onGameOver, highScore
       }
 
       controls.update();
-      renderer.render(scene, camera);
-
-      // Record frame-time and FPS for adaptive performance
-      const frameElapsed = performance.now() - tickStart;
-      performanceService.recordFrameTime(frameElapsed);
-
-      fpsCounter++;
-      if (now - fpsTimer >= 1000) {
-        performanceService.recordFramePerformance(fpsCounter);
-        fpsCounter = 0;
-        fpsTimer = now;
+      if (!isSoftwareGl) {
+        renderer.render(scene, camera);
+      } else {
+        swRenderAcc += dt;
+        if (!hasRenderedInitial || swRenderAcc >= 0.06) {
+          hasRenderedInitial = true;
+          swRenderAcc = 0;
+          renderer.render(scene, camera);
+        }
       }
-
-      if (isSoftwareGl) afterDraw(tick);
-      else frameId = requestAnimationFrame(tick);
-    }
-
-    frameId = requestAnimationFrame(tick);
+    });
 
     const resizeObserver = new ResizeObserver((entries) => {
       for (const entry of entries) {
@@ -1401,11 +1371,11 @@ export default function WizardChess3DGame({ onScoreUpdate, onGameOver, highScore
 
     return () => {
       isDisposed = true;
-      cancelAnimationFrame(frameId);
-      clearTimeout(frameId);
+      stopLoop();
       unsubPerf();
       if (aiTimeoutRef.current) clearTimeout(aiTimeoutRef.current);
       resizeObserver.disconnect();
+      controls.removeEventListener('start', onControlsStart);
       renderer.domElement.removeEventListener('pointerdown', onPointerDown);
       renderer.domElement.removeEventListener('pointerup', onPointerUp);
       controls.dispose();
@@ -1413,7 +1383,7 @@ export default function WizardChess3DGame({ onScoreUpdate, onGameOver, highScore
       runeFrameTex.dispose();
       disposeThreeScene(scene, renderer);
     };
-  }, [triggerGameOver, updateScore]);
+  }, [gameStateRef, startLoop, stopLoop, triggerGameOver, updateScore]);
 
   const pieceSymbol = (t: PieceType) =>
     t === 'q' ? '♕' : t === 'r' ? '♖' : t === 'b' ? '♗' : t === 'n' ? '♘' : '♙';

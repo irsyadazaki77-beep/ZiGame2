@@ -1,4 +1,4 @@
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { PlayerProfile, GameStats, Achievement, DailyMission, RecentlyPlayedEntry, GameMastery } from '../types';
 import { useToast } from '../utils/ToastContext';
 import { usePlayerProfile } from '../hooks/usePlayerProfile';
@@ -70,7 +70,6 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     });
   }, []);
 
-  // Sync theme classes on start & state change
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
     if (theme === 'light') {
@@ -91,11 +90,16 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
   }, [profile.settings?.reducedMotion]);
 
   const { user, isFirebaseUser } = useAuth();
+  const hydratedCloudUidRef = useRef<string | null>(null);
 
   useEffect(() => {
-    if (!isFirebaseUser || !user?.uid) return;
+    if (!isFirebaseUser || !user?.uid) {
+      hydratedCloudUidRef.current = null;
+      return;
+    }
 
     let isCancelled = false;
+    hydratedCloudUidRef.current = null;
 
     async function syncOnAuth() {
       try {
@@ -112,45 +116,50 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
 
         if (isCancelled) return;
 
+        // Strictly authoritative cloud hydration: local guest coins/scores/inventory never overwrite Firestore
+        const authoritativeState = mergeUserData(
+          {
+            profile,
+            games: gameProgress.games,
+            achievements: gameProgress.achievements,
+            missions: gameProgress.dailyMissions,
+            recentlyPlayed: gameProgress.recentlyPlayed
+          },
+          cloudData || {}
+        );
+
+        const nextProfile: PlayerProfile = {
+          ...authoritativeState.profile,
+          name: cloudData?.profile?.name || user?.displayName || authoritativeState.profile.name,
+          coins: typeof authoritativeCoins === 'number'
+            ? authoritativeCoins
+            : authoritativeState.profile.coins
+        };
+
+        setProfile(nextProfile);
+        gameProgress.setGames(authoritativeState.games);
+        gameProgress.setAchievements(authoritativeState.achievements);
+        if (authoritativeState.missions.length > 0) {
+          gameProgress.setDailyMissions(authoritativeState.missions);
+        }
+        gameProgress.setRecentlyPlayed(authoritativeState.recentlyPlayed);
+
+        hydratedCloudUidRef.current = user?.uid || null;
+
         if (cloudData) {
-          const merged = mergeUserData(
-            {
-              profile,
-              games: gameProgress.games,
-              achievements: gameProgress.achievements,
-              missions: gameProgress.dailyMissions,
-              recentlyPlayed: gameProgress.recentlyPlayed
-            },
-            cloudData
-          );
-
-          const nextProfile =
-            typeof authoritativeCoins === 'number'
-              ? { ...merged.profile, coins: authoritativeCoins }
-              : merged.profile;
-
-          setProfile(nextProfile);
-          gameProgress.setGames(merged.games);
-          gameProgress.setAchievements(merged.achievements);
-          gameProgress.setDailyMissions(merged.missions);
-          gameProgress.setRecentlyPlayed(merged.recentlyPlayed);
-
-          showToast('Sinkronisasi Sukses', 'Data profil cloud berhasil dimuat.', 'success', '☁️');
+          showToast('Sinkronisasi Sukses', 'Data profil cloud berhasil dimuat (Server Authoritative).', 'success', '☁️');
         } else {
-          if (typeof authoritativeCoins === 'number') {
-            setProfile(prev => ({ ...prev, coins: authoritativeCoins }));
-          }
-          await Promise.all([
-            syncDataToCloud(
-              profile,
-              gameProgress.games,
-              gameProgress.achievements,
-              gameProgress.dailyMissions,
-              gameProgress.recentlyPlayed
-            ).catch(err => {
-              console.error('Failed to upload initial data to cloud:', err);
-            })
-          ]);
+          // Initialize clean cloud record for first-time authenticated user without importing local guest wallet/scores
+          await syncDataToCloud(
+            nextProfile,
+            authoritativeState.games,
+            authoritativeState.achievements,
+            gameProgress.dailyMissions,
+            authoritativeState.recentlyPlayed
+          ).catch(err => {
+            console.error('Failed to upload initial cloud baseline:', err);
+          });
+          showToast('Akun Cloud Siap', 'Profil cloud baru diinisialisasi dengan saldo server.', 'success', '☁️');
         }
       } catch (err) {
         console.error('Unexpected error during syncOnAuth:', err);
@@ -165,19 +174,18 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
   }, [isFirebaseUser, user?.uid]);
 
   useEffect(() => {
-    if (isFirebaseUser && user?.uid) {
+    // Only sync to Firestore after authoritative cloud hydration has completed for the active user
+    if (isFirebaseUser && user?.uid && hydratedCloudUidRef.current === user.uid) {
       const timer = setTimeout(() => {
-        Promise.all([
-          syncDataToCloud(
-            profile,
-            gameProgress.games,
-            gameProgress.achievements,
-            gameProgress.dailyMissions,
-            gameProgress.recentlyPlayed
-          ).catch(err => {
-            console.error('Failed to sync user data to cloud:', err);
-          })
-        ]);
+        syncDataToCloud(
+          profile,
+          gameProgress.games,
+          gameProgress.achievements,
+          gameProgress.dailyMissions,
+          gameProgress.recentlyPlayed
+        ).catch(err => {
+          console.error('Failed to sync user data to cloud:', err);
+        });
       }, 3000);
       return () => clearTimeout(timer);
     }

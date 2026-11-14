@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { requireAdmin } from '../authMiddleware';
 import { serverLogger } from '../logger';
-import { sendApiError } from '../requestContext';
+import { sendApiError, handleServerException } from '../requestContext';
 import { requireCanonicalGameId } from '../../config/canonicalGames';
 import {
   getRealAdminStats,
@@ -42,7 +42,7 @@ adminRoutes.get('/admin/stats', requireAdmin, async (req: Request, res: Response
     return res.json(stats);
   } catch (err: unknown) {
     serverLogger.error('ADMIN_STATS_ERROR', 'Failed to get admin stats', err, undefined, req.user?.uid, req.ip, req.id);
-    return sendApiError(res, 500, 'INTERNAL_ERROR', 'Gagal memuat statistik admin.');
+    return handleServerException(err, req, res);
   }
 });
 
@@ -63,7 +63,7 @@ adminRoutes.get('/admin/suspicious-scores', requireAdmin, async (req: Request, r
     });
   } catch (err: unknown) {
     serverLogger.error('ADMIN_SUSPICIOUS_FETCH_ERROR', 'Failed to fetch suspicious scores', err, undefined, req.user?.uid, req.ip, req.id);
-    return sendApiError(res, 500, 'INTERNAL_ERROR', 'Gagal memuat daftar skor mencurigakan.');
+    return handleServerException(err, req, res);
   }
 });
 
@@ -85,7 +85,7 @@ adminRoutes.post(
       });
     } catch (err: unknown) {
       serverLogger.error('PURGE_SCORES_ERROR', 'Failed to purge suspect scores', err, undefined, req.user?.uid, req.ip, req.id);
-      return sendApiError(res, 500, 'INTERNAL_ERROR', 'Gagal membersihkan data skor mencurigakan.');
+      return handleServerException(err, req, res);
     }
   }
 );
@@ -134,7 +134,7 @@ adminRoutes.post(
       return res.json({ success: true, report });
     } catch (err: unknown) {
       serverLogger.error('ADMIN_RECONCILE_ERROR', 'Failed to reconcile user economy', err, undefined, req.user?.uid, req.ip, req.id);
-      return sendApiError(res, 500, 'INTERNAL_ERROR', 'Gagal merekonsiliasi data ekonomi user.');
+      return handleServerException(err, req, res);
     }
   }
 );
@@ -155,7 +155,7 @@ adminRoutes.post(
       return res.json({ success: true, report });
     } catch (err: unknown) {
       serverLogger.error('ADMIN_COMP_RECONCILE_ERROR', 'Failed to check competitive integrity', err, undefined, req.user?.uid, req.ip, req.id);
-      return sendApiError(res, 500, 'INTERNAL_ERROR', 'Gagal memeriksa integritas data kompetitif.');
+      return handleServerException(err, req, res);
     }
   }
 );
@@ -175,7 +175,7 @@ adminRoutes.get('/admin/security/bans', requireAdmin, async (req: Request, res: 
     });
   } catch (err: unknown) {
     serverLogger.error('ADMIN_SECURITY_BANS_ERROR', 'Failed to load flagged/banned users', err, undefined, req.user?.uid, req.ip, req.id);
-    return sendApiError(res, 500, 'INTERNAL_ERROR', 'Gagal memuat daftar pemblokiran keamanan.');
+    return handleServerException(err, req, res);
   }
 });
 
@@ -220,7 +220,7 @@ adminRoutes.post(
       });
     } catch (err: unknown) {
       serverLogger.error('ADMIN_BAN_ERROR', 'Failed to ban user account', err, undefined, req.user?.uid, req.ip, req.id);
-      return sendApiError(res, 500, 'INTERNAL_ERROR', 'Gagal membekukan akun pengguna.');
+      return handleServerException(err, req, res);
     }
   }
 );
@@ -245,7 +245,7 @@ adminRoutes.post(
       });
     } catch (err: unknown) {
       serverLogger.error('ADMIN_UNBAN_ERROR', 'Failed to unban user account', err, undefined, req.user?.uid, req.ip, req.id);
-      return sendApiError(res, 500, 'INTERNAL_ERROR', 'Gagal mencabut blokir akun pengguna.');
+      return handleServerException(err, req, res);
     }
   }
 );

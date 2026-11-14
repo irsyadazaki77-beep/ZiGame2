@@ -111,9 +111,16 @@ const result = {
   sharedEventDriven: [],
   modularArchitecture: [],
   legacy: [],
+  rawRafViolations: [],
+  listenerLeakViolations: [],
+  threeDisposeViolations: [],
   unregisteredFiles: [],
   missingRegistryTargets: [],
 };
+
+function stripComments(source) {
+  return source.replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, '');
+}
 
 // Analyze all discovered games (root entry files + modular directories)
 const analyzedEntries = new Set([...rootGameFiles, ...modularGames.keys()]);
@@ -126,6 +133,7 @@ Array.from(analyzedEntries)
 
     const entryContent = fs.readFileSync(entryFullPath, 'utf8');
     const modInfo = modularGames.get(entryRelPath);
+    const allFiles = modInfo ? [entryFullPath, ...modInfo.moduleFiles] : [entryFullPath];
     const modContent = modInfo
       ? modInfo.moduleFiles.map((f) => fs.readFileSync(f, 'utf8')).join('\n')
       : '';
@@ -133,7 +141,9 @@ Array.from(analyzedEntries)
 
     const baseName = path.basename(entryRelPath, '.tsx');
     const hasUseGameEngine = combinedContent.includes('useGameEngine');
-    const hasStartLoop = combinedContent.includes('startLoop');
+    const hasStartLoop =
+      combinedContent.includes('startLoop') ||
+      combinedContent.includes('ThreeStageController');
     const is3DWebGL =
       combinedContent.includes("'three'") ||
       combinedContent.includes('"three"') ||
@@ -156,6 +166,33 @@ Array.from(analyzedEntries)
       result.shared2DLoop.push(label);
     } else {
       result.sharedEventDriven.push(label);
+    }
+
+    // Strict SDK & Lifecycle Hygiene Checks across every file belonging to the game
+    for (const filePath of allFiles) {
+      const rel = path.relative(gamesDir, filePath).replace(/\\/g, '/');
+      const stripped = stripComments(fs.readFileSync(filePath, 'utf8'));
+
+      const rawRafCount = (stripped.match(/\brequestAnimationFrame\s*\(/g) || []).length;
+      if (rawRafCount > 0) {
+        result.rawRafViolations.push(`${rel} (${rawRafCount}x requestAnimationFrame)`);
+      }
+
+      const addEv = (stripped.match(/\.addEventListener\s*\(/g) || []).length;
+      const remEv = (stripped.match(/\.removeEventListener\s*\(/g) || []).length;
+      const addRO = (stripped.match(/new\s+ResizeObserver\s*\(/g) || []).length;
+      const disRO = (stripped.match(/\.disconnect\s*\(/g) || []).length;
+      if (addEv !== remEv || addRO > disRO) {
+        result.listenerLeakViolations.push(
+          `${rel} (add/remove: ${addEv}/${remEv}, ResizeObserver/disconnect: ${addRO}/${disRO})`
+        );
+      }
+
+      const usesThree = /from\s+['"]three['"]/.test(stripped);
+      const hasDispose = /disposeThreeScene|\.dispose\s*\(/.test(stripped);
+      if (usesThree && !hasDispose) {
+        result.threeDisposeViolations.push(`${rel} (imports 'three' without disposeThreeScene/.dispose)`);
+      }
     }
 
     const isRegisteredInFile =
@@ -208,23 +245,36 @@ console.log(
 );
 
 console.log(
+  `\n=== 6. SDK Loop & Resource Cleanup Hygiene ===\n` +
+    `Raw requestAnimationFrame violations: ${result.rawRafViolations.length}\n` +
+    (result.rawRafViolations.length ? result.rawRafViolations.join('\n') + '\n' : '') +
+    `Listener / ResizeObserver leak violations: ${result.listenerLeakViolations.length}\n` +
+    (result.listenerLeakViolations.length ? result.listenerLeakViolations.join('\n') + '\n' : '') +
+    `Missing Three.js disposal violations: ${result.threeDisposeViolations.length}\n` +
+    (result.threeDisposeViolations.length ? result.threeDisposeViolations.join('\n') + '\n' : '')
+);
+
+console.log(
   `\n=== Status Registrasi di gameRegistry.ts ===\n` +
     `Unregistered files: ${result.unregisteredFiles.length}\n` +
     (result.unregisteredFiles.length ? result.unregisteredFiles.join('\n') + '\n' : '') +
     `Orphan modular dirs: ${orphanModularDirs.length}\n` +
     (orphanModularDirs.length ? orphanModularDirs.join('\n') + '\n' : '') +
     `Missing registry targets: ${result.missingRegistryTargets.length}\n` +
-    (result.missingRegistryTargets.length ? result.missingRegistryTargets.join('\n') : '(Semua 40 game canonical & modular sinkron dengan gameRegistry.ts)')
+    (result.missingRegistryTargets.length ? result.missingRegistryTargets.join('\n') : `(Semua ${registryMap.size} game canonical & modular sinkron dengan gameRegistry.ts)`)
 );
 
 if (
   result.legacy.length > 0 ||
+  result.rawRafViolations.length > 0 ||
+  result.listenerLeakViolations.length > 0 ||
+  result.threeDisposeViolations.length > 0 ||
   result.unregisteredFiles.length > 0 ||
   orphanModularDirs.length > 0 ||
   result.missingRegistryTargets.length > 0
 ) {
-  console.error('\n[AUDIT FAILED]: Terdapat game legacy, direktori modular yatim, atau ketidaksinkronan dengan gameRegistry.ts!');
+  console.error('\n[AUDIT FAILED]: Terdapat game legacy, raw RAF loop, kebocoran resource, direktori modular yatim, atau ketidaksinkronan dengan gameRegistry.ts!');
   process.exit(1);
 } else {
-  console.log(`\n[AUDIT PASSED]: Semua ${totalGames} game (termasuk ${result.modularArchitecture.length} game modular) tervalidasi menggunakan Game Engine terpusat.`);
+  console.log(`\n[AUDIT PASSED]: Semua ${totalGames} game (termasuk ${result.modularArchitecture.length} game modular) lolos audit SDK terpusat, zero raw RAF, dan zero resource leak.`);
 }

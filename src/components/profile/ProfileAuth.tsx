@@ -86,8 +86,8 @@ export const ProfileAuth: React.FC<ProfileAuthProps> = ({
                   Identitas Terverifikasi Firebase (Cloud & Ranked Aktif)
                 </span>
               ) : (
-                <span className="text-zinc-400">
-                  Profil Offline / Guest (Tersimpan Lokal di Perangkat)
+                <span className="text-amber-400">
+                  Mode Tamu Offline (Tersimpan Lokal). Leaderboard ranked dan sinkronisasi dompet cloud memerlukan login Firebase.
                 </span>
               )}
             </p>

@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
-import { sendApiError } from './requestContext';
+import { sendApiError, handleServerException } from './requestContext';
+import { ApiError } from './errors';
 import { serverLogger } from './logger';
 import { checkUserBanStatus, recordSecurityEvent } from './persistence/security';
 
@@ -164,6 +165,9 @@ export async function requireNotBanned(req: Request, res: Response, next: NextFu
       );
     }
   } catch (err) {
+    if (err instanceof ApiError && err.status === 503) {
+      return handleServerException(err, req, res);
+    }
     serverLogger.warn('BAN_CHECK_WARN', 'Failed to check user ban status', { error: String(err) });
   }
 

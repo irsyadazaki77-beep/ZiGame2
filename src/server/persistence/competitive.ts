@@ -25,7 +25,7 @@ import {
   AnomalySeverity
 } from './db';
 import { calculateLevelFromXp } from './progression';
-import { getUserEconomy } from './economy';
+import { getUserEconomy, buildDoubleEntryLedgerEntry } from './economy';
 import { getActiveSeason } from './seasons';
 import { recordSuspiciousScore } from './suspiciousScores';
 import { invalidateSession } from './sessions';
@@ -422,7 +422,7 @@ export async function executeRankedSubmission(input: ScoreSubmissionInput): Prom
 
         if (coinsEarned > 0) {
           const ledgerRef = db.collection('economyTransactions').doc(txId);
-          tx.set(ledgerRef, {
+          tx.set(ledgerRef, buildDoubleEntryLedgerEntry({
             transactionId: txId,
             userId,
             type: 'GAME_REWARD',
@@ -432,7 +432,7 @@ export async function executeRankedSubmission(input: ScoreSubmissionInput): Prom
             reason: `RANKED_REWARD_${canonicalId.toUpperCase()}`,
             referenceId: sessionId,
             createdAt: nowIso
-          });
+          }));
         }
 
         if (xpEarned > 0) {
@@ -676,7 +676,7 @@ export async function executeRankedSubmission(input: ScoreSubmissionInput): Prom
 
     const txId = `rnk_tx_${nowMs}_${crypto.randomBytes(8).toString('hex')}`;
     if (coinsEarned > 0) {
-      memoryStore.ledger.push({
+      memoryStore.ledger.push(buildDoubleEntryLedgerEntry({
         transactionId: txId,
         userId,
         type: 'GAME_REWARD',
@@ -686,7 +686,7 @@ export async function executeRankedSubmission(input: ScoreSubmissionInput): Prom
         reason: `RANKED_REWARD_${canonicalId.toUpperCase()}`,
         referenceId: sessionId,
         createdAt: nowIso
-      });
+      }));
     }
 
     if (xpEarned > 0) {

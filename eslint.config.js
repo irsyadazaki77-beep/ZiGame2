@@ -1,9 +1,11 @@
 import js from '@eslint/js';
 import globals from 'globals';
 import tseslint from 'typescript-eslint';
+import { flatRecommended as firebaseSecurityRulesRecommended } from '@firebase/eslint-plugin-security-rules';
 
 export default tseslint.config(
   { ignores: ['dist', 'dev-dist', 'node_modules'] },
+  firebaseSecurityRulesRecommended,
   {
     extends: [js.configs.recommended, ...tseslint.configs.recommended],
     files: ['**/*.{ts,tsx}'],

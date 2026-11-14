@@ -3,6 +3,8 @@ import { isFirebaseReady, auth, provider, signInWithPopup, fbSignOut, onAuthStat
 import { authService } from '../services/authService';
 import { logger } from '../utils/logger';
 
+export type AuthMode = 'cloud' | 'guest';
+
 export interface AuthUser {
   uid: string;
   email: string | null;
@@ -19,6 +21,8 @@ export interface AuthContextType {
   isAdmin: boolean;
   isAuthenticated: boolean;
   isFirebaseUser: boolean;
+  isGuestMode: boolean;
+  authMode: AuthMode;
   loginWithGoogle: () => Promise<{ success: boolean; message: string; user?: AuthUser }>;
   loginOffline: (username: string, passwordPlain: string) => Promise<{ success: boolean; message: string }>;
   registerOffline: (username: string, displayName: string, passwordPlain: string) => Promise<{ success: boolean; message: string }>;
@@ -32,14 +36,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // Initialize and listen to Firebase Auth
   useEffect(() => {
     let isMounted = true;
 
     if (!isFirebaseReady() || !auth) {
-      // Offline/local only fallback
       const activeUser = localStorage.getItem('zigame_active_user');
       if (activeUser && isMounted) {
+        localStorage.setItem('zigame_auth_mode', 'guest');
         setUser({
           uid: 'local_' + activeUser,
           email: null,
@@ -49,6 +52,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           isFirebase: false,
           isAdmin: false
         });
+      } else {
+        localStorage.setItem('zigame_auth_mode', 'guest');
       }
       setLoading(false);
       return;
@@ -59,11 +64,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       if (fbUser) {
         try {
-          // Inspect Custom Claims for authoritative admin verification
           const tokenResult = await fbUser.getIdTokenResult();
           const hasAdminClaim = Boolean(tokenResult?.claims?.admin === true || tokenResult?.claims?.role === 'admin');
 
-          // Check server authority
           let serverIsAdmin = hasAdminClaim;
           try {
             const token = tokenResult.token;
@@ -91,6 +94,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           if (isMounted) {
             setUser(authUser);
             localStorage.setItem('zigame_active_user', fbUser.uid);
+            localStorage.setItem('zigame_auth_mode', 'cloud');
           }
         } catch (err) {
           logger.warn('Error reading auth state token claims', { error: err });
@@ -104,11 +108,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               isFirebase: true,
               isAdmin: false
             });
+            localStorage.setItem('zigame_auth_mode', 'cloud');
           }
         }
       } else {
-        // No Firebase user; check if local offline guest profile exists
         const activeLocal = localStorage.getItem('zigame_active_user');
+        localStorage.setItem('zigame_auth_mode', 'guest');
         if (activeLocal && isMounted && !activeLocal.startsWith('fb_') && activeLocal.length < 32) {
           setUser({
             uid: 'local_' + activeLocal,
@@ -171,10 +176,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       setUser(authUser);
       localStorage.setItem('zigame_active_user', fbUser.uid);
+      localStorage.setItem('zigame_auth_mode', 'cloud');
 
       return {
         success: true,
-        message: `Selamat datang, ${authUser.displayName}!`,
+        message: `Selamat datang, ${authUser.displayName}! Mode Cloud & Ranked aktif.`,
         user: authUser
       };
     } catch (err: any) {
@@ -209,6 +215,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       };
       setUser(offlineUser);
       localStorage.setItem('zigame_active_user', cleanUser);
+      localStorage.setItem('zigame_auth_mode', 'guest');
     }
 
     return { success: res.success, message: res.message };
@@ -235,6 +242,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       };
       setUser(offlineUser);
       localStorage.setItem('zigame_active_user', cleanUser);
+      localStorage.setItem('zigame_auth_mode', 'guest');
     }
 
     return { success: res.success, message: res.message };
@@ -250,23 +258,30 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
 
     localStorage.removeItem('zigame_active_user');
+    localStorage.setItem('zigame_auth_mode', 'guest');
     sessionStorage.clear();
     setUser(null);
     await authService.logout();
   }, []);
 
+  const isFirebaseUser = Boolean(user?.isFirebase);
+  const authMode: AuthMode = isFirebaseUser ? 'cloud' : 'guest';
+  const isGuestMode = !isFirebaseUser;
+
   const value = useMemo<AuthContextType>(() => ({
     user,
     loading,
     isAdmin: Boolean(user?.isAdmin),
-    isAuthenticated: Boolean(user && user.isFirebase),
-    isFirebaseUser: Boolean(user?.isFirebase),
+    isAuthenticated: isFirebaseUser,
+    isFirebaseUser,
+    isGuestMode,
+    authMode,
     loginWithGoogle,
     loginOffline,
     registerOffline,
     logout,
     getIdToken
-  }), [user, loading, loginWithGoogle, loginOffline, registerOffline, logout, getIdToken]);
+  }), [user, loading, isFirebaseUser, isGuestMode, authMode, loginWithGoogle, loginOffline, registerOffline, logout, getIdToken]);
 
   return (
     <AuthContext.Provider value={value}>

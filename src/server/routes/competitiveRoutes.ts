@@ -168,11 +168,11 @@ competitiveRoutes.get('/competitive/leaderboard/:gameId', rateLimit(60, 60000, '
   }
 });
 
-competitiveRoutes.get('/competitive/seasons/active', async (_req: Request, res: Response) => {
+competitiveRoutes.get('/competitive/seasons/active', async (req: Request, res: Response) => {
   try {
     const season = await getActiveSeason();
     return res.json({ success: true, season });
-  } catch {
-    return res.status(500).json({ success: false });
+  } catch (err: unknown) {
+    return handleServerException(err, req, res);
   }
 });

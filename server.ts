@@ -7,14 +7,33 @@ import { apiRouter } from "./src/server/apiRouter";
 import { serverLogger } from "./src/server/logger";
 import { requestCorrelationMiddleware, handleServerException } from "./src/server/requestContext";
 import { securityHeadersMiddleware, sanitizePayloadMiddleware } from "./src/server/securityMiddleware";
-import { probeFirestoreAvailability } from "./src/server/persistence/db";
+import { probeFirestoreAvailability, isFirestoreAvailable } from "./src/server/persistence/db";
 import { APP_VERSION } from "./src/config/version";
 import { FatalError } from "./src/server/errors";
-import firebaseAppletConfig from "./firebase-applet-config.json";
 
 export { FatalError };
 
-const activeProjectId = process.env.FIREBASE_PROJECT_ID || (!firebaseAppletConfig.projectId?.includes('YOUR_FIREBASE_PROJECT_ID') ? firebaseAppletConfig.projectId : undefined);
+interface LocalAppletConfig {
+  projectId?: string;
+  firestoreDatabaseId?: string;
+}
+
+function readLocalAppletConfig(): LocalAppletConfig {
+  const configPath = path.resolve(process.cwd(), "firebase-applet-config.json");
+  if (!fs.existsSync(configPath)) return {};
+  try {
+    const parsed = JSON.parse(fs.readFileSync(configPath, "utf-8"));
+    if (parsed?.projectId && String(parsed.projectId).includes("YOUR_FIREBASE_PROJECT_ID")) {
+      return {};
+    }
+    return parsed || {};
+  } catch {
+    return {};
+  }
+}
+
+const localAppletConfig = readLocalAppletConfig();
+const activeProjectId = process.env.FIREBASE_PROJECT_ID || localAppletConfig.projectId;
 
 /**
  * Safely parses service account credentials from raw JSON string, base64-encoded string,
@@ -64,7 +83,6 @@ export function validateEnvironment(
       (env.FIREBASE_PROJECT_ID || activeProjectId)
     );
 
-    // If no valid service account JSON, no ADC path, and no Cloud Run platform identity
     if (!parsedServiceAccount && !hasAdcPath && !hasCloudRunIdentity) {
       const detail = rawServiceAccount
         ? `Malformed FIREBASE_SERVICE_ACCOUNT: "${rawServiceAccount.slice(0, 30)}" is not valid service account JSON.`
@@ -78,7 +96,6 @@ export function validateEnvironment(
       throw new FatalError(fatalMsg);
     }
 
-    // When raw string was provided but was not valid JSON, and Cloud Run ADC is available:
     if (rawServiceAccount && !parsedServiceAccount && (hasCloudRunIdentity || hasAdcPath)) {
       serverLogger.warn(
         'FIREBASE_CONFIG_WARN',
@@ -88,9 +105,19 @@ export function validateEnvironment(
   }
 }
 
-validateEnvironment(process.env, {
-  exitOnFatal: !process.env.VITEST && process.env.NODE_ENV !== 'test'
-});
+let prodEnvConfigError: string | null = null;
+try {
+  validateEnvironment(process.env, {
+    exitOnFatal: false
+  });
+} catch (err) {
+  prodEnvConfigError = err instanceof Error ? err.message : String(err);
+  serverLogger.fatal(
+    'PRODUCTION_CONFIG_DEGRADED',
+    'Production server booting without full Firebase Admin credentials; all server persistence routes will return 503 Service Unavailable (no memoryStore fallback).',
+    err
+  );
+}
 
 // Initialize Firebase Admin SDK
 try {
@@ -124,18 +151,19 @@ try {
       initializeApp({
         projectId: activeProjectId
       });
-      serverLogger.info('FIREBASE_DEV', `Firebase Admin initialized with projectId (${activeProjectId}) for ID token verification. Persistence utilizing memory adapter.`);
-    } else {
-      serverLogger.warn('FIREBASE_DEV', 'Running in non-production mode without Firebase credentials. Utilizing memory adapter.');
+      serverLogger.warn('FIREBASE_DEV', `Firebase Admin initialized with projectId (${activeProjectId}) for ID token verification. Ephemeral memoryStore active in development unless Firestore credentials are supplied.`);
+    } else if (!process.env.VITEST && process.env.NODE_ENV !== 'test') {
+      serverLogger.warn('FIREBASE_DEV', 'Running in development mode without Firebase credentials. Utilizing ephemeral memoryStore.');
     }
   }
 } catch (error) {
   serverLogger.error('FIREBASE_INIT_ERROR', 'Firebase Admin initialization failed:', error);
   if (process.env.NODE_ENV === 'production') {
-    if (!process.env.VITEST) {
-      process.exit(1);
-    }
-    throw new FatalError(`Firebase Admin initialization failed in production: ${error instanceof Error ? error.message : String(error)}`);
+    serverLogger.fatal(
+      'PRODUCTION_FIREBASE_INIT_DEGRADED',
+      'Firebase Admin failed to initialize in production; server will boot without database access and return 503 on persistence endpoints.',
+      error
+    );
   }
 }
 
@@ -172,18 +200,21 @@ export async function createExpressApp() {
 }
 
 async function startServer() {
-  // Validate production environment and fail-fast before server boot or listening
-  validateEnvironment(process.env, {
-    exitOnFatal: !process.env.VITEST && process.env.NODE_ENV !== 'test'
-  });
-
-  // Probe Firestore connectivity in dev so unprivileged/unreachable ADC degrades cleanly to InMemoryStore
-  if (process.env.NODE_ENV !== 'production') {
-    await probeFirestoreAvailability();
+  // Verify Firestore connectivity at startup:
+  // - In production: never fall back to memoryStore; if Firestore is unconfigured or unreachable,
+  //   keep HTTP server alive so Cloud Run health/SPA/Offline Guest Mode serve cleanly while all
+  //   state-mutating & DB endpoints fail closed with 503 Service Unavailable.
+  // - In development: probe so missing/unprivileged credentials fall back explicitly with warning.
+  const firestoreOk = prodEnvConfigError ? false : await probeFirestoreAvailability(3000);
+  if (process.env.NODE_ENV === 'production' && (!firestoreOk || !isFirestoreAvailable())) {
+    serverLogger.fatal(
+      'PRODUCTION_DEGRADED_MODE',
+      'Firestore unavailable at production startup. Serving SPA and health endpoints while rejecting all persistence mutations with 503 Service Unavailable (memoryStore fallback is disabled).'
+    );
   }
 
   const app = await createExpressApp();
-  const PORT = 3000;
+  const PORT = Number(process.env.PORT) || 3000;
 
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {

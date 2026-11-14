@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { audio } from '../../utils/audio';
-import { useGameEngine } from '../../hooks/useGameEngine';
+import { useGameEngine } from '../../sdk';
 import { disposeThreeScene } from '../../utils/threeCleanup';
 import { screenShake } from '../../utils/screenShake';
 import { GameOverlay } from '../gameplay/GameOverlay';
@@ -211,6 +211,8 @@ export default function MazeRunnerGame({ onGameOver, onScoreUpdate, highScore }:
     countdown,
     triggerGameOver,
     resumeGame,
+    startLoop,
+    stopLoop,
     gameStateRef,
     scoreRef
   } = useGameEngine({
@@ -644,34 +646,17 @@ export default function MazeRunnerGame({ onGameOver, onScoreUpdate, highScore }:
       camera.updateProjectionMatrix();
       renderer.setSize(w, h);
     };
+    const resizeObserver = new ResizeObserver(handleResize);
+    resizeObserver.observe(mount);
     window.addEventListener('resize', handleResize);
 
-    const clock = new THREE.Clock();
-    let frameId = 0;
+    let elapsed = 0;
+    let swRenderAcc = 0;
+    let hasRenderedInitial = false;
 
-    function afterDraw(cb: () => void) {
-      const gl = renderer.getContext() as WebGL2RenderingContext;
-      const sync = gl.fenceSync ? gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0) : null;
-      gl.flush();
-      if (!sync) {
-        frameId = window.setTimeout(cb, 80);
-        return;
-      }
-      const poll = () => {
-        const state = gl.getSyncParameter(sync, gl.SYNC_STATUS);
-        if (state === gl.UNSIGNALED) {
-          frameId = window.setTimeout(poll, 5);
-        } else {
-          gl.deleteSync(sync);
-          frameId = window.setTimeout(cb, 80);
-        }
-      };
-      frameId = window.setTimeout(poll, 5);
-    }
-
-    const tick = () => {
-      const delta = Math.min(clock.getDelta(), 0.1);
-      const elapsed = clock.getElapsedTime();
+    startLoop((_timestamp, deltaTimeMs) => {
+      const delta = Math.min(deltaTimeMs / 1000, 0.05);
+      elapsed += delta;
       const st = mazeStateRef.current;
 
       if (st.rebuildRequested) {
@@ -721,21 +706,26 @@ export default function MazeRunnerGame({ onGameOver, onScoreUpdate, highScore }:
       camera.position.z = THREE.MathUtils.damp(camera.position.z, _camTargetPos.z, 7, delta);
       camera.lookAt(_camLookAt);
 
-      renderer.render(scene, camera);
-      if (isSoftwareGl) afterDraw(tick);
-      else frameId = requestAnimationFrame(tick);
-    };
-
-    frameId = requestAnimationFrame(tick);
+      if (!isSoftwareGl) {
+        renderer.render(scene, camera);
+      } else {
+        swRenderAcc += delta;
+        if (!hasRenderedInitial || swRenderAcc >= 0.06) {
+          hasRenderedInitial = true;
+          swRenderAcc = 0;
+          renderer.render(scene, camera);
+        }
+      }
+    });
 
     return () => {
-      cancelAnimationFrame(frameId);
-      clearTimeout(frameId);
+      stopLoop();
+      resizeObserver.disconnect();
       window.removeEventListener('resize', handleResize);
       floorTex.dispose();
       disposeThreeScene(scene, renderer);
     };
-  }, []);
+  }, [startLoop, stopLoop]);
 
   return (
     <div className="relative w-full h-full min-h-[480px] flex flex-col items-center justify-center bg-[#050811] overflow-hidden select-none">
@@ -770,32 +760,44 @@ export default function MazeRunnerGame({ onGameOver, onScoreUpdate, highScore }:
 
       {/* Mobile Touch D-Pad (Bottom-Left on touch screens) */}
       {gameState === 'playing' && (
-        <div className="absolute bottom-20 left-4 z-10 flex flex-col items-center gap-1 md:hidden pointer-events-auto">
+        <div className="absolute bottom-20 left-4 z-10 flex flex-col items-center gap-1 md:hidden pointer-events-auto touch-none">
           <button
-            onClick={() => movePlayer(-1, 0)}
-            className="w-11 h-11 rounded-lg bg-slate-900/90 border border-white/15 flex items-center justify-center text-white active:bg-cyan-600"
+            onPointerDown={(e) => {
+              e.preventDefault();
+              movePlayer(-1, 0);
+            }}
+            className="w-11 h-11 rounded-lg bg-slate-900/90 border border-white/15 flex items-center justify-center text-white active:bg-cyan-600 touch-none"
             aria-label="Gerak Atas"
           >
             <ArrowUp className="w-5 h-5" />
           </button>
           <div className="flex items-center gap-1">
             <button
-              onClick={() => movePlayer(0, -1)}
-              className="w-11 h-11 rounded-lg bg-slate-900/90 border border-white/15 flex items-center justify-center text-white active:bg-cyan-600"
+              onPointerDown={(e) => {
+                e.preventDefault();
+                movePlayer(0, -1);
+              }}
+              className="w-11 h-11 rounded-lg bg-slate-900/90 border border-white/15 flex items-center justify-center text-white active:bg-cyan-600 touch-none"
               aria-label="Gerak Kiri"
             >
               <ArrowLeft className="w-5 h-5" />
             </button>
             <button
-              onClick={() => movePlayer(1, 0)}
-              className="w-11 h-11 rounded-lg bg-slate-900/90 border border-white/15 flex items-center justify-center text-white active:bg-cyan-600"
+              onPointerDown={(e) => {
+                e.preventDefault();
+                movePlayer(1, 0);
+              }}
+              className="w-11 h-11 rounded-lg bg-slate-900/90 border border-white/15 flex items-center justify-center text-white active:bg-cyan-600 touch-none"
               aria-label="Gerak Bawah"
             >
               <ArrowDown className="w-5 h-5" />
             </button>
             <button
-              onClick={() => movePlayer(0, 1)}
-              className="w-11 h-11 rounded-lg bg-slate-900/90 border border-white/15 flex items-center justify-center text-white active:bg-cyan-600"
+              onPointerDown={(e) => {
+                e.preventDefault();
+                movePlayer(0, 1);
+              }}
+              className="w-11 h-11 rounded-lg bg-slate-900/90 border border-white/15 flex items-center justify-center text-white active:bg-cyan-600 touch-none"
               aria-label="Gerak Kanan"
             >
               <ArrowRight className="w-5 h-5" />

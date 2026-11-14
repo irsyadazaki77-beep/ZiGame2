@@ -526,6 +526,20 @@ export const gachaSchema: EndpointSchema = {
   }
 };
 
+export const spinSchema: EndpointSchema = {
+  name: 'spinSchema',
+  description: 'Validasi putaran roda harian otoritatif',
+  fields: {
+    idempotencyKey: {
+      type: 'string',
+      required: false,
+      customValidator: (val) => typeof val === 'string' && isValidIdempotencyKey(val),
+      errorCode: 'INVALID_IDEMPOTENCY_KEY',
+      errorMessage: 'Kunci idempotency putaran harian tidak valid.'
+    }
+  }
+};
+
 export const claimRewardSchema: EndpointSchema = {
   name: 'claimRewardSchema',
   description: 'Validasi klaim hadiah misi, tantangan, dan achievement',
@@ -755,6 +769,7 @@ export const analyticsBatchSchema: EndpointSchema = {
   buyItemSchema,
   gambleSchema,
   gachaSchema,
+  spinSchema,
   claimRewardSchema,
   killSwitchSchema,
   adminUserTargetSchema,

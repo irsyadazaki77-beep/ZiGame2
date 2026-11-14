@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import { useGameEngine } from '../../hooks/useGameEngine';
+import { useGameEngine } from '../../sdk';
 import { disposeThreeScene } from '../../utils/threeCleanup';
 import { audio } from '../../utils/audio';
 import { screenShake } from '../../utils/screenShake';
@@ -331,7 +331,9 @@ export default function DeskRacerGame({ onScoreUpdate, onGameOver, highScore }: 
     triggerGameOver,
     setGameState,
     gameState,
-    gameStateRef
+    gameStateRef,
+    startLoop,
+    stopLoop
   } = useGameEngine({
     gameId: 'desk-racer',
     onScoreUpdate,
@@ -797,40 +799,16 @@ export default function DeskRacerGame({ onScoreUpdate, onGameOver, highScore }: 
       renderer.compile(scene, camera);
     }
 
-    const clock = new THREE.Clock();
-    let frameId = 0;
+    let elapsedTotal = 0;
     let isDisposed = false;
+    let swRenderAcc = 0;
+    let hasRenderedInitial = false;
 
-    function afterDraw(cb: () => void) {
-      const gl = renderer.getContext() as WebGL2RenderingContext;
-      if (!gl || !gl.fenceSync) {
-        frameId = window.setTimeout(cb, 80);
-        return;
-      }
-      const sync = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
-      gl.flush();
-      const poll = () => {
-        if (isDisposed) return;
-        const state = sync && gl.getSyncParameter(sync, gl.SYNC_STATUS);
-        if (state === gl.UNSIGNALED) {
-          frameId = window.setTimeout(poll, 5);
-        } else {
-          if (sync) gl.deleteSync(sync);
-          frameId = window.setTimeout(cb, 80);
-        }
-      };
-      frameId = window.setTimeout(poll, 5);
-    }
-
-    let fpsCounter = 0;
-    let fpsTimer = performance.now();
-
-    function tick() {
+    startLoop((_timestamp, deltaTimeMs) => {
       if (isDisposed) return;
-      const tickStart = performance.now();
-      const dt = Math.min(clock.getDelta(), 0.08);
+      const dt = Math.min(deltaTimeMs / 1000, 0.05);
       const now = performance.now();
-      const elapsedTotal = clock.getElapsedTime();
+      elapsedTotal += dt;
 
       const isPlaying = (gameStateRef.current as string)?.toLowerCase() === 'playing';
 
@@ -1129,24 +1107,17 @@ export default function DeskRacerGame({ onScoreUpdate, onGameOver, highScore }: 
         }
       }
 
-      renderer.render(scene, camera);
-
-      // Record frame-time and FPS for adaptive performance
-      const frameElapsed = performance.now() - tickStart;
-      performanceService.recordFrameTime(frameElapsed);
-
-      fpsCounter++;
-      if (now - fpsTimer >= 1000) {
-        performanceService.recordFramePerformance(fpsCounter);
-        fpsCounter = 0;
-        fpsTimer = now;
+      if (!isSoftwareGl) {
+        renderer.render(scene, camera);
+      } else {
+        swRenderAcc += dt;
+        if (!hasRenderedInitial || swRenderAcc >= 0.06) {
+          hasRenderedInitial = true;
+          swRenderAcc = 0;
+          renderer.render(scene, camera);
+        }
       }
-
-      if (isSoftwareGl) afterDraw(tick);
-      else frameId = requestAnimationFrame(tick);
-    }
-
-    frameId = requestAnimationFrame(tick);
+    });
 
     const resizeObserver = new ResizeObserver((entries) => {
       for (const entry of entries) {
@@ -1161,8 +1132,7 @@ export default function DeskRacerGame({ onScoreUpdate, onGameOver, highScore }: 
 
     return () => {
       isDisposed = true;
-      cancelAnimationFrame(frameId);
-      clearTimeout(frameId);
+      stopLoop();
       unsubPerf();
       resizeObserver.disconnect();
       window.removeEventListener('keydown', onKeyDown);
@@ -1173,7 +1143,7 @@ export default function DeskRacerGame({ onScoreUpdate, onGameOver, highScore }: 
       roadGeo.dispose();
       disposeThreeScene(scene, renderer);
     };
-  }, [setGameState, triggerGameOver, updateScore]);
+  }, [setGameState, startLoop, stopLoop, triggerGameOver, updateScore]);
 
   // SVG path string for the 2D Track Minimap in bottom-left
   const minimapSvgPath =
@@ -1300,19 +1270,22 @@ export default function DeskRacerGame({ onScoreUpdate, onGameOver, highScore }: 
       </div>
 
       {/* Mobile Touch Steering Controls */}
-      <div className="md:hidden absolute bottom-16 right-4 z-10 flex items-center gap-2 pointer-events-auto">
+      <div className="md:hidden absolute bottom-16 right-4 z-10 flex items-center gap-2 pointer-events-auto touch-none">
         <button
           onPointerDown={() => { keysRef.current.left = true; keysRef.current.up = true; }}
           onPointerUp={() => { keysRef.current.left = false; }}
           onPointerLeave={() => { keysRef.current.left = false; }}
-          className="w-12 h-12 rounded-xl bg-zinc-900/90 border border-white/15 text-white font-bold text-sm active:bg-red-500"
+          onPointerCancel={() => { keysRef.current.left = false; }}
+          className="w-12 h-12 rounded-xl bg-zinc-900/90 border border-white/15 text-white font-bold text-sm active:bg-red-500 touch-none"
         >
           ◀
         </button>
         <button
           onPointerDown={() => { keysRef.current.up = true; }}
           onPointerUp={() => { keysRef.current.up = false; }}
-          className="px-4 h-12 rounded-xl bg-red-600/90 border border-red-400/30 text-white font-bold text-xs"
+          onPointerLeave={() => { keysRef.current.up = false; }}
+          onPointerCancel={() => { keysRef.current.up = false; }}
+          className="px-4 h-12 rounded-xl bg-red-600/90 border border-red-400/30 text-white font-bold text-xs touch-none"
         >
           GAS
         </button>
@@ -1320,7 +1293,8 @@ export default function DeskRacerGame({ onScoreUpdate, onGameOver, highScore }: 
           onPointerDown={() => { keysRef.current.right = true; keysRef.current.up = true; }}
           onPointerUp={() => { keysRef.current.right = false; }}
           onPointerLeave={() => { keysRef.current.right = false; }}
-          className="w-12 h-12 rounded-xl bg-zinc-900/90 border border-white/15 text-white font-bold text-sm active:bg-red-500"
+          onPointerCancel={() => { keysRef.current.right = false; }}
+          className="w-12 h-12 rounded-xl bg-zinc-900/90 border border-white/15 text-white font-bold text-sm active:bg-red-500 touch-none"
         >
           ▶
         </button>

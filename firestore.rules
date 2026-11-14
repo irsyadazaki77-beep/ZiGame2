@@ -1,26 +1,35 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    
+
     // Default Deny-All Catch-all Safety Net
     match /{document=**} {
       allow read, write: if false;
     }
 
     // Primitive Helpers & Hardened Guards
-    function isValidId(id) { return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); }
-    function incoming() { return request.resource.data; }
-    function existing() { return resource.data; }
-    function isSignedIn() { return request.auth != null; }
-    
-    // Unified Canonical Admin Authority: Custom Claims primary with emergency admins document lookup and bootstrapped admin email
-    function isAdmin() { 
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+    function incoming() {
+      return request.resource.data;
+    }
+    function existing() {
+      return resource.data;
+    }
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId && isValidId(userId);
+    }
+
+    // Strict Custom Claims Admin Authority (no hardcoded personal emails)
+    function isAdmin() {
       return isSignedIn() && (
-        request.auth.token.admin == true || 
-        request.auth.token.role == 'admin' || 
-        (request.auth.token.email == 'zakiirsyad554@gmail.com' && request.auth.token.email_verified == true) ||
-        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
-      ); 
+        request.auth.token.admin == true ||
+        request.auth.token.role == 'admin'
+      );
     }
 
     // Account Suspension Guard: Blocks client SDK mutations if userSecurity document has isBanned == true
@@ -49,7 +58,7 @@ service cloud.firestore {
       allow list, write: if false;
     }
 
-    // Admins Collection (Read: Server Admin Only, Write: Server Admin SDK Only)
+    // Admins Collection (Read: Claim Admin Only, Write: Server Admin SDK Only)
     match /admins/{adminId} {
       allow read: if isAdmin() && isValidId(adminId);
       allow write: if false;
@@ -57,11 +66,9 @@ service cloud.firestore {
 
     // User Profile and Sync State (Canonical Identity: Firebase UID)
     match /users/{userId} {
-      allow read: if isSignedIn() && request.auth.uid == userId && isValidId(userId);
-      
-      allow create: if isSignedIn() 
-        && request.auth.uid == userId 
-        && isValidId(userId)
+      allow read: if isOwner(userId);
+
+      allow create: if isOwner(userId)
         && isNotBanned()
         && isValidUser(incoming())
         // Client cannot set coins above starting bonus (max 500) on create
@@ -69,41 +76,37 @@ service cloud.firestore {
         // Ensure no administrative / sensitive fields are set on create
         && !incoming().keys().hasAny(['isAdmin', 'isBanned', 'verifiedBalance', 'role']);
 
-      allow update: if (
-        isSignedIn() 
-        && request.auth.uid == userId 
-        && isValidId(userId)
+      allow update: if isOwner(userId)
         && isNotBanned()
         && isValidUser(incoming())
         // Client cannot unilaterally increase profile.coins unless <= existing balance or <= 500 starter bonus
         && (!('coins' in incoming().profile) || ('coins' in existing().profile && incoming().profile.coins <= existing().profile.coins) || incoming().profile.coins <= 500)
         // Client cannot tamper with administrative / sensitive fields
-        && (!incoming().diff(existing()).affectedKeys().hasAny(['isAdmin', 'isBanned', 'verifiedBalance', 'role']))
-      );
-      
+        && (!incoming().diff(existing()).affectedKeys().hasAny(['isAdmin', 'isBanned', 'verifiedBalance', 'role']));
+
       allow delete: if false;
     }
 
     // Server-Authoritative Economy Store (Read: Owner, Write: Server Admin Only)
     match /userEconomy/{userId} {
-      allow read: if isSignedIn() && request.auth.uid == userId && isValidId(userId);
+      allow read: if isOwner(userId);
       allow write: if false;
     }
 
     // User Inventory (Read: Owner, Write: Server Admin Only)
     match /userInventory/{userId} {
-      allow read: if isSignedIn() && request.auth.uid == userId && isValidId(userId);
+      allow read: if isOwner(userId);
       allow write: if false;
 
       match /items/{itemId} {
-        allow read: if isSignedIn() && request.auth.uid == userId && isValidId(itemId);
+        allow read: if isOwner(userId) && isValidId(itemId);
         allow write: if false;
       }
     }
 
     // Spin Cooldowns (Read: Owner, Write: Server Admin Only)
     match /spinCooldowns/{userId} {
-      allow read: if isSignedIn() && request.auth.uid == userId && isValidId(userId);
+      allow read: if isOwner(userId);
       allow write: if false;
     }
 
@@ -116,25 +119,28 @@ service cloud.firestore {
     // Cloud Saves collection with schema version validation
     match /cloudSaves/{saveId} {
       allow read: if isSignedIn() && resource.data.userId == request.auth.uid && isValidId(saveId);
-      allow create: if isSignedIn() 
+      allow create: if isSignedIn()
         && isValidId(saveId)
         && isNotBanned()
         && incoming().userId == request.auth.uid
         && incoming().schemaVersion is number
         && incoming().schemaVersion >= 1;
-      allow update: if isSignedIn() 
+      allow update: if isSignedIn()
         && isValidId(saveId)
         && isNotBanned()
         && existing().userId == request.auth.uid
         && incoming().userId == request.auth.uid
         && incoming().updatedAt >= existing().updatedAt;
-      allow delete: if isSignedIn() && existing().userId == request.auth.uid && isValidId(saveId);
+      allow delete: if isSignedIn()
+        && isNotBanned()
+        && existing().userId == request.auth.uid
+        && isValidId(saveId);
     }
 
     // Leaderboards (Read: Authenticated Users, Write: Server Authoritative ONLY)
     match /leaderboards/{gameId} {
       allow read: if isSignedIn() && isValidId(gameId);
-      
+
       match /entries/{entryId} {
         allow read: if isSignedIn() && isValidId(entryId);
         allow write: if false;
@@ -144,7 +150,7 @@ service cloud.firestore {
     // Seasonal Leaderboards (Read: Authenticated Users, Write: Server Authoritative ONLY)
     match /seasonalLeaderboards/{seasonId} {
       allow read: if isSignedIn() && isValidId(seasonId);
-      
+
       match /games/{gameId}/entries/{userId} {
         allow read: if isSignedIn() && isValidId(gameId) && isValidId(userId);
         allow write: if false;
@@ -153,7 +159,7 @@ service cloud.firestore {
 
     // Competitive Profiles (Read: Owner, Write: Server Admin Only)
     match /competitiveProfiles/{userId} {
-      allow read: if isSignedIn() && request.auth.uid == userId && isValidId(userId);
+      allow read: if isOwner(userId);
       allow write: if false;
     }
 
@@ -181,7 +187,7 @@ service cloud.firestore {
 
     // User Security & Suspension Records (Read: Owner or Admin, Write: Server Admin SDK Only)
     match /userSecurity/{userId} {
-      allow read: if isSignedIn() && (request.auth.uid == userId || isAdmin()) && isValidId(userId);
+      allow read: if (isOwner(userId) || isAdmin()) && isValidId(userId);
       allow write: if false;
     }
 

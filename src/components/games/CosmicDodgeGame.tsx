@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { GameComponentProps } from '../../types';
 import { audio } from '../../utils/audio';
-import { useGameEngine } from '../../hooks/useGameEngine';
+import { useGameEngine } from '../../sdk';
 import { disposeThreeScene } from '../../utils/threeCleanup';
 import { screenShake } from '../../utils/screenShake';
 import { GameOverlay } from '../gameplay/GameOverlay';
@@ -183,6 +183,8 @@ export default function CosmicDodgeGame({ onScoreUpdate, onGameOver, highScore }
     startWithCountdown,
     resumeGame,
     countdown,
+    startLoop,
+    stopLoop,
     gameStateRef,
     scoreRef
   } = useGameEngine({
@@ -201,6 +203,8 @@ export default function CosmicDodgeGame({ onScoreUpdate, onGameOver, highScore }
   const canvasMountRef = useRef<HTMLDivElement | null>(null);
   const camViewRef = useRef<SpaceCamView>('chase');
   const keysRef = useRef<Record<string, boolean>>({});
+  const lastWarpPctRef = useRef(100);
+  const bannerTimerRef = useRef<number | null>(null);
 
   const shipStateRef = useRef({
     targetX: 0,
@@ -219,10 +223,23 @@ export default function CosmicDodgeGame({ onScoreUpdate, onGameOver, highScore }
     camViewRef.current = camView;
   }, [camView]);
 
+  useEffect(() => {
+    return () => {
+      if (bannerTimerRef.current !== null) {
+        clearTimeout(bannerTimerRef.current);
+      }
+    };
+  }, []);
+
   const showBanner = useCallback((msg: string) => {
     setBannerText(msg);
-    const t = window.setTimeout(() => setBannerText(null), 1200);
-    return () => clearTimeout(t);
+    if (bannerTimerRef.current !== null) {
+      clearTimeout(bannerTimerRef.current);
+    }
+    bannerTimerRef.current = window.setTimeout(() => {
+      setBannerText(null);
+      bannerTimerRef.current = null;
+    }, 1200);
   }, []);
 
   const handleStart = useCallback(() => {
@@ -407,35 +424,18 @@ export default function CosmicDodgeGame({ onScoreUpdate, onGameOver, highScore }
       camera.updateProjectionMatrix();
       renderer.setSize(w, h);
     };
+    const resizeObserver = new ResizeObserver(handleResize);
+    resizeObserver.observe(mount);
     window.addEventListener('resize', handleResize);
 
-    const clock = new THREE.Clock();
-    let frameId = 0;
+    let elapsed = 0;
     let uiTimer = 0;
+    let swRenderAcc = 0;
+    let hasRenderedInitial = false;
 
-    function afterDraw(cb: () => void) {
-      const gl = renderer.getContext() as WebGL2RenderingContext;
-      const sync = gl.fenceSync ? gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0) : null;
-      gl.flush();
-      if (!sync) {
-        frameId = window.setTimeout(cb, 80);
-        return;
-      }
-      const poll = () => {
-        const state = gl.getSyncParameter(sync, gl.SYNC_STATUS);
-        if (state === gl.UNSIGNALED) {
-          frameId = window.setTimeout(poll, 5);
-        } else {
-          gl.deleteSync(sync);
-          frameId = window.setTimeout(cb, 80);
-        }
-      };
-      frameId = window.setTimeout(poll, 5);
-    }
-
-    const tick = () => {
-      const delta = Math.min(clock.getDelta(), 0.1);
-      const elapsed = clock.getElapsedTime();
+    startLoop((_timestamp, deltaTimeMs) => {
+      const delta = Math.min(deltaTimeMs / 1000, 0.05);
+      elapsed += delta;
       const st = shipStateRef.current;
 
       if (st.resetRequested) {
@@ -549,7 +549,11 @@ export default function CosmicDodgeGame({ onScoreUpdate, onGameOver, highScore }
         uiTimer += delta;
         if (uiTimer > 0.12) {
           uiTimer = 0;
-          setWarpCharge(Math.round(st.warpEnergy));
+          const nextWarp = Math.round(st.warpEnergy);
+          if (nextWarp !== lastWarpPctRef.current) {
+            lastWarpPctRef.current = nextWarp;
+            setWarpCharge(nextWarp);
+          }
         }
       }
 
@@ -571,23 +575,29 @@ export default function CosmicDodgeGame({ onScoreUpdate, onGameOver, highScore }
       camera.position.z = THREE.MathUtils.damp(camera.position.z, _camPos.z, 9, delta);
       camera.lookAt(_camLook);
 
-      renderer.render(scene, camera);
-      if (isSoftwareGl) afterDraw(tick);
-      else frameId = requestAnimationFrame(tick);
-    };
-
-    frameId = requestAnimationFrame(tick);
+      if (!isSoftwareGl) {
+        renderer.render(scene, camera);
+      } else {
+        swRenderAcc += delta;
+        if (!hasRenderedInitial || swRenderAcc >= 0.06) {
+          hasRenderedInitial = true;
+          swRenderAcc = 0;
+          renderer.render(scene, camera);
+        }
+      }
+    });
 
     return () => {
-      cancelAnimationFrame(frameId);
-      clearTimeout(frameId);
+      stopLoop();
+      resizeObserver.disconnect();
       window.removeEventListener('resize', handleResize);
       disposeThreeScene(scene, renderer);
     };
-  }, [gameStateRef, scoreRef, showBanner, triggerGameOver, updateScore]);
+  }, [gameStateRef, scoreRef, showBanner, startLoop, stopLoop, triggerGameOver, updateScore]);
 
   return (
     <div
+      onPointerDown={handlePointerMove}
       onPointerMove={handlePointerMove}
       className="relative w-full h-full min-h-[480px] flex flex-col items-center justify-center bg-[#030611] overflow-hidden select-none touch-none"
     >

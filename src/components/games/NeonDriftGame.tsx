@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import { useGameEngine } from '../../hooks/useGameEngine';
+import { useGameEngine } from '../../sdk';
 import { disposeThreeScene } from '../../utils/threeCleanup';
 import { audio } from '../../utils/audio';
 import { screenShake } from '../../utils/screenShake';
@@ -267,6 +267,8 @@ export default function NeonDriftGame({ onScoreUpdate, onGameOver, highScore }: 
     triggerGameOver,
     startWithCountdown,
     countdown,
+    startLoop,
+    stopLoop,
     scoreRef,
   } = useGameEngine({
     gameId: 'neon-drift',
@@ -472,19 +474,16 @@ export default function NeonDriftGame({ onScoreUpdate, onGameOver, highScore }: 
     resizeObserver.observe(mount);
 
     let disposed = false;
-    let frameHandle = 0;
-    let lastTime = performance.now();
     let toastTimeout: ReturnType<typeof setTimeout> | undefined;
-    let hudSyncCounter = 0;
+    let hudSyncTimer = 0;
+    let lastSpeedShown = 160;
+    let lastNitroShown = 45;
+    let swRenderAcc = 0;
+    let hasRenderedInitial = false;
 
-    const afterDraw = isSoftwareGl
-      ? (cb: FrameRequestCallback) => window.setTimeout(() => cb(performance.now()), 16)
-      : (cb: FrameRequestCallback) => requestAnimationFrame(cb);
-
-    const tick = (now: number) => {
+    startLoop((now, deltaTimeMs) => {
       if (disposed) return;
-      const delta = Math.min((now - lastTime) / 1000, 0.1);
-      lastTime = now;
+      const delta = Math.min(deltaTimeMs / 1000, 0.05);
 
       const pState = playerStateRef.current;
       const inputs = inputStateRef.current;
@@ -548,14 +547,6 @@ export default function NeonDriftGame({ onScoreUpdate, onGameOver, highScore }: 
         const boostBonus = wantsBoost ? 2.5 : 1.0;
         const framePoints = 65 * speedMultiplier * boostBonus * pState.combo * delta;
         pState.scoreAcc += framePoints;
-
-        if (pState.scoreAcc >= 1) {
-          const added = Math.floor(pState.scoreAcc);
-          pState.scoreAcc -= added;
-          const nextScore = scoreRef.current + added;
-          scoreRef.current = nextScore;
-          updateScoreRef.current(nextScore);
-        }
 
         if (pState.combo > 1) {
           pState.comboTimer -= delta;
@@ -668,6 +659,12 @@ export default function NeonDriftGame({ onScoreUpdate, onGameOver, highScore }: 
             pState.vx = pState.x - tCar.x > 0 ? 6 : -6;
 
             if (pState.shields <= 0) {
+              const pending = Math.floor(pState.scoreAcc);
+              if (pending > 0) {
+                pState.scoreAcc -= pending;
+                scoreRef.current += pending;
+                updateScoreRef.current(scoreRef.current);
+              }
               triggerGameOverRef.current(scoreRef.current);
             }
           }
@@ -686,10 +683,26 @@ export default function NeonDriftGame({ onScoreUpdate, onGameOver, highScore }: 
         flameLeft.visible = wantsBoost;
         flameRight.visible = wantsBoost;
 
-        hudSyncCounter++;
-        if (hudSyncCounter % 3 === 0) {
-          setSpeedKmh(Math.round(pState.speedKmh));
-          setNitro(Math.round(pState.nitro));
+        hudSyncTimer += delta;
+        if (hudSyncTimer >= 0.1) {
+          hudSyncTimer = 0;
+          if (pState.scoreAcc >= 1) {
+            const added = Math.floor(pState.scoreAcc);
+            pState.scoreAcc -= added;
+            const nextScore = scoreRef.current + added;
+            scoreRef.current = nextScore;
+            updateScoreRef.current(nextScore);
+          }
+          const nextSpeed = Math.round(pState.speedKmh);
+          if (nextSpeed !== lastSpeedShown) {
+            lastSpeedShown = nextSpeed;
+            setSpeedKmh(nextSpeed);
+          }
+          const nextNitro = Math.round(pState.nitro);
+          if (nextNitro !== lastNitroShown) {
+            lastNitroShown = nextNitro;
+            setNitro(nextNitro);
+          }
         }
       }
 
@@ -716,16 +729,21 @@ export default function NeonDriftGame({ onScoreUpdate, onGameOver, highScore }: 
       camera.position.lerp(_camPos, Math.min(1, 14 * delta));
       camera.lookAt(_camTarget);
 
-      renderer.render(scene, camera);
-      frameHandle = afterDraw(tick);
-    };
-
-    frameHandle = afterDraw(tick);
+      if (!isSoftwareGl) {
+        renderer.render(scene, camera);
+      } else {
+        swRenderAcc += delta;
+        if (!hasRenderedInitial || swRenderAcc >= 0.06) {
+          hasRenderedInitial = true;
+          swRenderAcc = 0;
+          renderer.render(scene, camera);
+        }
+      }
+    });
 
     return () => {
       disposed = true;
-      cancelAnimationFrame(frameHandle);
-      clearTimeout(frameHandle);
+      stopLoop();
       if (toastTimeout) clearTimeout(toastTimeout);
       resizeObserver.disconnect();
       roadTexture.dispose();
@@ -734,7 +752,7 @@ export default function NeonDriftGame({ onScoreUpdate, onGameOver, highScore }: 
         mount.removeChild(renderer.domElement);
       }
     };
-  }, [scoreRef]);
+  }, [scoreRef, startLoop, stopLoop]);
 
   const handleStartGame = useCallback(() => {
     updateScore(0);
@@ -802,6 +820,91 @@ export default function NeonDriftGame({ onScoreUpdate, onGameOver, highScore }: 
           <div className="bg-gradient-to-r from-cyan-500 via-pink-500 to-amber-400 text-black px-4 py-1.5 rounded-full font-black text-sm uppercase tracking-wider shadow-[0_0_20px_rgba(0,240,255,0.6)] flex items-center gap-1.5">
             <Sparkles className="w-4 h-4" />
             {nearMissToast.text}
+          </div>
+        </div>
+      )}
+
+      {/* MOBILE TOUCH STEERING & NITRO CONTROLS */}
+      {gameState === 'playing' && (
+        <div className="md:hidden absolute bottom-24 left-4 right-4 z-10 flex items-center justify-between gap-2 pointer-events-auto touch-none">
+          <div className="flex items-center gap-2">
+            <button
+              onPointerDown={(e) => {
+                e.preventDefault();
+                inputStateRef.current.left = true;
+              }}
+              onPointerUp={() => {
+                inputStateRef.current.left = false;
+              }}
+              onPointerLeave={() => {
+                inputStateRef.current.left = false;
+              }}
+              onPointerCancel={() => {
+                inputStateRef.current.left = false;
+              }}
+              className="px-4 py-3 rounded-xl bg-zinc-950/90 border border-cyan-500/40 text-white font-bold text-xs uppercase active:bg-cyan-600 touch-none"
+              aria-label="Belok Kiri"
+            >
+              ◀ Kiri
+            </button>
+            <button
+              onPointerDown={(e) => {
+                e.preventDefault();
+                inputStateRef.current.right = true;
+              }}
+              onPointerUp={() => {
+                inputStateRef.current.right = false;
+              }}
+              onPointerLeave={() => {
+                inputStateRef.current.right = false;
+              }}
+              onPointerCancel={() => {
+                inputStateRef.current.right = false;
+              }}
+              className="px-4 py-3 rounded-xl bg-zinc-950/90 border border-cyan-500/40 text-white font-bold text-xs uppercase active:bg-cyan-600 touch-none"
+              aria-label="Belok Kanan"
+            >
+              Kanan ▶
+            </button>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              onPointerDown={(e) => {
+                e.preventDefault();
+                inputStateRef.current.drift = true;
+              }}
+              onPointerUp={() => {
+                inputStateRef.current.drift = false;
+              }}
+              onPointerLeave={() => {
+                inputStateRef.current.drift = false;
+              }}
+              onPointerCancel={() => {
+                inputStateRef.current.drift = false;
+              }}
+              className="px-3.5 py-3 rounded-xl bg-pink-600/90 border border-pink-400/40 text-white font-bold text-xs uppercase active:bg-pink-500 touch-none"
+            >
+              Drift
+            </button>
+            <button
+              onPointerDown={(e) => {
+                e.preventDefault();
+                inputStateRef.current.boost = true;
+              }}
+              onPointerUp={() => {
+                inputStateRef.current.boost = false;
+              }}
+              onPointerLeave={() => {
+                inputStateRef.current.boost = false;
+              }}
+              onPointerCancel={() => {
+                inputStateRef.current.boost = false;
+              }}
+              className="px-3.5 py-3 rounded-xl bg-amber-500 text-zinc-950 font-black text-xs uppercase active:bg-amber-400 touch-none"
+            >
+              Nitro
+            </button>
           </div>
         </div>
       )}

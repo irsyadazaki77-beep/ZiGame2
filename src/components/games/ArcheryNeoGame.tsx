@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { audio } from '../../utils/audio';
-import { useGameEngine } from '../../hooks/useGameEngine';
+import { useGameEngine } from '../../sdk';
 import { disposeThreeScene } from '../../utils/threeCleanup';
 import { screenShake } from '../../utils/screenShake';
 import { GameOverlay } from '../gameplay/GameOverlay';
@@ -176,6 +176,8 @@ export default function ArcheryNeoGame({ onGameOver, onScoreUpdate, highScore }:
     startWithCountdown,
     resumeGame,
     countdown,
+    startLoop,
+    stopLoop,
     gameStateRef,
     scoreRef
   } = useGameEngine({
@@ -198,6 +200,8 @@ export default function ArcheryNeoGame({ onGameOver, onScoreUpdate, highScore }:
   const arrowsLeftRef = useRef(12);
   const stageRef = useRef(1);
   const comboRef = useRef(1);
+  const lastDrawPctRef = useRef(0);
+  const bannerTimerRef = useRef<number | null>(null);
 
   const rangeStateRef = useRef({
     aimYaw: 0,
@@ -221,10 +225,23 @@ export default function ArcheryNeoGame({ onGameOver, onScoreUpdate, highScore }:
     camModeRef.current = camMode;
   }, [camMode]);
 
+  useEffect(() => {
+    return () => {
+      if (bannerTimerRef.current !== null) {
+        clearTimeout(bannerTimerRef.current);
+      }
+    };
+  }, []);
+
   const showBanner = useCallback((msg: string) => {
     setHitBanner(msg);
-    const t = window.setTimeout(() => setHitBanner(null), 1300);
-    return () => clearTimeout(t);
+    if (bannerTimerRef.current !== null) {
+      clearTimeout(bannerTimerRef.current);
+    }
+    bannerTimerRef.current = window.setTimeout(() => {
+      setHitBanner(null);
+      bannerTimerRef.current = null;
+    }, 1300);
   }, []);
 
   const randomizeWind = useCallback((lvl: number) => {
@@ -242,6 +259,7 @@ export default function ArcheryNeoGame({ onGameOver, onScoreUpdate, highScore }:
     setStage(1);
     comboRef.current = 1;
     setCombo(1);
+    lastDrawPctRef.current = 0;
     setDrawPct(0);
 
     rangeStateRef.current = {
@@ -294,6 +312,7 @@ export default function ArcheryNeoGame({ onGameOver, onScoreUpdate, highScore }:
       st.fireRequested = true;
     } else {
       st.drawTension = 0;
+      lastDrawPctRef.current = 0;
       setDrawPct(0);
     }
   }, []);
@@ -476,34 +495,18 @@ export default function ArcheryNeoGame({ onGameOver, onScoreUpdate, highScore }:
       camera.updateProjectionMatrix();
       renderer.setSize(w, h);
     };
+    const resizeObserver = new ResizeObserver(handleResize);
+    resizeObserver.observe(mount);
     window.addEventListener('resize', handleResize);
 
-    const clock = new THREE.Clock();
-    let frameId = 0;
+    let elapsed = 0;
+    let swRenderAcc = 0;
+    let drawHudAcc = 0;
+    let hasRenderedInitial = false;
 
-    function afterDraw(cb: () => void) {
-      const gl = renderer.getContext() as WebGL2RenderingContext;
-      const sync = gl.fenceSync ? gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0) : null;
-      gl.flush();
-      if (!sync) {
-        frameId = window.setTimeout(cb, 80);
-        return;
-      }
-      const poll = () => {
-        const state = gl.getSyncParameter(sync, gl.SYNC_STATUS);
-        if (state === gl.UNSIGNALED) {
-          frameId = window.setTimeout(poll, 5);
-        } else {
-          gl.deleteSync(sync);
-          frameId = window.setTimeout(cb, 80);
-        }
-      };
-      frameId = window.setTimeout(poll, 5);
-    }
-
-    const tick = () => {
-      const delta = Math.min(clock.getDelta(), 0.05);
-      const elapsed = clock.getElapsedTime();
+    startLoop((_timestamp, deltaTimeMs) => {
+      const delta = Math.min(deltaTimeMs / 1000, 0.05);
+      elapsed += delta;
       const st = rangeStateRef.current;
 
       if (st.resetRequested) {
@@ -529,10 +532,18 @@ export default function ArcheryNeoGame({ onGameOver, onScoreUpdate, highScore }:
           bonusOrb.rotation.y = elapsed * 2.5;
         }
 
-        // Handle Bow Draw Tension
+        // Handle Bow Draw Tension (throttled HUD updates ~15Hz)
         if (st.isDrawing) {
           st.drawTension = Math.min(1, st.drawTension + delta * 1.35);
-          setDrawPct(Math.round(st.drawTension * 100));
+          drawHudAcc += delta;
+          if (drawHudAcc >= 0.065) {
+            drawHudAcc = 0;
+            const nextPct = Math.round(st.drawTension * 100);
+            if (nextPct !== lastDrawPctRef.current) {
+              lastDrawPctRef.current = nextPct;
+              setDrawPct(nextPct);
+            }
+          }
         }
 
         bow.group.rotation.y = st.aimYaw;
@@ -545,6 +556,7 @@ export default function ArcheryNeoGame({ onGameOver, onScoreUpdate, highScore }:
           st.fireRequested = false;
           const speed = 26 + st.drawTension * 24;
           st.drawTension = 0;
+          lastDrawPctRef.current = 0;
           setDrawPct(0);
 
           arrowsLeftRef.current = Math.max(0, arrowsLeftRef.current - 1);
@@ -691,28 +703,34 @@ export default function ArcheryNeoGame({ onGameOver, onScoreUpdate, highScore }:
       camera.position.z = THREE.MathUtils.damp(camera.position.z, _camPos.z, 9, delta);
       camera.lookAt(_camLook);
 
-      renderer.render(scene, camera);
-      if (isSoftwareGl) afterDraw(tick);
-      else frameId = requestAnimationFrame(tick);
-    };
-
-    frameId = requestAnimationFrame(tick);
+      if (!isSoftwareGl) {
+        renderer.render(scene, camera);
+      } else {
+        swRenderAcc += delta;
+        if (!hasRenderedInitial || swRenderAcc >= 0.06) {
+          hasRenderedInitial = true;
+          swRenderAcc = 0;
+          renderer.render(scene, camera);
+        }
+      }
+    });
 
     return () => {
-      cancelAnimationFrame(frameId);
-      clearTimeout(frameId);
+      stopLoop();
+      resizeObserver.disconnect();
       window.removeEventListener('resize', handleResize);
       targetTex.dispose();
       clearArrows();
       disposeThreeScene(scene, renderer);
     };
-  }, [addScore, gameStateRef, randomizeWind, scoreRef, showBanner, triggerGameOver]);
+  }, [addScore, gameStateRef, randomizeWind, scoreRef, showBanner, startLoop, stopLoop, triggerGameOver]);
 
   return (
     <div
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={releaseArrow}
+      onPointerCancel={releaseArrow}
       className="relative w-full h-full min-h-[480px] flex flex-col items-center justify-center bg-[#060a14] overflow-hidden select-none cursor-crosshair touch-none"
     >
       {/* Dedicated WebGL Mount */}

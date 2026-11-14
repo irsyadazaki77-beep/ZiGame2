@@ -17,3 +17,4 @@ export * from './physicsWorkerController';
 export * from './canvas2dStageController';
 export * from './objectPool';
 export * from './VirtualControls';
+export * from '../hooks/useGameEngine';

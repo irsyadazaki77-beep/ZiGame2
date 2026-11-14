@@ -1,7 +1,7 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import { useGameEngine } from '../../hooks/useGameEngine';
+import { useGameEngine } from '../../sdk';
 import { disposeThreeScene } from '../../utils/threeCleanup';
 import { audio } from '../../utils/audio';
 import { screenShake } from '../../utils/screenShake';
@@ -261,6 +261,8 @@ export default function VaporwaveRacerGame({ onScoreUpdate, onGameOver, highScor
     startWithCountdown,
     resumeGame,
     countdown,
+    startLoop,
+    stopLoop,
     gameStateRef,
     scoreRef
   } = useGameEngine({
@@ -542,35 +544,18 @@ export default function VaporwaveRacerGame({ onScoreUpdate, onGameOver, highScor
       camera.updateProjectionMatrix();
       renderer.setSize(w, h);
     };
+    const resizeObserver = new ResizeObserver(handleResize);
+    resizeObserver.observe(mount);
     window.addEventListener('resize', handleResize);
 
-    const clock = new THREE.Clock();
-    let frameId = 0;
+    let elapsed = 0;
     let hudSyncTimer = 0;
+    let swRenderAcc = 0;
+    let hasRenderedInitial = false;
 
-    function afterDraw(cb: () => void) {
-      const gl = renderer.getContext() as WebGL2RenderingContext;
-      const sync = gl.fenceSync ? gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0) : null;
-      gl.flush();
-      if (!sync) {
-        frameId = window.setTimeout(cb, 80);
-        return;
-      }
-      const poll = () => {
-        const state = gl.getSyncParameter(sync, gl.SYNC_STATUS);
-        if (state === gl.UNSIGNALED) {
-          frameId = window.setTimeout(poll, 5);
-        } else {
-          gl.deleteSync(sync);
-          frameId = window.setTimeout(cb, 80);
-        }
-      };
-      frameId = window.setTimeout(poll, 5);
-    }
-
-    const tick = () => {
-      const delta = Math.min(clock.getDelta(), 0.1);
-      const elapsed = clock.getElapsedTime();
+    startLoop((_timestamp, deltaTimeMs) => {
+      const delta = Math.min(deltaTimeMs / 1000, 0.05);
+      elapsed += delta;
       const st = raceStateRef.current;
 
       if (st.resetRequested) {
@@ -732,22 +717,27 @@ export default function VaporwaveRacerGame({ onScoreUpdate, onGameOver, highScor
       camera.position.z = THREE.MathUtils.damp(camera.position.z, _camPos.z, 10, delta);
       camera.lookAt(_camTarget);
 
-      renderer.render(scene, camera);
-      if (isSoftwareGl) afterDraw(tick);
-      else frameId = requestAnimationFrame(tick);
-    };
-
-    frameId = requestAnimationFrame(tick);
+      if (!isSoftwareGl) {
+        renderer.render(scene, camera);
+      } else {
+        swRenderAcc += delta;
+        if (!hasRenderedInitial || swRenderAcc >= 0.06) {
+          hasRenderedInitial = true;
+          swRenderAcc = 0;
+          renderer.render(scene, camera);
+        }
+      }
+    });
 
     return () => {
-      cancelAnimationFrame(frameId);
-      clearTimeout(frameId);
+      stopLoop();
+      resizeObserver.disconnect();
       window.removeEventListener('resize', handleResize);
       roadTex.dispose();
       sunTex.dispose();
       disposeThreeScene(scene, renderer);
     };
-  }, [gameStateRef, scoreRef, showToast, triggerGameOver, updateScore]);
+  }, [gameStateRef, scoreRef, showToast, startLoop, stopLoop, triggerGameOver, updateScore]);
 
   return (
     <div className="relative w-full h-full min-h-[480px] flex flex-col items-center justify-center bg-[#0b0418] overflow-hidden select-none">
@@ -788,37 +778,40 @@ export default function VaporwaveRacerGame({ onScoreUpdate, onGameOver, highScor
 
       {/* Mobile Touch Steering Bar */}
       {gameState === 'playing' && (
-        <div className="absolute bottom-20 left-4 right-4 z-10 flex gap-2 md:hidden pointer-events-auto">
+        <div className="absolute bottom-20 left-4 right-4 z-10 flex gap-2 md:hidden pointer-events-auto touch-none">
           <button
-            onTouchStart={(e) => {
+            onPointerDown={(e) => {
               e.preventDefault();
               steerLeft();
             }}
-            onClick={steerLeft}
-            className="flex-1 py-3 bg-slate-950/90 border border-fuchsia-500/40 rounded-xl text-white font-bold text-xs uppercase tracking-wider active:bg-fuchsia-600"
+            className="flex-1 py-3 bg-slate-950/90 border border-fuchsia-500/40 rounded-xl text-white font-bold text-xs uppercase tracking-wider active:bg-fuchsia-600 touch-none"
           >
             ◀ Jalur Kiri
           </button>
           <button
-            onTouchStart={(e) => {
+            onPointerDown={(e) => {
               e.preventDefault();
               raceStateRef.current.isBoosting = true;
             }}
-            onTouchEnd={(e) => {
-              e.preventDefault();
+            onPointerUp={() => {
               raceStateRef.current.isBoosting = false;
             }}
-            className="px-5 py-3 bg-cyan-600 active:bg-cyan-500 rounded-xl text-slate-950 font-bold text-xs uppercase tracking-wider"
+            onPointerLeave={() => {
+              raceStateRef.current.isBoosting = false;
+            }}
+            onPointerCancel={() => {
+              raceStateRef.current.isBoosting = false;
+            }}
+            className="px-5 py-3 bg-cyan-600 active:bg-cyan-500 rounded-xl text-slate-950 font-bold text-xs uppercase tracking-wider touch-none"
           >
             Boost
           </button>
           <button
-            onTouchStart={(e) => {
+            onPointerDown={(e) => {
               e.preventDefault();
               steerRight();
             }}
-            onClick={steerRight}
-            className="flex-1 py-3 bg-slate-950/90 border border-fuchsia-500/40 rounded-xl text-white font-bold text-xs uppercase tracking-wider active:bg-fuchsia-600"
+            className="flex-1 py-3 bg-slate-950/90 border border-fuchsia-500/40 rounded-xl text-white font-bold text-xs uppercase tracking-wider active:bg-fuchsia-600 touch-none"
           >
             Jalur Kanan ▶
           </button>

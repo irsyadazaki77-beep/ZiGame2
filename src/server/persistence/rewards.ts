@@ -18,8 +18,9 @@ import {
   StoredEconomyTransaction,
   StoredLeaderboardEntry
 } from './db';
+import { ECONOMY_BALANCE_CONFIG } from '../../config/balanceConfig';
 import { calculateLevelFromXp, getUserProgression } from './progression';
-import { getUserEconomy } from './economy';
+import { getUserEconomy, buildDoubleEntryLedgerEntry } from './economy';
 import { getCompetitiveProfile } from './competitive';
 import { getProcessedAction, setProcessedAction, isValidIdempotencyKey } from './idempotency';
 
@@ -421,9 +422,10 @@ export async function executeClaimReward(
 
   const amount = definition.rewardCoins;
   const xp = definition.rewardXp;
-  const transactionId = `tx_${Date.now()}_${crypto.randomBytes(8).toString('hex')}`;
-  const nowIso = new Date().toISOString();
-  let newBalance = 0;
+  const actionKey = `claim_${userId}_${idempotencyKey}`;
+  const nowMs = Date.now();
+  const transactionId = `tx_${nowMs}_${crypto.randomBytes(8).toString('hex')}`;
+  const nowIso = new Date(nowMs).toISOString();
 
   if (isFirestoreAvailable()) {
     const db = getDb();
@@ -431,8 +433,14 @@ export async function executeClaimReward(
     const progRef = db.collection('userProgression').doc(userId);
     const claimRef = db.collection('userClaimedRewards').doc(`${userId}_${canonicalClaimId}`);
     const ledgerRef = db.collection('economyTransactions').doc(transactionId);
+    const actionRef = db.collection('processedActions').doc(actionKey);
 
-    await db.runTransaction(async (tx) => {
+    return await db.runTransaction(async (tx) => {
+      const actionDoc = await tx.get(actionRef);
+      if (actionDoc.exists) {
+        return actionDoc.data()?.result;
+      }
+
       const claimDoc = await tx.get(claimRef);
       if (claimDoc.exists) {
         throw new ApiError(400, 'REWARD_ALREADY_CLAIMED', 'Reward ini sudah pernah Anda klaim sebelumnya.');
@@ -441,14 +449,20 @@ export async function executeClaimReward(
       const ecoDoc = await tx.get(ecoRef);
       const current: StoredEconomy = ecoDoc.exists
         ? (ecoDoc.data() as StoredEconomy)
-        : { userId, coins: 100, totalEarned: 100, totalSpent: 0, lastUpdated: Date.now() };
+        : {
+            userId,
+            coins: ECONOMY_BALANCE_CONFIG.starterCoins,
+            totalEarned: ECONOMY_BALANCE_CONFIG.starterCoins,
+            totalSpent: 0,
+            lastUpdated: nowMs
+          };
 
       const updatedEco: StoredEconomy = {
         userId,
         coins: current.coins + amount,
         totalEarned: current.totalEarned + amount,
         totalSpent: current.totalSpent,
-        lastUpdated: Date.now()
+        lastUpdated: nowMs
       };
 
       tx.set(ecoRef, updatedEco);
@@ -457,14 +471,14 @@ export async function executeClaimReward(
         const progDoc = await tx.get(progRef);
         const currentProg: StoredUserProgression = progDoc.exists
           ? (progDoc.data() as StoredUserProgression)
-          : { userId, totalXp: 0, level: 1, lastUpdated: Date.now() };
+          : { userId, totalXp: 0, level: 1, lastUpdated: nowMs };
 
         const newTotalXp = currentProg.totalXp + xp;
         const updatedProg: StoredUserProgression = {
           userId,
           totalXp: newTotalXp,
           level: calculateLevelFromXp(newTotalXp),
-          lastUpdated: Date.now()
+          lastUpdated: nowMs
         };
         tx.set(progRef, updatedProg);
       }
@@ -479,7 +493,7 @@ export async function executeClaimReward(
         claimedAt: nowIso
       });
 
-      const ledgerEntry: StoredEconomyTransaction = {
+      const ledgerEntry = buildDoubleEntryLedgerEntry({
         transactionId,
         userId,
         type: 'QUEST_REWARD',
@@ -489,10 +503,20 @@ export async function executeClaimReward(
         reason: `REWARD_${claimType.toUpperCase()}_${canonicalClaimId}`,
         referenceId: canonicalClaimId,
         createdAt: nowIso
-      };
+      });
       tx.set(ledgerRef, ledgerEntry);
 
-      newBalance = updatedEco.coins;
+      const result = {
+        success: true,
+        claimId: canonicalClaimId,
+        amount,
+        xp,
+        newBalance: updatedEco.coins,
+        transactionId
+      };
+
+      tx.set(actionRef, { result, timestamp: nowMs });
+      return result;
     });
   } else {
     const userClaims = memoryStore.claimedRewards.get(userId) || new Set<string>();
@@ -504,17 +528,17 @@ export async function executeClaimReward(
     const balanceBefore = current.coins;
     current.coins += amount;
     current.totalEarned += amount;
-    current.lastUpdated = Date.now();
+    current.lastUpdated = nowMs;
     memoryStore.economies.set(userId, current);
 
     if (xp > 0) {
-      let prog = memoryStore.userProgression.get(userId) || { userId, totalXp: 0, level: 1, lastUpdated: Date.now() };
+      let prog = memoryStore.userProgression.get(userId) || { userId, totalXp: 0, level: 1, lastUpdated: nowMs };
       const newTotalXp = prog.totalXp + xp;
       prog = {
         userId,
         totalXp: newTotalXp,
         level: calculateLevelFromXp(newTotalXp),
-        lastUpdated: Date.now()
+        lastUpdated: nowMs
       };
       memoryStore.userProgression.set(userId, prog);
     }
@@ -522,7 +546,7 @@ export async function executeClaimReward(
     userClaims.add(canonicalClaimId);
     memoryStore.claimedRewards.set(userId, userClaims);
 
-    const ledgerEntry: StoredEconomyTransaction = {
+    const ledgerEntry = buildDoubleEntryLedgerEntry({
       transactionId,
       userId,
       type: 'QUEST_REWARD',
@@ -532,20 +556,19 @@ export async function executeClaimReward(
       reason: `REWARD_${claimType.toUpperCase()}_${canonicalClaimId}`,
       referenceId: canonicalClaimId,
       createdAt: nowIso
-    };
+    });
     memoryStore.ledger.push(ledgerEntry);
-    newBalance = current.coins;
+
+    const result = {
+      success: true,
+      claimId: canonicalClaimId,
+      amount,
+      xp,
+      newBalance: current.coins,
+      transactionId
+    };
+
+    await setProcessedAction(actionKey, result);
+    return result;
   }
-
-  const result = {
-    success: true,
-    claimId: canonicalClaimId,
-    amount,
-    xp,
-    newBalance,
-    transactionId
-  };
-
-  await setProcessedAction(`claim_${userId}_${idempotencyKey}`, result);
-  return result;
 }

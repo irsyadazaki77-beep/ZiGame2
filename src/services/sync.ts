@@ -3,6 +3,7 @@ import { PlayerProfile, GameStats, Achievement, DailyMission, RecentlyPlayedEntr
 import { storageService } from './storageService';
 import { withRetry } from '../utils/resilience';
 import { logger } from '../utils/logger';
+import { ECONOMY_BALANCE_CONFIG } from '../config/balanceConfig';
 
 export interface CloudSavePayload {
   schemaVersion: number;
@@ -30,7 +31,24 @@ export const DEFAULT_AVATARS = ['🤖', '🕹️', '👾', '🚀', '🦊', '🐱
 export const DEFAULT_THEMES = ['indigo', 'purple', 'rose', 'emerald', '#6366f1', '#a855f7', '#f43f5e', '#10b981'];
 
 /**
- * Merge local and cloud user data ensuring server-authoritative economy and cosmetic protections.
+ * Safely merges only UI/accessibility/control preferences from local storage when cloud settings are unset.
+ * Never carries over coins, XP, levels, scores, or inventory.
+ */
+function mergeSafeUiSettings(
+  localSettings: PlayerProfile['settings'] | undefined,
+  cloudSettings: PlayerProfile['settings'] | undefined
+): PlayerProfile['settings'] | undefined {
+  if (!localSettings && !cloudSettings) return undefined;
+  return {
+    ...(localSettings || {}),
+    ...(cloudSettings || {})
+  };
+}
+
+/**
+ * Resolves cloud state as the single authoritative source of truth for authenticated users.
+ * Local guest coins, inventory, XP, levels, ranked/high scores, achievements, and missions
+ * NEVER overwrite or inflate Firestore cloud state upon login.
  */
 export function mergeUserData(
   local: {
@@ -51,99 +69,101 @@ export function mergeUserData(
   const cloudProfile = cloud?.profile || ({} as Partial<PlayerProfile>);
   const hasCloudProfile = Boolean(cloud && cloud.profile);
 
-  // Cosmetic unlocks: when cloud data is available, only combine default starter cosmetics
-  // with cloud-authoritative unlocks, rejecting unverified client-side cosmetic claims
-  const mergedAvatars = hasCloudProfile && Array.isArray(cloudProfile.unlockedAvatars)
+  // Inventory / Cosmetics: strictly authoritative from cloud (or starter defaults for new cloud accounts)
+  const authoritativeAvatars = hasCloudProfile && Array.isArray(cloudProfile.unlockedAvatars)
     ? Array.from(new Set([...DEFAULT_AVATARS, ...cloudProfile.unlockedAvatars]))
-    : Array.from(new Set([...DEFAULT_AVATARS, ...(local.profile.unlockedAvatars || [])]));
+    : [...DEFAULT_AVATARS];
 
-  const mergedThemes = hasCloudProfile && Array.isArray(cloudProfile.unlockedThemes)
+  const authoritativeThemes = hasCloudProfile && Array.isArray(cloudProfile.unlockedThemes)
     ? Array.from(new Set([...DEFAULT_THEMES, ...cloudProfile.unlockedThemes]))
-    : Array.from(new Set([...DEFAULT_THEMES, ...(local.profile.unlockedThemes || [])]));
+    : [...DEFAULT_THEMES];
 
-  // Active avatar & theme validation: must exist within merged unlocked sets or revert to default
-  const selectedAvatar = local.profile.avatar && mergedAvatars.includes(local.profile.avatar)
-    ? local.profile.avatar
-    : cloudProfile.avatar && mergedAvatars.includes(cloudProfile.avatar)
-      ? cloudProfile.avatar
-      : DEFAULT_AVATARS[0];
+  const selectedAvatar = hasCloudProfile && cloudProfile.avatar && authoritativeAvatars.includes(cloudProfile.avatar)
+    ? cloudProfile.avatar
+    : DEFAULT_AVATARS[0];
 
-  const selectedTheme = local.profile.colorTheme && mergedThemes.includes(local.profile.colorTheme)
-    ? local.profile.colorTheme
-    : cloudProfile.colorTheme && mergedThemes.includes(cloudProfile.colorTheme)
-      ? cloudProfile.colorTheme
-      : DEFAULT_THEMES[0];
+  const selectedTheme = hasCloudProfile && cloudProfile.colorTheme && authoritativeThemes.includes(cloudProfile.colorTheme)
+    ? cloudProfile.colorTheme
+    : DEFAULT_THEMES[0];
 
-  // Coins: strictly respect cloud authoritative balance when present, never allow unverified local override
-  const resolvedCoins = typeof cloudProfile.coins === 'number'
-    ? cloudProfile.coins
-    : Math.min(typeof local.profile.coins === 'number' ? local.profile.coins : 100, 500);
+  // Economy & Progression: strictly cloud authoritative, never trust localStorage guest balances or XP
+  const starterCoins = ECONOMY_BALANCE_CONFIG.starterCoins;
+  const resolvedCoins = hasCloudProfile && typeof cloudProfile.coins === 'number'
+    ? Math.max(0, Math.floor(cloudProfile.coins))
+    : starterCoins;
+
+  const safeSettings = mergeSafeUiSettings(local.profile.settings, cloudProfile.settings);
 
   const mergedProfile: PlayerProfile = {
-    ...cloudProfile,
-    ...local.profile,
-    name: local.profile.name || cloudProfile.name || 'GUEST',
+    uid: hasCloudProfile ? cloudProfile.uid : undefined,
+    username: hasCloudProfile ? cloudProfile.username : undefined,
+    name: hasCloudProfile && cloudProfile.name ? cloudProfile.name : (local.profile.name || 'PLAYER'),
     avatar: selectedAvatar,
     colorTheme: selectedTheme,
     coins: resolvedCoins,
-    unlockedAvatars: mergedAvatars,
-    unlockedThemes: mergedThemes
+    xp: hasCloudProfile && typeof cloudProfile.xp === 'number' ? cloudProfile.xp : 0,
+    level: hasCloudProfile && typeof cloudProfile.level === 'number' ? cloudProfile.level : 1,
+    streak: hasCloudProfile && typeof cloudProfile.streak === 'number' ? cloudProfile.streak : 0,
+    lastPlayDate: hasCloudProfile ? cloudProfile.lastPlayDate : undefined,
+    totalPlaytimeSec: hasCloudProfile && typeof cloudProfile.totalPlaytimeSec === 'number' ? cloudProfile.totalPlaytimeSec : 0,
+    mastery: hasCloudProfile && cloudProfile.mastery ? cloudProfile.mastery : {},
+    hasCompletedOnboarding: hasCloudProfile ? cloudProfile.hasCompletedOnboarding : local.profile.hasCompletedOnboarding,
+    onboardingStep: hasCloudProfile ? cloudProfile.onboardingStep : local.profile.onboardingStep,
+    favoriteGenre: hasCloudProfile ? cloudProfile.favoriteGenre : local.profile.favoriteGenre,
+    favoriteGames: hasCloudProfile && Array.isArray(cloudProfile.favoriteGames) ? cloudProfile.favoriteGames : [],
+    selectedTitle: hasCloudProfile ? cloudProfile.selectedTitle : undefined,
+    selectedBadges: hasCloudProfile && Array.isArray(cloudProfile.selectedBadges) ? cloudProfile.selectedBadges : [],
+    achievementShowcase: hasCloudProfile ? cloudProfile.achievementShowcase : undefined,
+    isPublicProfile: hasCloudProfile ? cloudProfile.isPublicProfile : true,
+    socialPrivacy: hasCloudProfile ? cloudProfile.socialPrivacy : local.profile.socialPrivacy,
+    settings: safeSettings,
+    unlockedAvatars: authoritativeAvatars,
+    unlockedThemes: authoritativeThemes
   };
 
-  // Strip any illegal administrative / privilege escalation fields from merged state
+  // Strip any administrative or privilege-escalating fields
   delete (mergedProfile as any).isAdmin;
   delete (mergedProfile as any).isBanned;
   delete (mergedProfile as any).role;
   delete (mergedProfile as any).verifiedBalance;
 
-  // Games: highest verified highscore & max total plays
-  const cloudGames = cloud?.games || [];
+  // Games: strictly cloud authoritative high scores & play counts (zero out unverified local guest progress)
+  const cloudGames = Array.isArray(cloud?.games) ? cloud.games : [];
   const mergedGames = local.games.map(localG => {
     const cloudG = cloudGames.find(cg => cg.id === localG.id);
-    if (!cloudG) return localG;
     return {
       ...localG,
-      highScore: Math.max(localG.highScore, cloudG.highScore),
-      plays: Math.max(localG.plays, cloudG.plays)
+      highScore: cloudG ? Math.max(0, Number(cloudG.highScore) || 0) : 0,
+      plays: cloudG ? Math.max(0, Number(cloudG.plays) || 0) : 0
     };
   });
 
-  // Achievements: union of unlocked status
-  const cloudAch = cloud?.achievements || [];
+  // Achievements: strictly cloud authoritative unlocked state
+  const cloudAch = Array.isArray(cloud?.achievements) ? cloud.achievements : [];
   const mergedAchievements = local.achievements.map(localA => {
     const cloudA = cloudAch.find(ca => ca.id === localA.id);
-    const isUnlocked = localA.unlocked || !!cloudA?.unlocked;
+    const isUnlocked = Boolean(cloudA?.unlocked);
     return {
       ...localA,
       unlocked: isUnlocked,
-      unlockedAt: localA.unlockedAt || cloudA?.unlockedAt || (isUnlocked ? new Date().toLocaleDateString('id-ID') : undefined)
+      unlockedAt: isUnlocked ? cloudA?.unlockedAt : undefined
     };
   });
 
-  // Recently Played: timestamp merge with deduplication
-  const combinedRecents = [
-    ...local.recentlyPlayed,
-    ...(cloud?.recentlyPlayed || [])
-  ];
-  const recentMap = new Map<string, RecentlyPlayedEntry>();
-  combinedRecents.forEach(entry => {
-    const existing = recentMap.get(entry.gameId);
-    if (!existing || entry.lastPlayedAt > existing.lastPlayedAt) {
-      recentMap.set(entry.gameId, entry);
-    }
-  });
-  const mergedRecentlyPlayed = Array.from(recentMap.values())
-    .sort((a, b) => b.lastPlayedAt - a.lastPlayedAt)
-    .slice(0, 20);
+  // Missions & Recently Played: strictly from cloud
+  const mergedMissions = Array.isArray(cloud?.missions) ? cloud.missions : [];
+  const mergedRecentlyPlayed = Array.isArray(cloud?.recentlyPlayed)
+    ? [...cloud.recentlyPlayed].sort((a, b) => b.lastPlayedAt - a.lastPlayedAt).slice(0, 20)
+    : [];
 
   return {
     profile: mergedProfile,
     games: mergedGames,
     achievements: mergedAchievements,
-    missions: local.missions.length > 0 ? local.missions : (cloud?.missions || []),
+    missions: mergedMissions,
     recentlyPlayed: mergedRecentlyPlayed
   };
-}
+};
 
 /**
  * Backward compatibility alias for resolveCloudConflict
@@ -151,22 +171,17 @@ export function mergeUserData(
 export const resolveCloudConflict = mergeUserData;
 
 export const syncDataToCloud = async (
-  profile: PlayerProfile, 
-  games: GameStats[], 
+  profile: PlayerProfile,
+  games: GameStats[],
   achievements: Achievement[],
   missions: DailyMission[],
   recentlyPlayed: RecentlyPlayedEntry[] = []
 ): Promise<boolean> => {
+  // Never persist offline guest snapshots or enqueue them to overwrite authenticated cloud accounts
   if (!isFirebaseReady() || !auth?.currentUser || !db) {
-    // Enqueue mutation for later sync if offline/firebase not ready
-    storageService.pushOfflineMutation({
-      type: 'SYNC_SNAPSHOT',
-      payload: { profile, games, achievements, missions, recentlyPlayed },
-      timestamp: Date.now()
-    });
     return false;
   }
-  
+
   try {
     const uid = auth.currentUser.uid;
     const userRef = doc(db, 'users', uid);
@@ -197,12 +212,10 @@ export const syncDataToCloud = async (
         // Fallback gracefully on network / read errors
       }
 
-      // Authoritative coins: strictly retain existing cloud balance or clamp starter bonus to max 500
       const safeCoins = cloudCoins !== null
         ? cloudCoins
-        : Math.min(typeof profile.coins === 'number' ? profile.coins : 100, 500);
+        : ECONOMY_BALANCE_CONFIG.starterCoins;
 
-      // Authoritative cosmetics: only permit default starter cosmetics or server-confirmed cloud inventory
       const safeUnlockedAvatars = cloudUnlockedAvatars !== null
         ? Array.from(new Set([...DEFAULT_AVATARS, ...cloudUnlockedAvatars]))
         : DEFAULT_AVATARS;
@@ -221,7 +234,7 @@ export const syncDataToCloud = async (
 
       const sanitizedProfile: PlayerProfile = {
         ...profile,
-        name: (profile.name || 'GUEST').slice(0, 64),
+        name: (profile.name || 'PLAYER').slice(0, 64),
         avatar: safeAvatar,
         colorTheme: safeTheme,
         coins: safeCoins,
@@ -229,7 +242,6 @@ export const syncDataToCloud = async (
         unlockedThemes: safeUnlockedThemes
       };
 
-      // Ensure no administrative or privilege-escalating fields can ever be sent
       delete (sanitizedProfile as any).isAdmin;
       delete (sanitizedProfile as any).isBanned;
       delete (sanitizedProfile as any).role;
@@ -252,7 +264,6 @@ export const syncDataToCloud = async (
       logger.info('Cloud state synchronized', { code: 'SYNC_OK', userId: uid });
     }, { maxRetries: 3, initialDelayMs: 500 });
 
-    // Drain queued offline mutations on success
     storageService.clearOfflineMutations();
     return true;
   } catch (error) {
@@ -266,15 +277,15 @@ export const syncDataToCloud = async (
 
 export const fetchCloudData = async (): Promise<any | null> => {
   if (!isFirebaseReady() || !auth?.currentUser || !db) return null;
-  
+
   try {
     const uid = auth.currentUser.uid;
     const userRef = doc(db, 'users', uid);
-    
+
     const docSnap = await withRetry(async () => {
       return await getDoc(userRef);
     }, { maxRetries: 3, initialDelayMs: 400 });
-    
+
     if (docSnap.exists()) {
       return docSnap.data();
     }

@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { rateLimit } from '../rateLimiter';
 import { serverLogger } from '../logger';
-import { sendApiError } from '../requestContext';
+import { sendApiError, handleServerException } from '../requestContext';
 import { APP_VERSION } from '../../config/version';
 import { isValidGameId, requireCanonicalGameId } from '../../config/canonicalGames';
 import { GAME_BALANCE_CONFIG } from '../../config/balanceConfig';
@@ -20,9 +20,8 @@ export const systemRoutes = Router();
 
 systemRoutes.get('/health', (_req: Request, res: Response) => {
   const health = getPersistenceHealthStatus();
-  const statusCode = health.status === 'unavailable' ? 503 : 200;
-  return res.status(statusCode).json({
-    status: health.status,
+  return res.status(200).json({
+    status: health.status === 'unavailable' ? 'degraded' : health.status,
     version: APP_VERSION,
     persistence: health.persistence,
     timestamp: new Date().toISOString()
@@ -93,7 +92,7 @@ systemRoutes.get('/leaderboard/:gameId', rateLimit(60, 60000, 'leaderboard_view'
     });
   } catch (err: unknown) {
     serverLogger.error('LEADERBOARD_FETCH_ERROR', 'Failed to fetch leaderboard', err, undefined, req.user?.uid, req.ip, req.id);
-    return sendApiError(res, 500, 'INTERNAL_ERROR', 'Gagal memuat data papan peringkat.');
+    return handleServerException(err, req, res);
   }
 });
 

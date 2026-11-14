@@ -14,15 +14,31 @@ export interface RateLimitResult {
   resetTime: number;
 }
 
-export interface RateLimiter {
+export interface RateLimitStore {
   check(key: string, maxRequests: number, windowMs: number): Promise<RateLimitResult>;
+  clear?(): void;
+  destroy?(): void;
+}
+
+export type RateLimiter = RateLimitStore;
+
+let loggedProdMemoryWarn = false;
+
+function warnIfProdInMemory(context: string): void {
+  if (process.env.NODE_ENV === 'production' && !loggedProdMemoryWarn) {
+    loggedProdMemoryWarn = true;
+    serverLogger.warn(
+      'RATE_LIMIT_IN_MEMORY_PROD',
+      `Rate limiter running with per-instance MemoryRateLimiter fallback (${context}). Configure a shared RateLimitStore (Redis or Firestore) for multi-instance production deployments.`
+    );
+  }
 }
 
 /**
  * In-Memory Sliding Window Counter Rate Limiter
- * Used during testing and when Firestore is uninitialized
+ * Used during testing and development, or as emergency single-instance fallback.
  */
-export class MemoryRateLimiter implements RateLimiter {
+export class MemoryRateLimiter implements RateLimitStore {
   private store = new Map<string, { count: number; resetTime: number }>();
   private readonly maxEntries: number;
   private cleanupInterval: NodeJS.Timeout | null = null;
@@ -30,12 +46,10 @@ export class MemoryRateLimiter implements RateLimiter {
   constructor(maxEntries: number = 10000, cleanupIntervalMs: number = 60000) {
     this.maxEntries = maxEntries;
 
-    // Periodic sweep for expired window keys
     this.cleanupInterval = setInterval(() => {
       this.cleanupExpired();
     }, cleanupIntervalMs);
 
-    // Call .unref() so this background timer does not keep Node.js or Vitest processes alive
     if (this.cleanupInterval && typeof this.cleanupInterval.unref === 'function') {
       this.cleanupInterval.unref();
     }
@@ -52,7 +66,6 @@ export class MemoryRateLimiter implements RateLimiter {
   private enforceCapacity(now: number): void {
     if (this.store.size >= this.maxEntries) {
       this.cleanupExpired(now);
-      // If still at or over threshold after expired sweep, evict oldest 10%
       if (this.store.size >= this.maxEntries) {
         const evictBatch = Math.max(1, Math.floor(this.maxEntries * 0.1));
         let evicted = 0;
@@ -66,6 +79,7 @@ export class MemoryRateLimiter implements RateLimiter {
   }
 
   async check(key: string, maxRequests: number, windowMs: number): Promise<RateLimitResult> {
+    warnIfProdInMemory('MemoryRateLimiter.check');
     const now = Date.now();
     this.enforceCapacity(now);
     const entry = this.store.get(key);
@@ -98,13 +112,14 @@ export class MemoryRateLimiter implements RateLimiter {
 }
 
 /**
- * Firestore-backed Rate Limiter for Production Environments
+ * Shared Firestore-backed Rate Limiter for Multi-Instance Production Environments
  */
-export class FirestoreRateLimiter implements RateLimiter {
+export class FirestoreRateLimiter implements RateLimitStore {
   private fallback = new MemoryRateLimiter();
 
   async check(key: string, maxRequests: number, windowMs: number): Promise<RateLimitResult> {
     if (!isFirestoreAvailable()) {
+      warnIfProdInMemory('Firestore unavailable');
       return this.fallback.check(key, maxRequests, windowMs);
     }
 
@@ -139,13 +154,29 @@ export class FirestoreRateLimiter implements RateLimiter {
         return { allowed: true, remaining: maxRequests - newCount, resetTime: data.resetTime };
       });
     } catch (err) {
+      warnIfProdInMemory('Firestore transaction failed');
       serverLogger.warn('RATE_LIMITER_FALLBACK', 'Firestore rate limiter failed, falling back to memory', { error: String(err) });
       return this.fallback.check(key, maxRequests, windowMs);
     }
   }
 }
 
-export const defaultRateLimiter: RateLimiter = new FirestoreRateLimiter();
+let activeRateLimitStore: RateLimitStore = new FirestoreRateLimiter();
+
+/**
+ * Allows plugging in a shared Redis/Memcached/custom RateLimitStore for horizontally scaled deployments.
+ */
+export function setSharedRateLimitStore(store: RateLimitStore): void {
+  activeRateLimitStore = store;
+}
+
+export function getSharedRateLimitStore(): RateLimitStore {
+  return activeRateLimitStore;
+}
+
+export const defaultRateLimiter: RateLimitStore = {
+  check: (key, maxRequests, windowMs) => activeRateLimitStore.check(key, maxRequests, windowMs)
+};
 
 export const SENSITIVE_CATEGORIES = new Set([
   'economy',
@@ -155,6 +186,8 @@ export const SENSITIVE_CATEGORIES = new Set([
   'gacha',
   'shop_purchase',
   'score_submit',
+  'comp_submit',
+  'comp_session_start',
   'daily_spin',
   'session_start',
   'admin'
@@ -167,7 +200,7 @@ export function rateLimit(
   maxRequests: number,
   windowMs: number = 60000,
   category?: string,
-  limiter: RateLimiter = defaultRateLimiter
+  limiter: RateLimitStore = defaultRateLimiter
 ) {
   const fallbackMemLimiter = new MemoryRateLimiter();
 
@@ -187,7 +220,7 @@ export function rateLimit(
       try {
         result = await limiter.check(key, maxRequests, windowMs);
       } catch (limiterErr) {
-        // Secure degraded: fallback to in-memory limiter
+        warnIfProdInMemory('Middleware limiter exception');
         serverLogger.warn('RATE_LIMIT_DEGRADED', 'Primary rate limiter failed, applying in-memory fallback', {
           category: endpointCat,
           error: String(limiterErr)
@@ -219,7 +252,6 @@ export function rateLimit(
     } catch (err) {
       serverLogger.error('RATE_LIMIT_ERROR', 'Failed to evaluate rate limit', err, undefined, req.user?.uid, req.ip, req.id);
       if (isSensitive) {
-        // Fail-closed for sensitive economy/admin/score endpoints
         return sendApiError(
           res,
           503,

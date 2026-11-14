@@ -2,7 +2,6 @@ import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut as fbSignOut, onAuthStateChanged, User } from 'firebase/auth';
 import { initializeFirestore, getFirestore, doc, getDoc, getDocFromServer, setDoc, updateDoc } from 'firebase/firestore';
 import { logger } from '../utils/logger';
-import firebaseConfigJson from '../../firebase-applet-config.json';
 
 export enum OperationType {
   CREATE = 'create',
@@ -58,15 +57,46 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
   return errInfo;
 }
 
-// Configuration priority: firebase-applet-config.json with env var overrides
+interface AppletFirebaseConfig {
+  apiKey?: string;
+  authDomain?: string;
+  projectId?: string;
+  storageBucket?: string;
+  messagingSenderId?: string;
+  appId?: string;
+  firestoreDatabaseId?: string;
+}
+
+function loadDevFallbackConfig(): AppletFirebaseConfig {
+  if (!import.meta.env.DEV) {
+    return {};
+  }
+  try {
+    const modules = import.meta.glob('../../firebase-applet-config.json', { eager: true });
+    const mod = modules['../../firebase-applet-config.json'] as
+      | ({ default?: AppletFirebaseConfig } & AppletFirebaseConfig)
+      | undefined;
+    const raw: AppletFirebaseConfig = (mod && 'default' in mod && mod.default ? mod.default : mod) || {};
+    if (raw.projectId?.includes('YOUR_FIREBASE_PROJECT_ID') || raw.apiKey?.includes('YOUR_API_KEY')) {
+      return {};
+    }
+    return raw;
+  } catch {
+    return {};
+  }
+}
+
+const devFallbackConfig = loadDevFallbackConfig();
+
+// Configuration priority: VITE_FIREBASE_* env vars first, with dev-only fallback to gitignored local config
 const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || firebaseConfigJson.apiKey || "",
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || firebaseConfigJson.authDomain || "",
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || firebaseConfigJson.projectId || "",
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || firebaseConfigJson.storageBucket || "",
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || firebaseConfigJson.messagingSenderId || "",
-  appId: import.meta.env.VITE_FIREBASE_APP_ID || firebaseConfigJson.appId || "",
-  firestoreDatabaseId: import.meta.env.VITE_FIRESTORE_DATABASE_ID || firebaseConfigJson.firestoreDatabaseId || "(default)"
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || devFallbackConfig.apiKey || '',
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || devFallbackConfig.authDomain || '',
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || devFallbackConfig.projectId || '',
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || devFallbackConfig.storageBucket || '',
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || devFallbackConfig.messagingSenderId || '',
+  appId: import.meta.env.VITE_FIREBASE_APP_ID || devFallbackConfig.appId || '',
+  firestoreDatabaseId: import.meta.env.VITE_FIRESTORE_DATABASE_ID || devFallbackConfig.firestoreDatabaseId || '(default)'
 };
 
 let app: any;
@@ -74,6 +104,7 @@ let auth: any = null;
 let db: any = null;
 let provider: any = null;
 let isInitialized = false;
+let initErrorMessage: string | null = null;
 
 try {
   if (firebaseConfig.apiKey && firebaseConfig.projectId) {
@@ -104,13 +135,19 @@ try {
         }
       });
     }
+  } else {
+    initErrorMessage = 'Firebase client configuration missing. Set VITE_FIREBASE_API_KEY and VITE_FIREBASE_PROJECT_ID (or provide firebase-applet-config.json in development). Cloud sync & ranked login are disabled; Offline Guest Mode remains available.';
+    if (!import.meta.env.VITEST && import.meta.env.MODE !== 'test') {
+      logger.error(initErrorMessage);
+    }
   }
 } catch (e) {
-  logger.warn("Firebase not fully configured or failed to initialize", { error: e as Error });
+  initErrorMessage = e instanceof Error ? e.message : String(e);
+  logger.warn('Firebase not fully configured or failed to initialize', { error: e as Error });
 }
 
 export const isFirebaseReady = () => isInitialized;
+export const getFirebaseInitError = () => initErrorMessage;
 
 export { app, auth, db, provider, signInWithPopup, fbSignOut, onAuthStateChanged, doc, getDoc, getDocFromServer, setDoc, updateDoc };
 export type { User };
-

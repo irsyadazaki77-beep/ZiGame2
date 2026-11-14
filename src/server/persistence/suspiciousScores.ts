@@ -33,7 +33,7 @@ export async function recordSuspiciousScore(entry: RecordSuspiciousScoreParams):
   if (isFirestoreAvailable()) {
     const db = getDb();
     await db.collection('suspiciousScores').doc(fullEntry.id).set(fullEntry);
-  } else {
+  } else if (process.env.NODE_ENV !== 'production') {
     memoryStore.suspiciousScores.push(fullEntry);
   }
 
@@ -59,6 +59,7 @@ export interface SuspiciousScoreFilter {
 }
 
 export async function getSuspiciousScores(filter?: SuspiciousScoreFilter): Promise<StoredSuspiciousScore[]> {
+  assertPersistenceOperational();
   const limit = Math.min(100, Math.max(1, filter?.limit || 100));
 
   if (isFirestoreAvailable()) {

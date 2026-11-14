@@ -22,12 +22,13 @@ import {
   buyItemSchema,
   gambleSchema,
   gachaSchema,
+  spinSchema,
   claimRewardSchema
 } from '../schemaValidator';
 
 export const economyRoutes = Router();
 
-economyRoutes.get('/economy', requireAuth, rateLimit(60, 60000, 'economy_fetch'), async (req: Request, res: Response) => {
+economyRoutes.get('/economy', requireAuth, enforceUserOwnership, rateLimit(60, 60000, 'economy_fetch'), async (req: Request, res: Response) => {
   try {
     const userId = req.user!.uid;
     const economy = await getUserEconomy(userId);
@@ -52,7 +53,7 @@ economyRoutes.get('/economy', requireAuth, rateLimit(60, 60000, 'economy_fetch')
   }
 });
 
-economyRoutes.get('/spin-status', requireAuth, rateLimit(60, 60000, 'spin_status'), async (req: Request, res: Response) => {
+economyRoutes.get('/spin-status', requireAuth, enforceUserOwnership, rateLimit(60, 60000, 'spin_status'), async (req: Request, res: Response) => {
   try {
     const userId = req.user!.uid;
     const cooldown = await getSpinCooldown(userId);
@@ -99,13 +100,15 @@ economyRoutes.post(
   enforceUserOwnership,
   requireNotBanned,
   rateLimit(10, 60000, 'daily_spin'),
+  validateBody(spinSchema),
   async (req: Request, res: Response) => {
     try {
       if (isKillSwitchActive('economy')) {
         return sendApiError(res, 503, 'ECONOMY_MAINTENANCE', 'Sistem transaksi ekonomi sedang dalam pemeliharaan sementara.');
       }
       const userId = req.user!.uid;
-      const result = await executeDailySpin(userId);
+      const { idempotencyKey } = (req.body || {}) as { idempotencyKey?: string };
+      const result = await executeDailySpin(userId, idempotencyKey);
 
       serverLogger.info('SPIN', `User spun wheel and won ${result.prize} coins`, {
         prize: result.prize,

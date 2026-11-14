@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { audio } from '../../utils/audio';
-import { useGameEngine } from '../../hooks/useGameEngine';
+import { useGameEngine } from '../../sdk';
 import { disposeThreeScene } from '../../utils/threeCleanup';
 import { screenShake } from '../../utils/screenShake';
 import { GameOverlay } from '../gameplay/GameOverlay';
@@ -64,6 +64,8 @@ export default function NeonStackerGame({ onGameOver, onScoreUpdate, highScore }
     startWithCountdown,
     resumeGame,
     countdown,
+    startLoop,
+    stopLoop,
     gameStateRef
   } = useGameEngine({
     gameId: 'neonstacker',
@@ -499,34 +501,17 @@ export default function NeonStackerGame({ onGameOver, onScoreUpdate, highScore }
       camera.updateProjectionMatrix();
       renderer.setSize(w, h);
     };
+    const resizeObserver = new ResizeObserver(handleResize);
+    resizeObserver.observe(mount);
     window.addEventListener('resize', handleResize);
 
-    const clock = new THREE.Clock();
-    let frameId = 0;
+    let elapsed = 0;
+    let swRenderAcc = 0;
+    let hasRenderedInitial = false;
 
-    function afterDraw(cb: () => void) {
-      const gl = renderer.getContext() as WebGL2RenderingContext;
-      const sync = gl.fenceSync ? gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0) : null;
-      gl.flush();
-      if (!sync) {
-        frameId = window.setTimeout(cb, 80);
-        return;
-      }
-      const poll = () => {
-        const state = gl.getSyncParameter(sync, gl.SYNC_STATUS);
-        if (state === gl.UNSIGNALED) {
-          frameId = window.setTimeout(poll, 5);
-        } else {
-          gl.deleteSync(sync);
-          frameId = window.setTimeout(cb, 80);
-        }
-      };
-      frameId = window.setTimeout(poll, 5);
-    }
-
-    const tick = () => {
-      const delta = Math.min(clock.getDelta(), 0.1);
-      const elapsed = clock.getElapsedTime();
+    startLoop((_timestamp, deltaTimeMs) => {
+      const delta = Math.min(deltaTimeMs / 1000, 0.05);
+      elapsed += delta;
       const st = stackStateRef.current;
 
       if (st.resetRequested) {
@@ -688,25 +673,30 @@ export default function NeonStackerGame({ onGameOver, onScoreUpdate, highScore }
       keyLight.target.position.set(0, towerTopY, 0);
       keyLight.target.updateMatrixWorld();
 
-      renderer.render(scene, camera);
-      if (isSoftwareGl) afterDraw(tick);
-      else frameId = requestAnimationFrame(tick);
-    };
-
-    frameId = requestAnimationFrame(tick);
+      if (!isSoftwareGl) {
+        renderer.render(scene, camera);
+      } else {
+        swRenderAcc += delta;
+        if (!hasRenderedInitial || swRenderAcc >= 0.06) {
+          hasRenderedInitial = true;
+          swRenderAcc = 0;
+          renderer.render(scene, camera);
+        }
+      }
+    });
 
     return () => {
-      cancelAnimationFrame(frameId);
-      clearTimeout(frameId);
+      stopLoop();
+      resizeObserver.disconnect();
       window.removeEventListener('resize', handleResize);
       clearTower();
       disposeThreeScene(scene, renderer);
     };
-  }, [gameStateRef]);
+  }, [gameStateRef, startLoop, stopLoop]);
 
   return (
     <div
-      onClick={handleStack}
+      onPointerDown={handleStack}
       className="relative w-full h-full min-h-[480px] flex flex-col items-center justify-center bg-[#060913] overflow-hidden select-none cursor-pointer touch-none"
     >
       {/* Dedicated WebGL Mount Container */}
@@ -741,6 +731,7 @@ export default function NeonStackerGame({ onGameOver, onScoreUpdate, highScore }
 
       {/* Unified Collapsible Bottom Control Dock */}
       <div
+        onPointerDown={(e) => e.stopPropagation()}
         onClick={(e) => e.stopPropagation()}
         className="absolute bottom-3 left-1/2 -translate-x-1/2 z-10 w-[94%] max-w-[640px] transition-transform duration-200 pointer-events-auto"
         style={{ transform: `translate(-50%, ${dockCollapsed ? 'calc(100% - 28px)' : '0px'})` }}
@@ -790,8 +781,11 @@ export default function NeonStackerGame({ onGameOver, onScoreUpdate, highScore }
             </button>
 
             <button
-              onClick={handleStack}
-              className="px-4 py-1.5 rounded-lg bg-pink-600 hover:bg-pink-500 text-white font-semibold tracking-wide whitespace-nowrap"
+              onPointerDown={(e) => {
+                e.stopPropagation();
+                handleStack();
+              }}
+              className="px-4 py-1.5 rounded-lg bg-pink-600 hover:bg-pink-500 text-white font-semibold tracking-wide whitespace-nowrap touch-none"
             >
               Tumpuk Balok
             </button>
