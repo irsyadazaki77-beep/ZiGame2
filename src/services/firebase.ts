@@ -67,10 +67,7 @@ interface AppletFirebaseConfig {
   firestoreDatabaseId?: string;
 }
 
-function loadDevFallbackConfig(): AppletFirebaseConfig {
-  if (!import.meta.env.DEV) {
-    return {};
-  }
+function loadAppletConfigFallback(): AppletFirebaseConfig {
   try {
     const modules = import.meta.glob('../../firebase-applet-config.json', { eager: true });
     const mod = modules['../../firebase-applet-config.json'] as
@@ -86,9 +83,9 @@ function loadDevFallbackConfig(): AppletFirebaseConfig {
   }
 }
 
-const devFallbackConfig = loadDevFallbackConfig();
+const devFallbackConfig = loadAppletConfigFallback();
 
-// Configuration priority: VITE_FIREBASE_* env vars first, with dev-only fallback to gitignored local config
+// Configuration priority: VITE_FIREBASE_* env vars first, with fallback to firebase-applet-config.json
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY || devFallbackConfig.apiKey || '',
   authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || devFallbackConfig.authDomain || '',

@@ -1,8 +1,7 @@
 import crypto from 'crypto';
 import { ApiError } from '../errors';
-import { requireCanonicalGameId, CanonicalGameId } from '../../config/canonicalGames';
+import { requireCanonicalGameId, CANONICAL_GAME_METADATA, CanonicalGameId } from '../../config/canonicalGames';
 import { getGameBalanceConfig, PROGRESSION_CONFIG, ECONOMY_BALANCE_CONFIG } from '../../config/balanceConfig';
-import { CANONICAL_GAME_REGISTRY } from '../../config/gameRegistry';
 import {
   getTierForRating,
   INITIAL_RATING,
@@ -445,7 +444,7 @@ export async function executeRankedSubmission(input: ScoreSubmissionInput): Prom
 
         const historyId = `hist_${nowMs}_${crypto.randomBytes(6).toString('hex')}`;
         const historyRef = db.collection('userGameHistory').doc(historyId);
-        const genre = CANONICAL_GAME_REGISTRY[canonicalId]?.genre || 'Arcade';
+        const genre = CANONICAL_GAME_METADATA[canonicalId]?.genre || 'Arcade';
         tx.set(historyRef, {
           historyId,
           userId,
@@ -697,7 +696,7 @@ export async function executeRankedSubmission(input: ScoreSubmissionInput): Prom
       memoryStore.userProgression.set(userId, prog);
     }
 
-    const genre = CANONICAL_GAME_REGISTRY[canonicalId]?.genre || 'Arcade';
+    const genre = CANONICAL_GAME_METADATA[canonicalId]?.genre || 'Arcade';
     const historyEntry: StoredGameHistoryEntry = {
       historyId: `hist_${nowMs}_${crypto.randomBytes(6).toString('hex')}`,
       userId,

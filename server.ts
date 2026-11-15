@@ -1,5 +1,4 @@
 import express, { Request, Response, NextFunction } from "express";
-import { createServer as createViteServer } from "vite";
 import path from "path";
 import fs from "fs";
 import { initializeApp, cert, getApps } from "firebase-admin/app";
@@ -247,8 +246,12 @@ async function startServer() {
   const app = await createExpressApp();
   const PORT = Number(process.env.PORT) || 3000;
 
-  // Vite middleware for development
-  if (process.env.NODE_ENV !== "production") {
+  const isRunningCompiledBundle = typeof __filename === 'string' && __filename.endsWith('server.cjs');
+  const isProductionRuntime = process.env.NODE_ENV === "production" || isRunningCompiledBundle;
+
+  // Vite middleware for development only (never required in production runtime)
+  if (!isProductionRuntime) {
+    const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({
       server: { middlewareMode: true, hmr: false },
       appType: "spa",

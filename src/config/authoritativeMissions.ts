@@ -10,8 +10,7 @@
  */
 
 import { DailyMission, Challenge, GameStats } from '../types';
-import { CANONICAL_GAME_IDS, CanonicalGameId } from './canonicalGames';
-import { CANONICAL_GAME_REGISTRY } from './gameRegistry';
+import { CANONICAL_GAME_IDS, CANONICAL_GAME_METADATA, CanonicalGameId } from './canonicalGames';
 
 // Calculate today's UTC Date string (YYYY-MM-DD)
 export function getUtcTodayDateString(timestamp: number = Date.now()): string {
@@ -76,8 +75,8 @@ export function getAuthoritativeDailyMissions(dateStr?: string, customGames?: Ga
     ? customGames.map(g => ({ id: g.id as CanonicalGameId, title: g.title, genre: g.genre || 'Arcade' }))
     : CANONICAL_GAME_IDS.map(id => ({
         id,
-        title: CANONICAL_GAME_REGISTRY[id]?.title || id,
-        genre: CANONICAL_GAME_REGISTRY[id]?.genre || 'Arcade'
+        title: CANONICAL_GAME_METADATA[id]?.title || id,
+        genre: CANONICAL_GAME_METADATA[id]?.genre || 'Arcade'
       }));
 
   const missions: AuthoritativeDailyMissionDef[] = [];
@@ -176,8 +175,8 @@ export function getAuthoritativeDailyChallenges(dateStr?: string, customGames?: 
     ? customGames
     : CANONICAL_GAME_IDS.map(id => ({
         id,
-        title: CANONICAL_GAME_REGISTRY[id]?.title || id,
-        genre: CANONICAL_GAME_REGISTRY[id]?.genre || 'Arcade'
+        title: CANONICAL_GAME_METADATA[id]?.title || id,
+        genre: CANONICAL_GAME_METADATA[id]?.genre || 'Arcade'
       }));
 
 

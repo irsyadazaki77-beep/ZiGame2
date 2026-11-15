@@ -48,6 +48,55 @@ export const CANONICAL_GAME_IDS = [
 
 export type CanonicalGameId = typeof CANONICAL_GAME_IDS[number];
 
+export interface CanonicalGameMetadata {
+  id: CanonicalGameId;
+  title: string;
+  genre: string;
+}
+
+export const CANONICAL_GAME_METADATA: Record<CanonicalGameId, CanonicalGameMetadata> = {
+  'snake': { id: 'snake', title: 'Pixel Snake', genre: 'Classic' },
+  'brick-breaker': { id: 'brick-breaker', title: 'Brick Neon', genre: 'Arcade' },
+  'flappy-pixel': { id: 'flappy-pixel', title: 'Flappy Pixel', genre: 'Endless' },
+  'space-defender': { id: 'space-defender', title: 'Space Defender', genre: 'Shooter' },
+  'memory-grid': { id: 'memory-grid', title: 'Memory Grid', genre: 'Puzzle' },
+  'cyber-runner': { id: 'cyber-runner', title: 'Cyber Runner', genre: 'Action' },
+  'neon-pong': { id: 'neon-pong', title: 'Neon Pong', genre: 'Arcade' },
+  'neon-stacker': { id: 'neon-stacker', title: 'Neon Stacker', genre: 'Arcade' },
+  'vaporwave-racer': { id: 'vaporwave-racer', title: 'Vaporwave Racer', genre: 'Action' },
+  'lock-breaker': { id: 'lock-breaker', title: 'Neon Lock Breaker', genre: 'Arcade' },
+  'sine-rider': { id: 'sine-rider', title: 'Sine Rider', genre: 'Arcade' },
+  'cosmic-dodge': { id: 'cosmic-dodge', title: 'Cosmic Dodge', genre: 'Action' },
+  'laser-grid': { id: 'laser-grid', title: 'Laser Grid Survival', genre: 'Arcade' },
+  'cyber-simon': { id: 'cyber-simon', title: 'Cyber Simon Says', genre: 'Puzzle' },
+  'plinko-neo': { id: 'plinko-neo', title: 'Plinko Neo Arcade', genre: 'Arcade' },
+  'cosmic-asteroid': { id: 'cosmic-asteroid', title: 'Cosmic Asteroid Smasher', genre: 'Shooter' },
+  'cyber-slasher': { id: 'cyber-slasher', title: 'Cyber Slasher Ninja', genre: 'Action' },
+  'cyber-clicker': { id: 'cyber-clicker', title: 'Cyber Core Clicker', genre: 'Idle / Clicker' },
+  'block-match': { id: 'block-match', title: 'Neon Block Match-3', genre: 'Puzzle' },
+  'cyber-typer': { id: 'cyber-typer', title: 'Cyber Typer Speedster', genre: 'Educational' },
+  'maze-runner': { id: 'maze-runner', title: 'Neon Maze Explorer', genre: 'Puzzle' },
+  'memory-path': { id: 'memory-path', title: 'Matrix Memory Path', genre: 'Puzzle' },
+  'rhythm-tap': { id: 'rhythm-tap', title: 'Cyber Rhythm Beats', genre: 'Music / Rhythm' },
+  'pixel-golf': { id: 'pixel-golf', title: 'Retro Putt Golf', genre: 'Sports' },
+  'pixel-dino': { id: 'pixel-dino', title: 'Pixel Dino Runner', genre: 'Classic' },
+  'cyber-tetris': { id: 'cyber-tetris', title: 'Cyber Tetris Pulse', genre: 'Classic' },
+  'archery-neo': { id: 'archery-neo', title: 'Archery Master Neo', genre: 'Sports' },
+  'cyber-mines': { id: 'cyber-mines', title: 'Cyber Minesweeper', genre: 'Puzzle' },
+  'neon-2048': { id: 'neon-2048', title: 'Neon 2048 Fusion', genre: 'Puzzle' },
+  'whack-a-drone': { id: 'whack-a-drone', title: 'Whack-a-Drone', genre: 'Arcade' },
+  'jump-rope': { id: 'jump-rope', title: 'Neon Jump Rope', genre: 'Arcade' },
+  'neon-drift': { id: 'neon-drift', title: 'Neon Drift 3D', genre: '3D Racing / Cyberpunk' },
+  'neon-heist': { id: 'neon-heist', title: 'Neon Heist', genre: 'Stealth / Strategy' },
+  'void-survivor': { id: 'void-survivor', title: 'Void Survivor', genre: 'Roguelite / Survival' },
+  'orbital-defense': { id: 'orbital-defense', title: 'Orbital Defense', genre: 'Tower Defense' },
+  'gravity-shift': { id: 'gravity-shift', title: 'Gravity Shift', genre: 'Platformer / Precision' },
+  'hex-dominion': { id: 'hex-dominion', title: 'Hex Dominion', genre: 'Strategy / Turn-Based' },
+  'wizard-chess': { id: 'wizard-chess', title: 'Wizard Chess 3D', genre: '3D Strategy / Chess' },
+  'desk-racer': { id: 'desk-racer', title: 'Desk Racer', genre: '3D Racing / Time-Trial' },
+  'world-box': { id: 'world-box', title: 'WorldBox: God Simulator', genre: 'Strategy / God Sandbox' }
+};
+
 /**
  * Mapping of legacy or alternate identifiers to their canonical form.
  */

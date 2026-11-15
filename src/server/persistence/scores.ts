@@ -1,8 +1,7 @@
 import crypto from 'crypto';
 import { ApiError } from '../errors';
-import { requireCanonicalGameId, CanonicalGameId } from '../../config/canonicalGames';
+import { requireCanonicalGameId, CANONICAL_GAME_METADATA, CanonicalGameId } from '../../config/canonicalGames';
 import { getGameBalanceConfig, PROGRESSION_CONFIG, ECONOMY_BALANCE_CONFIG } from '../../config/balanceConfig';
-import { CANONICAL_GAME_REGISTRY } from '../../config/gameRegistry';
 import {
   isFirestoreAvailable,
   getDb,
@@ -107,7 +106,7 @@ export async function executeScoreSubmission({
   const transactionId = `tx_${Date.now()}_${crypto.randomBytes(8).toString('hex')}`;
   const nowMs = Date.now();
   const nowIso = new Date(nowMs).toISOString();
-  const genre = CANONICAL_GAME_REGISTRY[canonicalId]?.genre || 'Arcade';
+  const genre = CANONICAL_GAME_METADATA[canonicalId]?.genre || 'Arcade';
 
   // Authoritative mastery level bound
   const safeMasteryLevel = Math.min(PROGRESSION_CONFIG.masteryMaxLevel, Math.max(1, masteryLevel || 1));
