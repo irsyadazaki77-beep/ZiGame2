@@ -93,7 +93,7 @@ export const TopBar: React.FC<TopBarProps> = ({
       </div>
 
       {/* Top Right Quick Stats / Profile Header */}
-      <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+      <div className="flex items-center gap-1.5 sm:gap-3 shrink-0">
         {/* PWA In-App Install Action */}
         <PWAInstallButton variant="topbar" />
 

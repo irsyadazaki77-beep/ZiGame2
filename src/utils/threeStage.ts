@@ -1000,7 +1000,7 @@ export class ThreeStageController {
     this.renderer.domElement.className = 'w-full h-full block select-none touch-none';
 
     this.applyRendererQuality();
-    this.renderer.setSize(w, h);
+    this.renderer.setSize(w, h, false);
 
     this.container.innerHTML = '';
     this.container.appendChild(this.renderer.domElement);
@@ -1237,7 +1237,7 @@ export class ThreeStageController {
       }
     }
     this.camera.updateProjectionMatrix();
-    this.renderer.setSize(w, h);
+    this.renderer.setSize(w, h, false);
     if (this.composer) {
       this.composer.setPixelRatio(this.renderer.getPixelRatio());
       this.composer.setSize(w, h);

@@ -10,7 +10,7 @@ test.describe('ZiGame Critical User Flows — Desktop & Mobile E2E Suite', () =>
     await expect(mainHeading).toBeVisible();
 
     // Verify game grid/cards exist
-    const gameCards = page.locator('[data-testid="game-card"], a[href*="/game/"], button');
+    const gameCards = page.locator('[data-testid="game-card"]:visible, a[href*="/game/"]:visible, button:visible');
     await expect(gameCards.first()).toBeVisible();
   });
 

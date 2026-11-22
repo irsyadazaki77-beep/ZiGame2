@@ -57,11 +57,12 @@ export const PWAInstallButton: React.FC<PWAInstallButtonProps> = ({ variant = 't
       ) : (
         <button
           onClick={handleInstallClick}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-600/20 hover:bg-indigo-600/30 border border-indigo-500/30 text-indigo-300 hover:text-white text-xs font-semibold transition active:scale-95 cursor-pointer shadow-xs whitespace-nowrap shrink-0"
+          className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl bg-indigo-600/20 hover:bg-indigo-600/30 border border-indigo-500/30 text-indigo-300 hover:text-white text-xs font-semibold transition active:scale-95 cursor-pointer shadow-xs whitespace-nowrap shrink-0"
           title="Install ZIGAME ke Desktop / Layar Utama"
+          aria-label="Install App"
         >
           <Download size={13} className="text-indigo-400 animate-bounce" />
-          <span>Install App</span>
+          <span className="hidden sm:inline">Install App</span>
         </button>
       )}
 

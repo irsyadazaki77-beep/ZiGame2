@@ -223,7 +223,7 @@ export default function Shop({ profile, onUpdateProfile }: ShopProps) {
   const visibleItems = tab === 'avatars' ? PREMIUM_AVATARS : tab === 'themes' ? PREMIUM_THEMES : [...PREMIUM_AVATARS, ...PREMIUM_THEMES];
 
   return (
-    <div className="max-w-7xl mx-auto space-y-8 select-none font-sans" id="shop-page-root">
+    <div className="max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-4 sm:py-6 space-y-6 sm:space-y-8 select-none font-sans" id="shop-page-root">
       {/* Banner */}
       <ShopBanner
         profile={profile}
@@ -257,13 +257,13 @@ export default function Shop({ profile, onUpdateProfile }: ShopProps) {
 
       {/* Items Showcase Catalog */}
       <div className="space-y-4">
-        <div className="flex items-center justify-between">
-          <h2 className="text-base font-bold font-display text-white uppercase tracking-wider flex items-center gap-2">
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <h2 className="text-base font-bold font-display text-text-primary uppercase tracking-wider flex items-center gap-2">
             <Sparkles size={16} className="text-indigo-400" />
             Katalog Kosmetik ({visibleItems.length} Item)
           </h2>
-          <span className="text-xs font-mono text-zinc-500">
-            Saldo: <strong className="text-amber-400">{profile.coins}🪙</strong>
+          <span className="text-xs font-mono text-text-muted">
+            Saldo: <strong className="text-amber-500">{profile.coins}🪙</strong>
           </span>
         </div>
 

@@ -36,9 +36,9 @@ export const GameViewportEffects: React.FC<GameViewportEffectsProps> = ({
   }, []);
 
   return (
-    <div className={`relative w-full h-full flex items-center justify-center ${shakeClass}`}>
+    <div className={`relative w-full h-full min-h-0 min-w-0 flex items-center justify-center ${shakeClass}`}>
       {/* Underlying Game Canvas Container */}
-      <div className={`relative w-full h-full flex items-center justify-center ${isCrtFilter ? 'crt-bloom' : ''}`}>
+      <div className={`relative w-full h-full min-h-0 min-w-0 flex items-center justify-center ${isCrtFilter ? 'crt-bloom' : ''}`}>
         {children}
       </div>
 

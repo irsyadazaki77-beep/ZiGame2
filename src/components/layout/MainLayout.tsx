@@ -101,7 +101,7 @@ export function MainLayout({ children }: { children: React.ReactNode }) {
 
       {/* Main Content Area */}
       <div 
-        className={`flex-1 flex flex-col min-h-0 h-[100dvh] relative transition-all duration-200 ease-in-out ${
+        className={`flex-1 flex flex-col min-h-0 min-w-0 w-full h-[100dvh] relative transition-all duration-200 ease-in-out ${
           isGamePage 
             ? 'pl-0 pb-0' 
             : `${isSidebarCollapsed ? 'md:pl-[72px]' : 'md:pl-[208px]'} pb-[calc(3.75rem+env(safe-area-inset-bottom,0px))] md:pb-0`
@@ -116,7 +116,7 @@ export function MainLayout({ children }: { children: React.ReactNode }) {
         )}
 
         {/* Page Content */}
-        <main className={`flex-1 overflow-x-hidden ${isGamePage ? 'overflow-y-hidden' : 'overflow-y-auto'}`}>
+        <main className={`flex-1 min-h-0 overflow-x-hidden ${isGamePage ? 'overflow-y-hidden' : 'overflow-y-auto'}`}>
           {children}
         </main>
       </div>

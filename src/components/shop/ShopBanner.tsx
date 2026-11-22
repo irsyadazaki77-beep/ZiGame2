@@ -51,11 +51,11 @@ export const ShopBanner: React.FC<ShopBannerProps> = ({
       </div>
 
       {/* Tabs Filter Bar */}
-      <div className="flex items-center justify-between mt-8 pt-6 border-t border-zinc-800/80 flex-wrap gap-4">
-        <div className="flex items-center gap-2 bg-zinc-950 p-1.5 rounded-2xl border border-zinc-800">
+      <div className="flex items-center justify-between mt-6 sm:mt-8 pt-5 sm:pt-6 border-t border-zinc-800/80 flex-wrap gap-3 sm:gap-4">
+        <div className="flex flex-wrap sm:flex-nowrap items-center gap-1.5 sm:gap-2 bg-zinc-950 p-1.5 rounded-2xl border border-zinc-800 w-full sm:w-auto">
           <button
             onClick={() => { audio.playCoin(); setTab('all'); }}
-            className={`px-5 py-2 rounded-xl text-xs font-bold font-display uppercase tracking-wider transition-all cursor-pointer ${
+            className={`flex-1 sm:flex-initial px-3 sm:px-5 py-2 rounded-xl text-[11px] sm:text-xs font-bold font-display uppercase tracking-wider transition-all cursor-pointer whitespace-nowrap ${
               tab === 'all'
                 ? 'bg-indigo-600 text-white shadow-lg'
                 : 'text-zinc-400 hover:text-white hover:bg-zinc-900'
@@ -65,23 +65,23 @@ export const ShopBanner: React.FC<ShopBannerProps> = ({
           </button>
           <button
             onClick={() => { audio.playCoin(); setTab('avatars'); }}
-            className={`px-5 py-2 rounded-xl text-xs font-bold font-display uppercase tracking-wider transition-all cursor-pointer ${
+            className={`flex-1 sm:flex-initial px-3 sm:px-5 py-2 rounded-xl text-[11px] sm:text-xs font-bold font-display uppercase tracking-wider transition-all cursor-pointer whitespace-nowrap ${
               tab === 'avatars'
                 ? 'bg-indigo-600 text-white shadow-lg'
                 : 'text-zinc-400 hover:text-white hover:bg-zinc-900'
             }`}
           >
-            AVATAR EKSKLUSIF
+            AVATAR
           </button>
           <button
             onClick={() => { audio.playCoin(); setTab('themes'); }}
-            className={`px-5 py-2 rounded-xl text-xs font-bold font-display uppercase tracking-wider transition-all cursor-pointer ${
+            className={`flex-1 sm:flex-initial px-3 sm:px-5 py-2 rounded-xl text-[11px] sm:text-xs font-bold font-display uppercase tracking-wider transition-all cursor-pointer whitespace-nowrap ${
               tab === 'themes'
                 ? 'bg-indigo-600 text-white shadow-lg'
                 : 'text-zinc-400 hover:text-white hover:bg-zinc-900'
             }`}
           >
-            TEMA WARNA LOBI
+            TEMA LOBI
           </button>
         </div>
 

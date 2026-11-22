@@ -37,6 +37,7 @@ export const GameCard: React.FC<GameCardProps> = React.memo(({
 
   return (
     <div
+      data-testid="game-card"
       onClick={onClick}
       className="group flex flex-col h-full bg-surface-card hover:bg-surface-card-hover border border-border-subtle hover:border-border-medium rounded-2xl overflow-hidden transition-all duration-200 cursor-pointer shadow-md hover:-translate-y-1 relative select-none"
     >

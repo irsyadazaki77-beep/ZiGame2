@@ -1,4 +1,4 @@
-import React, { Suspense } from 'react';
+import React, { Suspense, useRef, useState, useEffect } from 'react';
 import { RefreshCw, Sparkles, Minimize2, RotateCcw } from 'lucide-react';
 import { GameStats } from '../../types';
 import { GameErrorBoundary } from '../gameplay/GameErrorBoundary';
@@ -76,6 +76,15 @@ interface GameHeroCanvasProps {
   onScoreUpdate: (score: number) => void;
 }
 
+const parseAspectRatio = (ratio: string): number => {
+  const parts = ratio.split('/').map((s) => parseFloat(s.trim()));
+  if (parts.length === 2 && parts[0] > 0 && parts[1] > 0) {
+    return parts[0] / parts[1];
+  }
+  const num = parseFloat(ratio);
+  return num > 0 ? num : 16 / 9;
+};
+
 export const GameHeroCanvas: React.FC<GameHeroCanvasProps> = ({
   activeGame,
   GameComponent,
@@ -94,6 +103,51 @@ export const GameHeroCanvas: React.FC<GameHeroCanvasProps> = ({
   onGameOver,
   onScoreUpdate
 }) => {
+  const stageRef = useRef<HTMLDivElement>(null);
+  const [stageSize, setStageSize] = useState<{ w: number; h: number }>({ w: 0, h: 0 });
+
+  useEffect(() => {
+    const el = stageRef.current;
+    if (!el) return;
+
+    const updateSize = (w: number, h: number) => {
+      if (w > 0 && h > 0) {
+        setStageSize((prev) => (prev.w === Math.floor(w) && prev.h === Math.floor(h) ? prev : { w: Math.floor(w), h: Math.floor(h) }));
+      }
+    };
+
+    updateSize(el.clientWidth, el.clientHeight);
+
+    if (typeof ResizeObserver !== 'undefined') {
+      const ro = new ResizeObserver((entries) => {
+        for (const entry of entries) {
+          updateSize(entry.contentRect.width, entry.contentRect.height);
+        }
+      });
+      ro.observe(el);
+      return () => ro.disconnect();
+    }
+  }, []);
+
+  const targetRatio = parseAspectRatio(aspectRatio);
+  let fittedStyle: React.CSSProperties = {
+    boxShadow: '0 4px 24px rgba(0,0,0,0.6)',
+  };
+
+  if (stageSize.w > 0 && stageSize.h > 0) {
+    let fw = stageSize.w;
+    let fh = fw / targetRatio;
+    if (fh > stageSize.h) {
+      fh = stageSize.h;
+      fw = fh * targetRatio;
+    }
+    fittedStyle = {
+      boxShadow: '0 4px 24px rgba(0,0,0,0.6)',
+      width: `${Math.floor(fw)}px`,
+      height: `${Math.floor(fh)}px`,
+    };
+  }
+
   return (
     <>
       {/* Floating Focus Mode Banner */}
@@ -141,15 +195,15 @@ export const GameHeroCanvas: React.FC<GameHeroCanvasProps> = ({
       )}
 
       {/* Clean Focused Canvas Stage with GameViewportEffects */}
-      <div className="flex-1 w-full max-w-5xl flex items-center justify-center relative min-h-0 p-1 sm:p-4">
-        <GameViewportEffects isCrtFilter={isCrtFilter}>
-          <div 
-            className="relative w-full h-full max-w-full max-h-full flex items-center justify-center bg-[#090b10] border border-white/[0.08] rounded-xl sm:rounded-2xl md:rounded-3xl shadow-2xl overflow-hidden transition-all duration-300"
-            style={{
-              boxShadow: `0 4px 24px rgba(0,0,0,0.6)`,
-              aspectRatio,
-            }}
-          >
+      <div className="flex-1 w-full max-w-5xl flex items-center justify-center relative min-h-0 min-w-0 overflow-hidden p-1 sm:p-3">
+        <div ref={stageRef} className="w-full h-full min-h-0 min-w-0 flex items-center justify-center">
+          <GameViewportEffects isCrtFilter={isCrtFilter}>
+            <div 
+              className={`relative flex items-center justify-center bg-[#090b10] border border-white/[0.08] rounded-xl sm:rounded-2xl md:rounded-3xl shadow-2xl overflow-hidden transition-[border-radius] duration-300 ${
+                stageSize.w === 0 ? 'w-full h-full max-w-full max-h-full' : ''
+              }`}
+              style={fittedStyle}
+            >
             {isStartingSession ? (
               <div className="w-full h-full flex flex-col items-center justify-center p-8 text-center bg-[#090b10]">
                 <RefreshCw size={26} className="animate-spin text-indigo-400 mb-3" />
@@ -179,8 +233,9 @@ export const GameHeroCanvas: React.FC<GameHeroCanvasProps> = ({
                 <h3 className="font-semibold text-sm text-white">Modul Game Sedang Dikembangkan</h3>
               </div>
             )}
-          </div>
-        </GameViewportEffects>
+            </div>
+          </GameViewportEffects>
+        </div>
       </div>
 
       {/* 1-Line Controls Hint Strip */}

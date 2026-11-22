@@ -288,8 +288,8 @@ export default function GamePage({ games, profile, dailyMissions, onScoreUpdate,
       <div className="flex-1 flex min-h-0 w-full overflow-hidden relative" id="gamepage-viewport-columns">
         {/* Center Stage: The Hero Game Viewport */}
         <div 
-          className={`flex-1 flex flex-col h-full min-h-0 min-w-0 p-0 sm:p-3 md:p-5 overflow-hidden sm:overflow-y-auto relative items-center justify-between ${
-            mobileTab === 'game' ? 'flex' : 'hidden lg:flex'
+          className={`flex-1 flex-col h-full min-h-0 min-w-0 p-1.5 sm:p-3 md:p-4 overflow-hidden relative items-center justify-between ${
+            isSidebarOpen ? 'hidden lg:flex' : 'flex'
           }`}
           id="center-game-viewport"
         >
@@ -322,7 +322,7 @@ export default function GamePage({ games, profile, dailyMissions, onScoreUpdate,
           />
 
           {/* Virtual Touch Controller Deck for Mobile */}
-          <MobileTouchControls visible={mobileTab === 'game'} controlType={controls.controlType} />
+          <MobileTouchControls visible={!isSidebarOpen} controlType={controls.controlType} />
 
           {/* Simplified Arcade-Grade HUD Bar */}
           <GameHUDBar
@@ -358,7 +358,7 @@ export default function GamePage({ games, profile, dailyMissions, onScoreUpdate,
         </div>
 
         {/* Right Community & Leaderboard Sidebar (Drawer toggleable) */}
-        {!isFocusMode && (isSidebarOpen || mobileTab === 'community') && (
+        {!isFocusMode && isSidebarOpen && (
           <GamePageRightSidebar
             activeGame={activeGame}
             profile={profile}
@@ -366,7 +366,7 @@ export default function GamePage({ games, profile, dailyMissions, onScoreUpdate,
             currentAmbient={currentAmbient}
             activeTab={activeTab}
             setActiveTab={setActiveTab}
-            mobileTab={mobileTab}
+            mobileTab={isSidebarOpen ? 'community' : mobileTab}
             isTheatreMode={false}
             isFullscreen={isFullscreen}
           />

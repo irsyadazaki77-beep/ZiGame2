@@ -341,7 +341,7 @@ export const CANONICAL_GAME_REGISTRY: Record<CanonicalGameId, GameRegistryItem> 
     description: 'Tebas data orb yang melayang di udara dengan pedang plasma presisi tinggi sebelum jatuh ke jurang siber.',
     genre: 'Action',
     difficulty: 'Medium',
-    thumbnail: 'https://images.unsplash.com/photo-1579783902614-a3fb3927b675?auto=format&fit=crop&w=600&q=80',
+    thumbnail: 'https://images.unsplash.com/photo-1614064641938-3bbee52942c7?auto=format&fit=crop&w=600&q=80',
     layout: 'landscape',
     component: lazy(() => import('../components/games/CyberSlasherGame')),
     themeColor: '#10b981',

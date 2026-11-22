@@ -37,9 +37,7 @@ export const GamePageRightSidebar: React.FC<GamePageRightSidebarProps> = React.m
 
   return (
     <div 
-      className={`w-[340px] xl:w-[370px] border-l border-zinc-900 bg-zinc-950/60 backdrop-blur-md flex-none flex flex-col h-full overflow-hidden transition-all duration-300 ${
-        mobileTab === 'community' ? 'flex w-full' : 'hidden lg:flex'
-      }`}
+      className="w-full lg:w-[340px] xl:w-[370px] border-l border-zinc-900 bg-zinc-950/60 backdrop-blur-md flex-none flex flex-col h-full overflow-hidden transition-all duration-300"
       id="right-column-social-dashboard"
     >
       <div className="flex flex-col h-full overflow-hidden" id="sidebar-panel-container">

@@ -73,14 +73,14 @@ export default function LeaderboardPage({ games, currentUsername }: LeaderboardP
       className="space-y-6 max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-4 sm:py-6"
     >
       {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 border-b border-white/[0.05] pb-5">
+      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 border-b border-border-subtle pb-5">
         <div>
-          <h1 className="text-xl sm:text-2xl font-black tracking-wider text-white uppercase font-display flex items-center gap-2.5">
+          <h1 className="text-xl sm:text-2xl font-black tracking-wider text-text-primary uppercase font-display flex items-center gap-2.5">
             <Trophy className="text-amber-500 w-5 h-5 sm:w-6 sm:h-6" />
             Papan Peringkat
           </h1>
-          <p className="text-xs text-zinc-400 mt-1 uppercase tracking-widest font-mono flex items-center gap-1.5">
-            <ShieldCheck size={13} className="text-emerald-500" />
+          <p className="text-xs text-text-secondary mt-1 uppercase tracking-widest font-mono flex items-center gap-1.5">
+            <ShieldCheck size={13} className="text-emerald-500 shrink-0" />
             Skor terenkripsi yang diverifikasi sistem anti-cheat
           </p>
         </div>
@@ -89,35 +89,35 @@ export default function LeaderboardPage({ games, currentUsername }: LeaderboardP
       {/* Primary Configuration Row */}
       <div className="flex flex-col gap-3">
         {/* Category selector row */}
-        <div className="flex bg-[#121622] p-1 rounded-full border border-white/[0.04] gap-1 w-fit">
+        <div className="grid grid-cols-2 sm:flex bg-surface-card p-1 rounded-2xl sm:rounded-full border border-border-subtle gap-1 w-full sm:w-fit">
           <button
             onClick={() => { audio.playCoin(); setCategory('global'); setPage(1); }}
-            className={`px-4 py-1.5 rounded-full text-xs font-mono font-bold uppercase transition duration-200 cursor-pointer flex items-center gap-1.5 ${
-              category === 'global' ? 'bg-amber-500 text-black' : 'text-zinc-400 hover:text-white'
+            className={`px-3 sm:px-4 py-1.5 rounded-xl sm:rounded-full text-[11px] sm:text-xs font-mono font-bold uppercase transition duration-200 cursor-pointer flex items-center justify-center gap-1.5 ${
+              category === 'global' ? 'bg-amber-500 text-black' : 'text-text-secondary hover:text-text-primary'
             }`}
           >
             <Trophy size={13} /> Global
           </button>
           <button
             onClick={() => { audio.playCoin(); setCategory('weekly'); setPage(1); }}
-            className={`px-4 py-1.5 rounded-full text-xs font-mono font-bold uppercase transition duration-200 cursor-pointer flex items-center gap-1.5 ${
-              category === 'weekly' ? 'bg-amber-500 text-black' : 'text-zinc-400 hover:text-white'
+            className={`px-3 sm:px-4 py-1.5 rounded-xl sm:rounded-full text-[11px] sm:text-xs font-mono font-bold uppercase transition duration-200 cursor-pointer flex items-center justify-center gap-1.5 ${
+              category === 'weekly' ? 'bg-amber-500 text-black' : 'text-text-secondary hover:text-text-primary'
             }`}
           >
             <Calendar size={13} /> Mingguan
           </button>
           <button
             onClick={() => { audio.playCoin(); setCategory('seasonal'); setPage(1); }}
-            className={`px-4 py-1.5 rounded-full text-xs font-mono font-bold uppercase transition duration-200 cursor-pointer flex items-center gap-1.5 ${
-              category === 'seasonal' ? 'bg-amber-500 text-black' : 'text-zinc-400 hover:text-white'
+            className={`px-3 sm:px-4 py-1.5 rounded-xl sm:rounded-full text-[11px] sm:text-xs font-mono font-bold uppercase transition duration-200 cursor-pointer flex items-center justify-center gap-1.5 ${
+              category === 'seasonal' ? 'bg-amber-500 text-black' : 'text-text-secondary hover:text-text-primary'
             }`}
           >
             <Sparkles size={13} /> Season 1
           </button>
           <button
             onClick={() => { audio.playCoin(); setCategory('ranked'); setPage(1); }}
-            className={`px-4 py-1.5 rounded-full text-xs font-mono font-bold uppercase transition duration-200 cursor-pointer flex items-center gap-1.5 ${
-              category === 'ranked' ? 'bg-rose-500 text-white' : 'text-zinc-400 hover:text-white'
+            className={`px-3 sm:px-4 py-1.5 rounded-xl sm:rounded-full text-[11px] sm:text-xs font-mono font-bold uppercase transition duration-200 cursor-pointer flex items-center justify-center gap-1.5 ${
+              category === 'ranked' ? 'bg-rose-500 text-white' : 'text-text-secondary hover:text-text-primary'
             }`}
           >
             <ShieldCheck size={13} /> Ranked
@@ -132,8 +132,8 @@ export default function LeaderboardPage({ games, currentUsername }: LeaderboardP
               onClick={() => { audio.playHit(); setSelectedGameId(g.id); setPage(1); }}
               className={`px-3 py-1.5 rounded-full text-xs font-mono font-bold transition flex items-center gap-1.5 shrink-0 cursor-pointer border select-none ${
                 selectedGameId === g.id
-                  ? 'bg-zinc-800 text-white border-zinc-700'
-                  : 'bg-[#121622] border-white/[0.04] text-zinc-500 hover:text-zinc-300'
+                  ? 'bg-indigo-600 text-white border-indigo-500 shadow-sm'
+                  : 'bg-surface-card border-border-subtle text-text-secondary hover:text-text-primary'
               }`}
             >
               <span>{g.icon}</span>
