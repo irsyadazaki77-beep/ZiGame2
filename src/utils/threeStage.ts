@@ -10,6 +10,82 @@ import { disposeThreeScene } from './threeCleanup';
 
 export type CameraPreset3D = 'chase' | 'isometric' | 'diorama';
 export type QualityLevel3D = 'ultra' | 'balanced' | 'performance';
+export type StudioAtmosphere3D =
+  | 'cyber-neon'
+  | 'synthwave-sunset'
+  | 'emerald-matrix'
+  | 'solar-flare'
+  | 'abyssal-void';
+
+export interface StudioAtmosphereConfig3D {
+  id: StudioAtmosphere3D;
+  label: string;
+  hemiSky: number;
+  hemiGround: number;
+  keyColor: number;
+  rimColor: number;
+  accentColor: number;
+  exposure: number;
+  bloomStrength: number;
+}
+
+export const STUDIO_ATMOSPHERES_3D: Record<StudioAtmosphere3D, StudioAtmosphereConfig3D> = {
+  'cyber-neon': {
+    id: 'cyber-neon',
+    label: 'Cyber Neon',
+    hemiSky: 0x38bdf8,
+    hemiGround: 0x0f172a,
+    keyColor: 0xfffbeb,
+    rimColor: 0xc084fc,
+    accentColor: 0x22d3ee,
+    exposure: 1.15,
+    bloomStrength: 0.58,
+  },
+  'synthwave-sunset': {
+    id: 'synthwave-sunset',
+    label: 'Synthwave',
+    hemiSky: 0xf43f5e,
+    hemiGround: 0x1e1b4b,
+    keyColor: 0xfde68a,
+    rimColor: 0x22d3ee,
+    accentColor: 0xf43f5e,
+    exposure: 1.22,
+    bloomStrength: 0.72,
+  },
+  'emerald-matrix': {
+    id: 'emerald-matrix',
+    label: 'Matrix Bio',
+    hemiSky: 0x10b981,
+    hemiGround: 0x022c22,
+    keyColor: 0xecfccb,
+    rimColor: 0x06b6d4,
+    accentColor: 0x10b981,
+    exposure: 1.18,
+    bloomStrength: 0.64,
+  },
+  'solar-flare': {
+    id: 'solar-flare',
+    label: 'Solar Flare',
+    hemiSky: 0xf59e0b,
+    hemiGround: 0x1c1917,
+    keyColor: 0xfef3c7,
+    rimColor: 0xef4444,
+    accentColor: 0xf59e0b,
+    exposure: 1.25,
+    bloomStrength: 0.68,
+  },
+  'abyssal-void': {
+    id: 'abyssal-void',
+    label: 'Abyssal Void',
+    hemiSky: 0x6366f1,
+    hemiGround: 0x090d16,
+    keyColor: 0xe0f2fe,
+    rimColor: 0xa855f7,
+    accentColor: 0x818cf8,
+    exposure: 1.12,
+    bloomStrength: 0.66,
+  },
+};
 
 export interface CameraPresetConfig {
   position: [number, number, number];
@@ -935,19 +1011,50 @@ export class ThreeStageController {
 
   private perfSettings: PerformanceSettings;
   private unsubscribePerf: (() => void) | null = null;
+  private atmosphere: StudioAtmosphere3D = 'cyber-neon';
+  private elapsedClock = 0;
+  private smoothedFps = 60;
+  private ambientDustPoints: THREE.Points | null = null;
+  private ambientDustMat: THREE.PointsMaterial | null = null;
+  private horizonRingMesh: THREE.Mesh | null = null;
+  private horizonRingMat: THREE.MeshBasicMaterial | null = null;
+  private shockwavePool: Array<{
+    mesh: THREE.Mesh;
+    mat: THREE.MeshBasicMaterial;
+    active: boolean;
+    age: number;
+    duration: number;
+    maxRadius: number;
+  }> = [];
+
+  private static activeInstance: ThreeStageController | null = null;
+
+  public static getActiveStage(): ThreeStageController | null {
+    return ThreeStageController.activeInstance;
+  }
 
   constructor(options: ThreeStageOptions) {
+    ThreeStageController.activeInstance = this;
     this.container = options.container;
     this.isSoftwareGl = detectSoftwareWebGL();
     this.perfSettings = performanceService.getFastSettings();
     this.manualCamera = options.manualCamera ?? false;
     this.enableShadowsOption = options.enableShadows ?? true;
     this.bloomConfig = {
-      enabled: options.bloom?.enabled ?? false,
-      strength: options.bloom?.strength ?? 0.55,
+      enabled: options.bloom?.enabled ?? true,
+      strength: options.bloom?.strength ?? 0.58,
       radius: options.bloom?.radius ?? 0.4,
       threshold: options.bloom?.threshold ?? 0.82
     };
+
+    if (typeof localStorage !== 'undefined') {
+      try {
+        const savedAtmo = localStorage.getItem('zigame_3d_atmosphere') as StudioAtmosphere3D | null;
+        if (savedAtmo && STUDIO_ATMOSPHERES_3D[savedAtmo]) {
+          this.atmosphere = savedAtmo;
+        }
+      } catch {}
+    }
 
     const isMobileDevice = typeof window !== 'undefined' && (
       /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent) ||
@@ -1063,22 +1170,89 @@ export class ThreeStageController {
       const floorGeo = new THREE.PlaneGeometry(gridSize, gridSize);
       const floorMat = new THREE.MeshStandardMaterial({
         map: gridTex,
-        roughness: 0.45,
-        metalness: 0.35
+        roughness: 0.42,
+        metalness: 0.38
       });
       const floorMesh = new THREE.Mesh(floorGeo, floorMat);
       floorMesh.rotation.x = -Math.PI / 2;
       floorMesh.position.y = -0.02;
       floorMesh.receiveShadow = true;
       this.scene.add(floorMesh);
+
+      // Animated Cyber Horizon Perimeter Ring
+      const ringGeo = new THREE.TorusGeometry(gridSize * 0.44, 0.07, 8, 48);
+      ringGeo.rotateX(Math.PI / 2);
+      this.horizonRingMat = new THREE.MeshBasicMaterial({
+        color: STUDIO_ATMOSPHERES_3D[this.atmosphere].accentColor,
+        transparent: true,
+        opacity: 0.35
+      });
+      this.horizonRingMesh = new THREE.Mesh(ringGeo, this.horizonRingMat);
+      this.horizonRingMesh.position.y = 0.03;
+      this.scene.add(this.horizonRingMesh);
     }
 
-    const defaultCapacity = this.isSoftwareGl ? 120 : 260;
+    // Ambient 3D Holographic Starfield / Holo-Dust Dome (Zero-GC in render loop)
+    if (!this.isSoftwareGl) {
+      const dustCount = 96;
+      const positions = new Float32Array(dustCount * 3);
+      const rng = createSeededRandom(0x51a7f30d);
+      for (let i = 0; i < dustCount; i++) {
+        const angle = rng() * Math.PI * 2;
+        const radius = 5 + rng() * 19;
+        positions[i * 3] = Math.cos(angle) * radius;
+        positions[i * 3 + 1] = 0.6 + rng() * 12;
+        positions[i * 3 + 2] = Math.sin(angle) * radius;
+      }
+      const dustGeo = new THREE.BufferGeometry();
+      dustGeo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+      this.ambientDustMat = new THREE.PointsMaterial({
+        color: STUDIO_ATMOSPHERES_3D[this.atmosphere].accentColor,
+        size: 0.14,
+        transparent: true,
+        opacity: 0.45,
+        depthWrite: false
+      });
+      this.ambientDustPoints = new THREE.Points(dustGeo, this.ambientDustMat);
+      this.scene.add(this.ambientDustPoints);
+    }
+
+    // Pre-allocated 3D Expanding Shockwave Ring Pool (Zero-GC during gameplay)
+    const swGeo = new THREE.RingGeometry(0.76, 1.0, 28);
+    swGeo.rotateX(-Math.PI / 2);
+    for (let i = 0; i < 4; i++) {
+      const swMat = new THREE.MeshBasicMaterial({
+        color: 0x22d3ee,
+        side: THREE.DoubleSide,
+        transparent: true,
+        opacity: 0,
+        depthWrite: false
+      });
+      const swMesh = new THREE.Mesh(swGeo, swMat);
+      swMesh.visible = false;
+      swMesh.position.y = 0.08;
+      this.scene.add(swMesh);
+      this.shockwavePool.push({
+        mesh: swMesh,
+        mat: swMat,
+        active: false,
+        age: 0,
+        duration: 0.5,
+        maxRadius: 5.5
+      });
+    }
+
+    const defaultCapacity = this.isSoftwareGl ? 120 : 280;
     this.particles = new InstancedParticlePool3D(this.scene, options.particleCapacity ?? defaultCapacity);
 
     // Initialize Post-Processing Pipeline (EffectComposer + UnrealBloomPass + OutputPass)
     if (this.bloomConfig.enabled && !this.isSoftwareGl) {
       this.initPostProcessing(w, h);
+    }
+
+    // Apply initial Studio Atmosphere lighting & bloom theme
+    if (options.enableDefaultLighting !== false) {
+      this.applyAtmosphereConfig(STUDIO_ATMOSPHERES_3D[this.atmosphere]);
     }
 
     // Subscribe to global PerformanceService for adaptive DPR, shadows, and bloom toggling
@@ -1263,6 +1437,84 @@ export class ThreeStageController {
     this.applyRendererQuality();
   }
 
+  public getAtmosphere(): StudioAtmosphere3D {
+    return this.atmosphere;
+  }
+
+  public setAtmosphere(atmo: StudioAtmosphere3D): void {
+    const cfg = STUDIO_ATMOSPHERES_3D[atmo];
+    if (!cfg) return;
+    this.atmosphere = atmo;
+    if (typeof localStorage !== 'undefined') {
+      try {
+        localStorage.setItem('zigame_3d_atmosphere', atmo);
+      } catch {}
+    }
+    this.applyAtmosphereConfig(cfg);
+  }
+
+  public cycleAtmosphere(): StudioAtmosphere3D {
+    const keys = Object.keys(STUDIO_ATMOSPHERES_3D) as StudioAtmosphere3D[];
+    const idx = keys.indexOf(this.atmosphere);
+    const next = keys[(idx + 1) % keys.length];
+    this.setAtmosphere(next);
+    return next;
+  }
+
+  private applyAtmosphereConfig(cfg: StudioAtmosphereConfig3D): void {
+    if (this.disposed) return;
+    if (this.hemiLight) {
+      this.hemiLight.color.setHex(cfg.hemiSky);
+      this.hemiLight.groundColor.setHex(cfg.hemiGround);
+    }
+    if (this.keyLight) {
+      this.keyLight.color.setHex(cfg.keyColor);
+    }
+    if (this.rimLight) {
+      this.rimLight.color.setHex(cfg.rimColor);
+    }
+    if (this.horizonRingMat) {
+      this.horizonRingMat.color.setHex(cfg.accentColor);
+    }
+    if (this.ambientDustMat) {
+      this.ambientDustMat.color.setHex(cfg.accentColor);
+    }
+    if (this.renderer) {
+      this.renderer.toneMappingExposure = cfg.exposure;
+    }
+    if (this.bloomPass) {
+      this.bloomPass.strength = cfg.bloomStrength;
+    }
+  }
+
+  public getCurrentFps(): number {
+    return Math.round(this.smoothedFps);
+  }
+
+  /**
+   * Spawns a zero-GC expanding 3D neon shockwave ring on the stage floor.
+   */
+  public triggerShockwave(
+    x = 0,
+    y = 0.08,
+    z = 0,
+    colorHex?: number,
+    maxRadius = 5.5,
+    duration = 0.52
+  ): void {
+    if (this.disposed || this.shockwavePool.length === 0) return;
+    const slot = this.shockwavePool.find((s) => !s.active) || this.shockwavePool[0];
+    slot.active = true;
+    slot.age = 0;
+    slot.duration = Math.max(0.15, duration);
+    slot.maxRadius = Math.max(1.0, maxRadius);
+    slot.mat.color.setHex(colorHex ?? STUDIO_ATMOSPHERES_3D[this.atmosphere].accentColor);
+    slot.mat.opacity = 0.85;
+    slot.mesh.position.set(x, y, z);
+    slot.mesh.scale.set(0.2, 0.2, 0.2);
+    slot.mesh.visible = true;
+  }
+
   /**
    * Adds 3D camera trauma (0.0 to 1.0) for rotational & translational screen-shake.
    */
@@ -1299,8 +1551,13 @@ export class ThreeStageController {
    */
   public step(rawDt: number): number {
     const clampedDt = Math.min(rawDt, 0.1);
+    this.elapsedClock += clampedDt;
 
-    // Adaptive FPS check
+    // Live smoothed FPS telemetry & Adaptive FPS check
+    if (clampedDt > 0.001) {
+      const instantFps = Math.min(144, Math.max(15, 1 / clampedDt));
+      this.smoothedFps = this.smoothedFps * 0.9 + instantFps * 0.1;
+    }
     if (!this.isSoftwareGl && clampedDt > 0) {
       const fps = 1 / clampedDt;
       this.fpsSamples.push(fps);
@@ -1328,11 +1585,13 @@ export class ThreeStageController {
     const scaledDt = clampedDt * this.timeScale;
 
     if (!this.manualCamera) {
-      // Smooth camera preset & target interpolation
+      // Smooth camera preset, target interpolation & subtle 3D cinema breathing
       const cfg = this.presets[this.currentPreset];
+      const breatheX = Math.cos(this.elapsedClock * 1.15) * 0.07;
+      const breatheY = Math.sin(this.elapsedClock * 1.65) * 0.09;
       _targetPos.set(
-        cfg.position[0] + this.targetOffset.x,
-        cfg.position[1] + this.targetOffset.y,
+        cfg.position[0] + this.targetOffset.x + breatheX,
+        cfg.position[1] + this.targetOffset.y + breatheY,
         cfg.position[2] + this.targetOffset.z
       );
       _targetLook.set(
@@ -1352,6 +1611,32 @@ export class ThreeStageController {
       this.cameraRig.applyTraumaToCamera(this.camera, this.currentCamPos, clampedDt, 0.55);
       this.camera.lookAt(this.currentCamLook);
       this.cameraRig.stepFovRecovery(this.camera, cfg.fov, clampedDt);
+    }
+
+    // Animate 3D Holographic Floating Dust & Cyber Horizon Perimeter Ring
+    if (this.ambientDustPoints) {
+      this.ambientDustPoints.rotation.y += scaledDt * 0.045;
+    }
+    if (this.horizonRingMesh && this.horizonRingMat) {
+      this.horizonRingMesh.rotation.y -= scaledDt * 0.08;
+      this.horizonRingMat.opacity = 0.28 + Math.sin(this.elapsedClock * 2.4) * 0.12;
+    }
+
+    // Update Zero-GC 3D Expanding Shockwave Rings
+    for (let i = 0; i < this.shockwavePool.length; i++) {
+      const sw = this.shockwavePool[i];
+      if (!sw.active) continue;
+      sw.age += scaledDt;
+      const t = sw.age / sw.duration;
+      if (t >= 1) {
+        sw.active = false;
+        sw.mesh.visible = false;
+      } else {
+        const eased = 1 - Math.pow(1 - t, 3);
+        const radius = 0.25 + eased * sw.maxRadius;
+        sw.mesh.scale.set(radius, radius, radius);
+        sw.mat.opacity = (1 - t) * 0.85;
+      }
     }
 
     // Step instanced 3D particles
@@ -1463,6 +1748,9 @@ export class ThreeStageController {
   public dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
+    if (ThreeStageController.activeInstance === this) {
+      ThreeStageController.activeInstance = null;
+    }
     this.stopLoop();
     this.onTickCallback = null;
 

@@ -31,6 +31,8 @@ import { FriendChallengeBanner } from '../components/gamepage/FriendChallengeBan
 import { CreateFriendChallengeModal } from '../components/gamepage/CreateFriendChallengeModal';
 import { ChallengeReceivedModal } from '../components/gamepage/ChallengeReceivedModal';
 import { ChallengeResultModal } from '../components/gamepage/ChallengeResultModal';
+import { MatchmakingModal } from '../components/multiplayer/MatchmakingModal';
+import { MultiplayerRoom, multiplayerService } from '../services/multiplayerService';
 import { X } from 'lucide-react';
 
 interface GamePageProps {
@@ -85,13 +87,22 @@ export default function GamePage({ games, profile, dailyMissions, onScoreUpdate,
   const [activeChallenge, setActiveChallenge] = useState<FriendChallenge | null>(null);
   const [isCreateChallengeOpen, setIsCreateChallengeOpen] = useState(false);
   const [challengeResultData, setChallengeResultData] = useState<{ challenge: FriendChallenge; finalScore: number } | null>(null);
+  const [isMultiplayerOpen, setIsMultiplayerOpen] = useState(false);
+  const [activeRoom, setActiveRoom] = useState<MultiplayerRoom | null>(null);
+  const [roomRole, setRoomRole] = useState<'host' | 'guest'>('host');
   const [sessionScore, setSessionScore] = useState(0);
   const targetBeatenRef = useRef(false);
 
-  // Wrapped Score Update with Challenge milestone detector
+  // Wrapped Score Update with Challenge milestone detector & 1v1 room sync
   const handleScoreUpdateProxy = useCallback((gid: string, score: number) => {
     setSessionScore(score);
     onScoreUpdate(gid, score);
+
+    if (activeRoom) {
+      multiplayerService.syncScore(activeRoom.code, roomRole, score, false).then((updated) => {
+        if (updated) setActiveRoom(updated);
+      });
+    }
 
     if (activeChallenge && score >= activeChallenge.targetScore && !targetBeatenRef.current) {
       targetBeatenRef.current = true;
@@ -100,7 +111,7 @@ export default function GamePage({ games, profile, dailyMissions, onScoreUpdate,
       haptics.trigger('success');
       showToast('🎯 Target Terlewati!', `Kamu berhasil mengalahkan target skor ${activeChallenge.targetScore.toLocaleString()}!`, 'success', '🏆');
     }
-  }, [activeChallenge, onScoreUpdate, showToast]);
+  }, [activeChallenge, activeRoom, roomRole, onScoreUpdate, showToast]);
 
   // Wrapped Game Over with Challenge result check
   const handleGameOverProxy = useCallback((gid: string, score: number, sessionId?: string, sessionDuration?: number) => {
@@ -247,6 +258,20 @@ export default function GamePage({ games, profile, dailyMissions, onScoreUpdate,
         />
       )}
 
+      {isMultiplayerOpen && (
+        <MatchmakingModal
+          isOpen={isMultiplayerOpen}
+          onClose={() => setIsMultiplayerOpen(false)}
+          activeGame={activeGame}
+          profile={profile}
+          onRoomJoined={(room, role) => {
+            setActiveRoom(room);
+            setRoomRole(role);
+            handleRestart();
+          }}
+        />
+      )}
+
       {/* Simplified Header Navigation (Hidden in Focus Mode) */}
       {!isFocusMode && (
         <GamePageHeader
@@ -301,6 +326,44 @@ export default function GamePage({ games, profile, dailyMissions, onScoreUpdate,
             />
           )}
 
+          {/* Active 1v1 Live Multiplayer Room Banner */}
+          {activeRoom && (
+            <div
+              className="w-full max-w-5xl mb-1.5 px-3 py-1.5 rounded-xl bg-zinc-900/90 border border-rose-500/30 flex items-center justify-between gap-2 text-xs font-mono"
+              data-testid="multiplayer-live-banner"
+            >
+              <div className="flex items-center gap-2">
+                <span className="px-2 py-0.5 rounded bg-rose-500/20 text-rose-300 font-bold text-[10px]">
+                  ROOM {activeRoom.code}
+                </span>
+                <span className="text-zinc-200 font-bold">
+                  {activeRoom.host.avatar} {activeRoom.host.name}:{' '}
+                  <strong className="text-emerald-400">{activeRoom.host.score}</strong>
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-zinc-400">VS</span>
+                <span className="text-zinc-200 font-bold">
+                  {activeRoom.guest ? (
+                    <>
+                      {activeRoom.guest.avatar} {activeRoom.guest.name}:{' '}
+                      <strong className="text-rose-400">{activeRoom.guest.score}</strong>
+                    </>
+                  ) : (
+                    <span className="text-amber-400 animate-pulse">Menunggu Lawan...</span>
+                  )}
+                </span>
+                <button
+                  onClick={() => setActiveRoom(null)}
+                  className="text-zinc-500 hover:text-white ml-1 cursor-pointer"
+                  title="Keluar Room 1v1"
+                >
+                  <X size={13} />
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Main Game Stage & Overlays */}
           <GameHeroCanvas
             activeGame={activeGame}
@@ -332,6 +395,7 @@ export default function GamePage({ games, profile, dailyMissions, onScoreUpdate,
             competitiveInfo={competitiveInfo}
             onRestart={handleRestart}
             onOpenChallengeModal={() => setIsCreateChallengeOpen(true)}
+            onOpenMultiplayerModal={() => setIsMultiplayerOpen(true)}
             isFullscreen={isFullscreen}
             onToggleFullscreen={toggleFullscreen}
           />

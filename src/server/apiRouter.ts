@@ -14,6 +14,7 @@ import { sessionRoutes } from './routes/sessionRoutes';
 import { economyRoutes } from './routes/economyRoutes';
 import { competitiveRoutes } from './routes/competitiveRoutes';
 import { adminRoutes } from './routes/adminRoutes';
+import { multiplayerRoutes } from './routes/multiplayerRoutes';
 
 export const apiRouter = Router();
 
@@ -26,6 +27,7 @@ apiRouter.use(sessionRoutes);
 apiRouter.use(economyRoutes);
 apiRouter.use(competitiveRoutes);
 apiRouter.use(adminRoutes);
+apiRouter.use(multiplayerRoutes);
 
 // Catch-all JSON 404 for unmatched /api/* routes so SPA fallback never serves HTML
 apiRouter.use((_req, res) => {

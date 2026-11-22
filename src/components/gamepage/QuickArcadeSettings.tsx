@@ -19,6 +19,8 @@ import {
 } from 'lucide-react';
 import { GameStats } from '../../types';
 import { audioController } from '../../sdk/audioController';
+import { BGM_TRACKS, BgmIntensity, BgmTrackId } from '../../sdk/synthBgmController';
+import { GamepadIndicator } from './GamepadIndicator';
 import { screenShake } from '../../utils/screenShake';
 import { haptics } from '../../utils/haptics';
 import { performanceService } from '../../services/performanceService';
@@ -82,12 +84,16 @@ export const QuickArcadeSettings: React.FC<QuickArcadeSettingsProps> = React.mem
   const [perfSettings, setPerfSettings] = React.useState(() => performanceService.getFastSettings());
   const [masterVol, setMasterVol] = React.useState(() => audioController.getMasterVolume());
   const [sfxVol, setSfxVol] = React.useState(() => audioController.getSfxVolume());
+  const [bgmTrack, setBgmTrack] = React.useState<BgmTrackId>(() => audioController.getBgmTrack());
+  const [bgmIntensity, setBgmIntensity] = React.useState<BgmIntensity>(() => audioController.getBgmIntensity());
 
   React.useEffect(() => {
     const unsubPerf = performanceService.subscribe((s) => setPerfSettings(s));
     const unsubAudio = audioController.subscribe(() => {
       setMasterVol(audioController.getMasterVolume());
       setSfxVol(audioController.getSfxVolume());
+      setBgmTrack(audioController.getBgmTrack());
+      setBgmIntensity(audioController.getBgmIntensity());
     });
     return () => {
       unsubPerf();
@@ -208,8 +214,64 @@ export const QuickArcadeSettings: React.FC<QuickArcadeSettingsProps> = React.mem
                   className="w-full h-1.5 bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-emerald-500"
                 />
               </div>
+
+              {/* Procedural Chiptune BGM Synth Selector */}
+              <div className="pt-2 border-t border-white/[0.06] space-y-1.5">
+                <div className="flex items-center justify-between text-[10px] font-mono text-zinc-400">
+                  <span>CHIPTUNE SYNTH TRACK</span>
+                  <span className="text-indigo-400 font-bold">{BGM_TRACKS[bgmTrack]?.bpm || 125} BPM</span>
+                </div>
+                <div className="grid grid-cols-2 gap-1.5">
+                  {(Object.keys(BGM_TRACKS) as BgmTrackId[]).map((trackKey) => {
+                    const t = BGM_TRACKS[trackKey];
+                    const active = bgmTrack === trackKey;
+                    return (
+                      <button
+                        key={trackKey}
+                        onClick={() => {
+                          audioController.playClick();
+                          audioController.setBgmTrack(trackKey);
+                          setBgmTrack(trackKey);
+                        }}
+                        className={`px-2 py-1.5 rounded-lg text-[10px] font-mono font-bold transition cursor-pointer truncate ${
+                          active
+                            ? 'bg-indigo-600 text-white shadow-xs'
+                            : 'bg-white/[0.03] text-zinc-400 hover:text-white border border-white/[0.06]'
+                        }`}
+                      >
+                        {t.name}
+                      </button>
+                    );
+                  })}
+                </div>
+                <div className="flex items-center justify-between pt-1">
+                  <span className="text-[10px] font-mono text-zinc-400">Tempo Intensitas</span>
+                  <div className="flex gap-1">
+                    {(['normal', 'high', 'critical'] as BgmIntensity[]).map((lvl) => (
+                      <button
+                        key={lvl}
+                        onClick={() => {
+                          audioController.playClick();
+                          audioController.setBgmIntensity(lvl);
+                          setBgmIntensity(lvl);
+                        }}
+                        className={`px-2 py-0.5 rounded text-[9px] font-mono font-bold uppercase transition cursor-pointer ${
+                          bgmIntensity === lvl
+                            ? 'bg-emerald-500 text-zinc-950'
+                            : 'bg-white/[0.04] text-zinc-400 hover:text-white'
+                        }`}
+                      >
+                        {lvl === 'normal' ? '1.0x' : lvl === 'high' ? '1.15x' : '1.32x'}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
+
+          {/* Hardware Gamepad Diagnostics */}
+          <GamepadIndicator compact={false} />
 
           {/* Video & Theme Section */}
           <div className="space-y-3">

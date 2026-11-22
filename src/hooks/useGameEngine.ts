@@ -2,6 +2,8 @@ import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { GameLifecycleState, PerformanceSettings } from '../types';
 import { createGameRuntimeContext } from '../sdk/runtimeContext';
 import { GameRuntimeContext } from '../types/gameSdk';
+import { ThreeStageController } from '../utils/threeStage';
+import { gamepadController } from '../sdk/gamepadController';
 
 export type GameEngineState = GameLifecycleState;
 
@@ -103,18 +105,39 @@ export function useGameEngine({
     ctx.loop.start(callback);
   }, [ctx]);
 
-  // Score handlers
+  // Score handlers with automatic 3D Stage Juiciness (FOV kick, shockwave ring & particle burst)
+  const trigger3DScoreJuice = useCallback((prevScore: number, nextScore: number) => {
+    const delta = nextScore - prevScore;
+    if (delta <= 0) return;
+    const stage = ThreeStageController.getActiveStage();
+    if (!stage) return;
+
+    stage.kickFov(Math.min(3.2, 0.7 + delta * 0.03));
+    const crossedHundred = Math.floor(nextScore / 100) > Math.floor(prevScore / 100);
+    if (delta >= 25 || crossedHundred) {
+      stage.triggerShockwave(0, 0.08, 0, undefined, crossedHundred ? 7.2 : 5.0, 0.55);
+      stage.triggerTrauma(crossedHundred ? 0.22 : 0.12);
+      gamepadController.triggerHapticPulse('light');
+    }
+  }, []);
+
   const updateScore = useCallback((newScore: number) => {
+    const prev = scoreRef.current;
     ctx.score.set(newScore);
-  }, [ctx]);
+    trigger3DScoreJuice(prev, newScore);
+  }, [ctx, trigger3DScoreJuice]);
 
   const addScore = useCallback((points: number) => {
+    const prev = scoreRef.current;
     ctx.score.add(points);
-  }, [ctx]);
+    trigger3DScoreJuice(prev, prev + points);
+  }, [ctx, trigger3DScoreJuice]);
 
   const setScore = useCallback((newScore: number) => {
+    const prev = scoreRef.current;
     ctx.score.set(newScore);
-  }, [ctx]);
+    trigger3DScoreJuice(prev, newScore);
+  }, [ctx, trigger3DScoreJuice]);
 
   // Lifecycle transitions
   const pauseGame = useCallback(() => {
@@ -130,6 +153,13 @@ export function useGameEngine({
   }, [ctx]);
 
   const triggerGameOver = useCallback((finalScore?: number) => {
+    const stage = ThreeStageController.getActiveStage();
+    if (stage) {
+      stage.triggerSlowMo(0.28, 0.42);
+      stage.triggerTrauma(0.48);
+      stage.triggerShockwave(0, 0.1, 0, 0xf43f5e, 7.5, 0.65);
+    }
+    gamepadController.triggerHapticPulse('heavy');
     ctx.lifecycle.triggerGameOver(finalScore);
   }, [ctx]);
 

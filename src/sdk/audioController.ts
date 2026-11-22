@@ -1,5 +1,6 @@
 import { IAudioController } from '../types/gameSdk';
 import { audio } from '../utils/audio';
+import { BgmIntensity, BgmTrackId } from './synthBgmController';
 
 export class AudioController implements IAudioController {
   public playClick(): void {
@@ -132,6 +133,22 @@ export class AudioController implements IAudioController {
 
   public stopAll(): void {
     audio.stopAllSounds();
+  }
+
+  public getBgmTrack(): BgmTrackId {
+    return audio.getBgmTrack();
+  }
+
+  public setBgmTrack(track: BgmTrackId): void {
+    audio.setBgmTrack(track);
+  }
+
+  public getBgmIntensity(): BgmIntensity {
+    return audio.getBgmIntensity();
+  }
+
+  public setBgmIntensity(intensity: BgmIntensity): void {
+    audio.setBgmIntensity(intensity);
   }
 }
 

@@ -189,6 +189,10 @@ class InputManager {
       15: 'RIGHT',
       0: 'PRIMARY',
       1: 'SECONDARY',
+      4: 'SECONDARY', // L1 / LB
+      5: 'PRIMARY',   // R1 / RB
+      6: 'SECONDARY', // L2 / LT
+      7: 'PRIMARY',   // R2 / RT
       9: 'PAUSE',
       8: 'RESTART'
     };

@@ -1,6 +1,13 @@
-import React, { useState, useEffect } from 'react';
-import { CameraPreset3D, QualityLevel3D } from '../../utils/threeStage';
-import { Eye, Sparkles, ChevronDown, ChevronUp } from 'lucide-react';
+import React, { useState, useEffect, useCallback } from 'react';
+import {
+  CameraPreset3D,
+  QualityLevel3D,
+  STUDIO_ATMOSPHERES_3D,
+  StudioAtmosphere3D,
+  ThreeStageController,
+} from '../../utils/threeStage';
+import { Eye, Sparkles, ChevronDown, ChevronUp, Palette, Gauge } from 'lucide-react';
+import { audioController } from '../../sdk/audioController';
 
 interface ThreeDockOverlayProps {
   cameraPreset: CameraPreset3D;
@@ -20,16 +27,61 @@ export const ThreeDockOverlay: React.FC<ThreeDockOverlayProps> = ({
   presetLabels
 }) => {
   const [collapsed, setCollapsed] = useState(false);
+  const [atmosphere, setAtmosphere] = useState<StudioAtmosphere3D>(() => {
+    const active = ThreeStageController.getActiveStage();
+    if (active) return active.getAtmosphere();
+    try {
+      const saved = localStorage.getItem('zigame_3d_atmosphere') as StudioAtmosphere3D | null;
+      if (saved && STUDIO_ATMOSPHERES_3D[saved]) return saved;
+    } catch {}
+    return 'cyber-neon';
+  });
+  const [fps, setFps] = useState<number>(60);
+
+  const handleCycleAtmosphere = useCallback(() => {
+    audioController.playClick();
+    const active = ThreeStageController.getActiveStage();
+    if (active) {
+      const next = active.cycleAtmosphere();
+      active.triggerShockwave(0, 0.08, 0, STUDIO_ATMOSPHERES_3D[next].accentColor, 6.0, 0.48);
+      setAtmosphere(next);
+    } else {
+      const keys = Object.keys(STUDIO_ATMOSPHERES_3D) as StudioAtmosphere3D[];
+      const next = keys[(keys.indexOf(atmosphere) + 1) % keys.length];
+      setAtmosphere(next);
+    }
+  }, [atmosphere]);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const active = ThreeStageController.getActiveStage();
+      if (active) {
+        setFps(active.getCurrentFps());
+        setAtmosphere(active.getAtmosphere());
+      }
+    }, 800);
+    return () => clearInterval(interval);
+  }, []);
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key.toLowerCase() === 'h' && document.activeElement?.tagName !== 'INPUT') {
+      const tag = document.activeElement?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+      const k = e.key.toLowerCase();
+      if (k === 'h') {
         setCollapsed((prev) => !prev);
+      } else if (k === 'c') {
+        const order: CameraPreset3D[] = ['chase', 'isometric', 'diorama'];
+        const next = order[(order.indexOf(cameraPreset) + 1) % order.length];
+        audioController.playClick();
+        onSelectPreset(next);
+      } else if (k === 'v') {
+        handleCycleAtmosphere();
       }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, []);
+  }, [cameraPreset, onSelectPreset, handleCycleAtmosphere]);
 
   const labels: Record<CameraPreset3D, string> = {
     chase: presetLabels?.chase || 'Chase 3D',
@@ -93,13 +145,34 @@ export const ThreeDockOverlay: React.FC<ThreeDockOverlayProps> = ({
             <button
               type="button"
               onClick={onCycleQuality}
-              className="min-h-[44px] sm:min-h-0 flex items-center gap-1.5 rounded-lg border border-white/10 bg-slate-900 px-2.5 py-1.5 text-xs font-medium text-slate-200 transition-colors hover:bg-slate-800 whitespace-nowrap shrink-0"
+              className="min-h-[44px] sm:min-h-0 flex items-center gap-1.5 rounded-lg border border-white/10 bg-slate-900 px-2.5 py-1.5 text-xs font-medium text-slate-200 transition-colors hover:bg-slate-800 whitespace-nowrap shrink-0 cursor-pointer"
               title="Ubah tingkat kualitas grafis 3D"
             >
               <Sparkles className="h-3.5 w-3.5 text-amber-400" />
               <span>{qualityLabel}</span>
             </button>
           )}
+
+          {/* 3D Studio Atmosphere & Lighting Switcher (Shortcut: V) */}
+          <button
+            type="button"
+            onClick={handleCycleAtmosphere}
+            className="min-h-[44px] sm:min-h-0 flex items-center gap-1.5 rounded-lg border border-cyan-500/25 bg-slate-900 px-2.5 py-1.5 text-xs font-medium text-cyan-300 transition-colors hover:bg-slate-800 hover:text-white whitespace-nowrap shrink-0 cursor-pointer"
+            title="Ganti Atmosfer Pencahayaan & Bloom 3D (Shortcut: V)"
+            data-testid="three-atmosphere-btn"
+          >
+            <Palette className="h-3.5 w-3.5 text-cyan-400" />
+            <span>{STUDIO_ATMOSPHERES_3D[atmosphere]?.label || 'Cyber Neon'}</span>
+          </button>
+
+          {/* Live 3D FPS Telemetry Badge */}
+          <span
+            className="hidden md:inline-flex items-center gap-1 rounded-lg border border-white/10 bg-slate-900/80 px-2 py-1 text-[11px] font-mono font-bold text-emerald-400 tabular-nums shrink-0"
+            title="Frame Rate WebGL 3D Real-Time"
+          >
+            <Gauge className="h-3 w-3" />
+            {fps} FPS
+          </span>
 
           {extraControls}
         </div>

@@ -4,6 +4,7 @@ import { GameStats, CompetitiveRating } from '../../types';
 import { audioController } from '../../sdk/audioController';
 import { RANKED_GAME_ALLOWLIST } from '../../config/competitiveConfig';
 import { useAuth } from '../../contexts/AuthContext';
+import { GamepadIndicator } from './GamepadIndicator';
 
 interface GameHUDBarProps {
   activeGame: GameStats;
@@ -12,6 +13,7 @@ interface GameHUDBarProps {
   competitiveInfo: CompetitiveRating | undefined;
   onRestart: () => void;
   onOpenChallengeModal?: () => void;
+  onOpenMultiplayerModal?: () => void;
   isFullscreen?: boolean;
   onToggleFullscreen?: () => void;
 }
@@ -23,6 +25,7 @@ export const GameHUDBar: React.FC<GameHUDBarProps> = ({
   competitiveInfo,
   onRestart,
   onOpenChallengeModal,
+  onOpenMultiplayerModal,
   isFullscreen,
   onToggleFullscreen
 }) => {
@@ -75,6 +78,7 @@ export const GameHUDBar: React.FC<GameHUDBarProps> = ({
 
       {/* Right: Quick actions like competitive profile & quick retry */}
       <div className="flex items-center gap-1 sm:gap-2">
+        <GamepadIndicator compact={true} />
         {competitiveInfo && isRankedMode && (
           <div className="flex items-center gap-1 px-1.5 py-0.5 sm:px-3 sm:py-1 bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 rounded-lg text-[9px] xs:text-[10px] sm:text-xs font-semibold select-none tabular-nums">
             <Shield size={10} className="text-emerald-400 shrink-0" />
@@ -94,6 +98,19 @@ export const GameHUDBar: React.FC<GameHUDBarProps> = ({
           >
             {isFullscreen ? <Minimize size={11} className="text-teal-400 shrink-0" /> : <Maximize size={11} className="text-teal-400 shrink-0" />}
             <span className="hidden xs:inline">{isFullscreen ? 'KECIL' : 'FULLSCREEN'}</span>
+          </button>
+        )}
+
+        {onOpenMultiplayerModal && (
+          <button
+            onClick={onOpenMultiplayerModal}
+            className="px-1.5 py-0.5 sm:px-3 sm:py-1 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 text-rose-300 hover:text-white rounded-lg text-[9px] xs:text-[10px] sm:text-xs font-bold flex items-center gap-1 transition-all cursor-pointer active:scale-95 select-none"
+            title="Buka Lobby Duel 1v1 Real-Time"
+            aria-label="Duel 1v1 Live"
+            data-testid="open-multiplayer-btn"
+          >
+            <Swords size={11} className="text-rose-400 shrink-0" />
+            <span className="hidden sm:inline">1V1 LIVE</span>
           </button>
         )}
 

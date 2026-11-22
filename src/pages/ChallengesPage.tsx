@@ -12,6 +12,8 @@ import {
 } from "lucide-react";
 import { friendChallengeService, FriendChallenge } from '../services/friendChallengeService';
 import { CreateFriendChallengeModal } from '../components/gamepage/CreateFriendChallengeModal';
+import { BattlePassTrack } from '../components/rewards/BattlePassTrack';
+import { GridLevelEditor } from '../components/gameplay/GridLevelEditor';
 import { economyService } from '../services/economyService';
 
 interface ChallengesPageProps {
@@ -28,7 +30,7 @@ export default function ChallengesPage({
   onUpdateProfile
 }: ChallengesPageProps) {
   const navigate = useNavigate();
-  const [tab, setTab] = useState<'daily' | 'weekly' | 'missions' | 'special' | 'quests' | 'friends'>('daily');
+  const [tab, setTab] = useState<'daily' | 'weekly' | 'missions' | 'special' | 'quests' | 'friends' | 'battlepass' | 'ugc'>('daily');
   const [challenges, setChallenges] = useState<Challenge[]>([]);
   const [claimingId, setClaimingId] = useState<string | null>(null);
   const [friendSubTab, setFriendSubTab] = useState<'incoming' | 'outgoing'>('incoming');
@@ -157,6 +159,24 @@ export default function ChallengesPage({
         >
           <Swords size={13} className="text-indigo-400" /> Tantangan Teman
         </button>
+        <button
+          onClick={() => { audio.playHit(); setTab('battlepass'); }}
+          className={`px-4 py-2.5 rounded-xl text-xs font-mono font-bold uppercase transition shrink-0 snap-start cursor-pointer flex items-center gap-1.5 ${
+            tab === 'battlepass' ? 'bg-amber-500/15 text-amber-500 dark:text-amber-400 border border-amber-500/35 font-black shadow-xs' : 'text-text-muted hover:text-text-primary border border-transparent'
+          }`}
+          data-testid="tab-battlepass"
+        >
+          <Trophy size={13} className="text-amber-400" /> Cyber Pass S2
+        </button>
+        <button
+          onClick={() => { audio.playHit(); setTab('ugc'); }}
+          className={`px-4 py-2.5 rounded-xl text-xs font-mono font-bold uppercase transition shrink-0 snap-start cursor-pointer flex items-center gap-1.5 ${
+            tab === 'ugc' ? 'bg-emerald-500/15 text-emerald-500 dark:text-emerald-400 border border-emerald-500/35 font-black shadow-xs' : 'text-text-muted hover:text-text-primary border border-transparent'
+          }`}
+          data-testid="tab-ugc-editor"
+        >
+          <Sparkles size={13} className="text-emerald-400" /> Level Creator
+        </button>
       </div>
 
       {/* Claim Indicator Notification if any claim is pending */}
@@ -171,7 +191,14 @@ export default function ChallengesPage({
 
       {/* Main Grid View */}
       <div className="pt-2">
-        {tab === 'quests' ? (
+        {tab === 'battlepass' ? (
+          <BattlePassTrack profile={profile} onUpdateProfile={onUpdateProfile} />
+        ) : tab === 'ugc' ? (
+          <GridLevelEditor
+            authorName={profile.name}
+            onPlayLevel={(lvl) => navigate(`/game/${lvl.gameId}?ugc=${encodeURIComponent(lvl.id)}`)}
+          />
+        ) : tab === 'quests' ? (
           <Quests 
             dailyMissions={dailyMissions} 
             profile={profile} 

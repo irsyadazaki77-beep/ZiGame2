@@ -1,5 +1,6 @@
 // Web Audio API retro sound generator with volume control, lookahead BGM scheduler & node cleanup
 import { logger } from './logger';
+import { BGM_TRACKS, BgmIntensity, BgmTrackId, computeStepDurationSeconds } from '../sdk/synthBgmController';
 
 class RetroAudio {
   private ctx: AudioContext | null = null;
@@ -18,6 +19,8 @@ class RetroAudio {
   private bgmTimer: any = null;
   private bgmNextNoteTime: number = 0;
   private bgmStep: number = 0;
+  private bgmTrack: BgmTrackId = 'cyberpunk';
+  private bgmIntensity: BgmIntensity = 'normal';
   private bgmActiveNodes: Set<{ osc: OscillatorNode; gain: GainNode }> = new Set();
   private readonly lookaheadMs: number = 30; // Scheduler tick interval
   private readonly scheduleAheadTime: number = 0.12; // 120ms lookahead horizon
@@ -43,6 +46,10 @@ class RetroAudio {
         if (savedSfxVol !== null) {
           const parsed = parseFloat(savedSfxVol);
           if (!Number.isNaN(parsed)) this.sfxVolume = Math.max(0, Math.min(1, parsed));
+        }
+        const savedTrack = localStorage.getItem('zigame_bgm_track') as BgmTrackId | null;
+        if (savedTrack && BGM_TRACKS[savedTrack]) {
+          this.bgmTrack = savedTrack;
         }
       } catch {
         // Quietly ignore storage access restrictions
@@ -774,52 +781,119 @@ class RetroAudio {
   private scheduleBGM(): void {
     if (!this.isBgmPlaying || !this.ctx || this.isMuted || this.musicVolume <= 0) return;
 
-    const notes = [261.63, 293.66, 329.63, 349.23, 392.00, 440.00, 493.88];
-    const noteDuration = 0.25; // 250ms per step
+    const track = BGM_TRACKS[this.bgmTrack] || BGM_TRACKS['cyberpunk'];
+    const noteDuration = computeStepDurationSeconds(this.bgmTrack, this.bgmIntensity);
 
     // Schedule any notes that fall within the lookahead window
     while (this.bgmNextNoteTime < this.ctx.currentTime + this.scheduleAheadTime) {
       const startTime = this.bgmNextNoteTime;
-      const stopTime = startTime + 0.2;
+      const stopTime = startTime + Math.max(0.08, noteDuration * 0.82);
 
       try {
+        // 1. Lead Synth Voice with Low-Pass Filter Sweep
         const osc = this.ctx.createOscillator();
+        const filter = this.ctx.createBiquadFilter();
         const gain = this.ctx.createGain();
 
-        const noteIndex = (this.bgmStep % 4) * 2;
-        const freq = notes[noteIndex % notes.length];
-
-        osc.type = 'triangle';
+        const freq = track.leadNotes[this.bgmStep % track.leadNotes.length];
+        osc.type = track.leadWave;
         osc.frequency.setValueAtTime(freq, startTime);
 
-        gain.gain.setValueAtTime(0.03 * this.musicVolume, startTime);
+        filter.type = 'lowpass';
+        const sweepCutoff = track.filterCutoffHz + Math.sin(this.bgmStep * 0.5) * 350;
+        filter.frequency.setValueAtTime(Math.max(400, sweepCutoff), startTime);
+
+        gain.gain.setValueAtTime(0.028 * this.musicVolume, startTime);
         gain.gain.exponentialRampToValueAtTime(0.001, stopTime);
 
-        osc.connect(gain);
+        osc.connect(filter);
+        filter.connect(gain);
         gain.connect(this.masterGain || this.ctx.destination);
 
         const nodeItem = { osc, gain };
         this.bgmActiveNodes.add(nodeItem);
         this.activeNodes.add(osc);
+        this.activeNodes.add(filter);
         this.activeNodes.add(gain);
 
         osc.onended = () => {
           try {
             osc.disconnect();
+            filter.disconnect();
             gain.disconnect();
           } catch {}
           this.activeNodes.delete(osc);
+          this.activeNodes.delete(filter);
           this.activeNodes.delete(gain);
           this.bgmActiveNodes.delete(nodeItem);
         };
 
         osc.start(startTime);
         osc.stop(stopTime);
+
+        // 2. Sub-Bass Voice on every 2nd step
+        if (this.bgmStep % 2 === 0 && track.bassNotes.length > 0) {
+          const bassOsc = this.ctx.createOscillator();
+          const bassGain = this.ctx.createGain();
+          const bassFreq = track.bassNotes[Math.floor(this.bgmStep / 2) % track.bassNotes.length];
+
+          bassOsc.type = track.bassWave;
+          bassOsc.frequency.setValueAtTime(bassFreq, startTime);
+
+          const bassStop = startTime + Math.max(0.12, noteDuration * 1.4);
+          bassGain.gain.setValueAtTime(0.032 * this.musicVolume, startTime);
+          bassGain.gain.exponentialRampToValueAtTime(0.001, bassStop);
+
+          bassOsc.connect(bassGain);
+          bassGain.connect(this.masterGain || this.ctx.destination);
+
+          const bassItem = { osc: bassOsc, gain: bassGain };
+          this.bgmActiveNodes.add(bassItem);
+          this.activeNodes.add(bassOsc);
+          this.activeNodes.add(bassGain);
+
+          bassOsc.onended = () => {
+            try {
+              bassOsc.disconnect();
+              bassGain.disconnect();
+            } catch {}
+            this.activeNodes.delete(bassOsc);
+            this.activeNodes.delete(bassGain);
+            this.bgmActiveNodes.delete(bassItem);
+          };
+
+          bassOsc.start(startTime);
+          bassOsc.stop(bassStop);
+        }
       } catch {}
 
       this.bgmNextNoteTime += noteDuration;
       this.bgmStep++;
     }
+  }
+
+  public getBgmTrack(): BgmTrackId {
+    return this.bgmTrack;
+  }
+
+  public setBgmTrack(track: BgmTrackId): void {
+    if (!BGM_TRACKS[track]) return;
+    this.bgmTrack = track;
+    if (typeof localStorage !== 'undefined') {
+      try {
+        localStorage.setItem('zigame_bgm_track', track);
+      } catch {}
+    }
+    this.notify();
+  }
+
+  public getBgmIntensity(): BgmIntensity {
+    return this.bgmIntensity;
+  }
+
+  public setBgmIntensity(intensity: BgmIntensity): void {
+    this.bgmIntensity = intensity;
+    this.notify();
   }
 
   startBGM() {
