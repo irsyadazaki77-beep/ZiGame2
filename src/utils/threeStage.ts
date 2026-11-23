@@ -1400,8 +1400,8 @@ export class ThreeStageController {
 
   public handleResize = (): void => {
     if (this.disposed || !this.container) return;
-    const w = Math.max(300, this.container.clientWidth || 800);
-    const h = Math.max(220, this.container.clientHeight || 500);
+    const w = Math.max(160, this.container.clientWidth || 320);
+    const h = Math.max(160, this.container.clientHeight || 240);
     const aspect = w / h;
     this.camera.aspect = aspect;
     if (!this.manualCamera) {

@@ -43,17 +43,17 @@ export const TopBar: React.FC<TopBarProps> = ({
   }, []);
 
   return (
-    <header className="sticky top-0 z-40 bg-surface-base/90 backdrop-blur-xl border-b border-border-subtle px-3 sm:px-5 lg:px-6 min-h-[3.5rem] py-2.5 flex items-center justify-between flex-none pt-safe transition-colors duration-150">
-      <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+    <header className="sticky top-0 z-40 bg-surface-base/90 backdrop-blur-xl border-b border-border-subtle pl-[max(0.75rem,env(safe-area-inset-left,0px))] pr-[max(0.75rem,env(safe-area-inset-right,0px))] sm:px-5 lg:px-6 min-h-[3.5rem] pt-[max(0.5rem,env(safe-area-inset-top,0px))] pb-2 md:py-2.5 flex items-center justify-between gap-2 flex-none transition-colors duration-150">
+      <div className="flex items-center gap-1.5 sm:gap-3 min-w-0">
         {/* Mobile Brand Logo */}
         <div 
           onClick={() => navigate('/')}
-          className="md:hidden flex items-center gap-2 cursor-pointer select-none"
+          className="md:hidden flex items-center gap-1.5 sm:gap-2 cursor-pointer select-none min-w-0"
         >
           <div className="w-7 h-7 rounded-lg bg-indigo-600 flex items-center justify-center shadow-md shadow-indigo-600/20 shrink-0">
             <Gamepad2 className="w-3.5 h-3.5 text-white" />
           </div>
-          <span className="font-display font-black tracking-wider text-sm text-text-primary">ZIGAME</span>
+          <span className="font-display font-black tracking-wider text-xs sm:text-sm text-text-primary truncate">ZIGAME</span>
         </div>
 
         {/* Desktop / Tablet Sidebar Toggle Icon */}

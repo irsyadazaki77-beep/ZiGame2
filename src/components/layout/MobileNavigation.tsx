@@ -23,7 +23,7 @@ export const MobileNavigation: React.FC = () => {
   return (
     <nav 
       aria-label="Navigasi Bawah Mobile"
-      className="md:hidden fixed bottom-0 left-0 right-0 h-[calc(3.75rem+env(safe-area-inset-bottom,0px))] pb-[env(safe-area-inset-bottom,0px)] bg-surface-base/90 backdrop-blur-md border-t border-border-subtle z-50 px-2 flex items-center justify-around shadow-[0_-4px_16px_rgba(0,0,0,0.03)]"
+      className="md:hidden fixed bottom-0 left-0 right-0 h-[calc(3.5rem+env(safe-area-inset-bottom,0px))] pb-[env(safe-area-inset-bottom,0px)] pl-[max(0.5rem,env(safe-area-inset-left,0px))] pr-[max(0.5rem,env(safe-area-inset-right,0px))] bg-surface-base/95 backdrop-blur-md border-t border-border-subtle z-50 flex items-center justify-around shadow-[0_-4px_16px_rgba(0,0,0,0.03)]"
     >
       {MOBILE_NAV_ITEMS.map((item) => {
         const isActive = location.pathname === item.path || (item.path !== '/' && location.pathname.startsWith(item.path));
@@ -32,10 +32,10 @@ export const MobileNavigation: React.FC = () => {
           <button
             key={item.path}
             onClick={() => navigate(item.path)}
-            className="relative flex flex-col items-center justify-center flex-1 h-full py-1 cursor-pointer min-w-0 select-none active:scale-95 transition-all"
+            className="relative flex flex-col items-center justify-center flex-1 min-h-[44px] h-full py-1 cursor-pointer min-w-0 select-none active:scale-95 transition-all"
             aria-label={item.label}
           >
-            <div className={`relative flex flex-col items-center justify-center px-2 py-1 rounded-xl transition-all duration-150 ${
+            <div className={`relative flex flex-col items-center justify-center min-h-[40px] px-2 py-1 rounded-xl transition-all duration-150 ${
               isActive ? 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 font-bold' : 'text-text-muted hover:text-text-primary'
             }`}>
               <Icon className={`w-4 h-4 transition-colors duration-150 shrink-0 ${

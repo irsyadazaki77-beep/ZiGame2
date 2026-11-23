@@ -54,7 +54,7 @@ export const MobileTouchControls: React.FC<MobileTouchControlsProps> = ({ visibl
     <>
       {/* PORTRAIT MODE DECK (Super compact bottom bar to maximize game canvas height) */}
       <div 
-        className="lg:hidden landscape:hidden flex-none py-2 px-4 sm:px-6 bg-zinc-950/70 backdrop-blur-md border-t border-white/[0.06] flex items-center justify-between select-none touch-none w-full max-w-md mx-auto pb-safe"
+        className="lg:hidden landscape:hidden flex-none pt-2 pb-[max(0.5rem,env(safe-area-inset-bottom,0px))] pl-[max(1rem,env(safe-area-inset-left,0px))] pr-[max(1rem,env(safe-area-inset-right,0px))] sm:px-6 bg-zinc-950/75 backdrop-blur-md border-t border-white/[0.06] flex items-center justify-between select-none touch-none w-full max-w-md mx-auto"
         id="virtual-mobile-gamepad-deck-portrait"
       >
         {/* Left Control Group (D-Pad or Analog Joystick) */}
@@ -197,12 +197,12 @@ export const MobileTouchControls: React.FC<MobileTouchControlsProps> = ({ visibl
 
       {/* LANDSCAPE MODE OVERLAY */}
       <div 
-        className="hidden lg:hidden landscape:block pointer-events-none fixed inset-0 z-40 select-none pl-safe pr-safe pb-safe"
+        className="hidden lg:hidden landscape:block pointer-events-none fixed inset-0 z-40 select-none"
         id="virtual-mobile-gamepad-deck-landscape"
       >
         {/* Floating Left Overlay */}
         {showDPad && (
-          <div className="pointer-events-auto absolute bottom-4 left-4 flex items-end gap-2">
+          <div className="pointer-events-auto absolute bottom-[max(1rem,env(safe-area-inset-bottom,0px))] left-[max(1rem,env(safe-area-inset-left,0px))] flex items-end gap-2">
             {stickMode === 'joystick' ? (
               <AnalogVirtualJoystick size={116} />
             ) : (
@@ -255,7 +255,7 @@ export const MobileTouchControls: React.FC<MobileTouchControlsProps> = ({ visibl
 
         {/* Floating Left Overlay: Horizontal-Only */}
         {showHorizontalOnly && (
-          <div className="pointer-events-auto absolute bottom-4 left-4 flex items-center gap-3 select-none touch-none">
+          <div className="pointer-events-auto absolute bottom-[max(1rem,env(safe-area-inset-bottom,0px))] left-[max(1rem,env(safe-area-inset-left,0px))] flex items-center gap-3 select-none touch-none">
             <button
               onTouchStart={(e) => handleTouchStart('LEFT', e)}
               onTouchEnd={(e) => handleTouchEnd('LEFT', e)}
@@ -277,7 +277,7 @@ export const MobileTouchControls: React.FC<MobileTouchControlsProps> = ({ visibl
 
         {/* Floating Left Overlay: Vertical-Only */}
         {showVerticalOnly && (
-          <div className="pointer-events-auto absolute bottom-4 left-4 flex items-center gap-3 select-none touch-none">
+          <div className="pointer-events-auto absolute bottom-[max(1rem,env(safe-area-inset-bottom,0px))] left-[max(1rem,env(safe-area-inset-left,0px))] flex items-center gap-3 select-none touch-none">
             <button
               onTouchStart={(e) => handleTouchStart('UP', e)}
               onTouchEnd={(e) => handleTouchEnd('UP', e)}
@@ -299,7 +299,7 @@ export const MobileTouchControls: React.FC<MobileTouchControlsProps> = ({ visibl
 
         {/* Floating Right Overlay: Action Button */}
         {showAction && (
-          <div className="pointer-events-auto absolute bottom-4 right-4 opacity-85 hover:opacity-100 transition-opacity select-none touch-none">
+          <div className="pointer-events-auto absolute bottom-[max(1rem,env(safe-area-inset-bottom,0px))] right-[max(1rem,env(safe-area-inset-right,0px))] opacity-85 hover:opacity-100 transition-opacity select-none touch-none">
             <button
               onTouchStart={(e) => handleTouchStart('PRIMARY', e)}
               onTouchEnd={(e) => handleTouchEnd('PRIMARY', e)}

@@ -148,18 +148,20 @@ export const GameHeroCanvas: React.FC<GameHeroCanvasProps> = ({
     };
   }
 
+  const maxWidthClass = isFocusMode ? 'max-w-7xl' : 'max-w-5xl xl:max-w-6xl';
+
   return (
     <>
       {/* Floating Focus Mode Banner */}
       {isFocusMode && (
-        <div className="w-full max-w-5xl flex items-center justify-between px-3 py-1.5 bg-zinc-950/80 border border-white/[0.08] rounded-xl mb-2 text-xs font-mono">
+        <div className={`w-full ${maxWidthClass} flex items-center justify-between px-3 py-1.5 bg-zinc-950/80 border border-white/[0.08] rounded-xl mb-1.5 sm:mb-2 text-xs font-mono`}>
           <div className="flex items-center gap-2 text-indigo-400 font-bold">
             <span className="w-2 h-2 rounded-full bg-indigo-500" />
             <span>FOCUS THEATER MODE AKTIF</span>
           </div>
           <button
             onClick={() => setIsFocusMode(false)}
-            className="px-2 py-0.5 bg-white/[0.08] hover:bg-white/[0.15] text-zinc-300 rounded text-[10px] flex items-center gap-1 cursor-pointer transition"
+            className="px-2.5 py-1 bg-white/[0.08] hover:bg-white/[0.15] text-zinc-300 rounded text-[10px] flex items-center gap-1 cursor-pointer transition"
           >
             <Minimize2 size={12} /> Keluar (F)
           </button>
@@ -168,25 +170,25 @@ export const GameHeroCanvas: React.FC<GameHeroCanvasProps> = ({
 
       {/* Save-State Restore Prompt Banner */}
       {hasExistingSave && (
-        <div className="w-full max-w-5xl mb-2 p-2.5 bg-indigo-950/40 border border-indigo-500/30 rounded-2xl flex items-center justify-between gap-3 text-xs font-sans">
+        <div className={`w-full ${maxWidthClass} mb-1.5 sm:mb-2 p-2.5 bg-indigo-950/40 border border-indigo-500/30 rounded-2xl flex flex-wrap sm:flex-nowrap items-center justify-between gap-2 sm:gap-3 text-xs font-sans`}>
           <div className="flex items-center gap-2 text-indigo-200">
-            <RotateCcw size={14} className="text-indigo-400" />
+            <RotateCcw size={14} className="text-indigo-400 shrink-0" />
             <span>Ditemukan progres permainan yang tersimpan dari sesi sebelumnya.</span>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 shrink-0">
             <button
               onClick={() => {
                 saveStateService.clearState(activeGame.id);
                 setHasExistingSave(false);
                 onRestart();
               }}
-              className="px-2.5 py-1 text-[11px] font-mono text-zinc-400 hover:text-white transition cursor-pointer"
+              className="px-2.5 py-1.5 text-[11px] font-mono text-zinc-400 hover:text-white transition cursor-pointer"
             >
               Mulai Baru
             </button>
             <button
               onClick={() => setHasExistingSave(false)}
-              className="px-3 py-1 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-[11px] font-mono font-bold transition cursor-pointer"
+              className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-[11px] font-mono font-bold transition cursor-pointer"
             >
               Lanjutkan
             </button>
@@ -195,11 +197,11 @@ export const GameHeroCanvas: React.FC<GameHeroCanvasProps> = ({
       )}
 
       {/* Clean Focused Canvas Stage with GameViewportEffects */}
-      <div className="flex-1 w-full max-w-5xl flex items-center justify-center relative min-h-0 min-w-0 overflow-hidden p-1 sm:p-3">
-        <div ref={stageRef} className="w-full h-full min-h-0 min-w-0 flex items-center justify-center">
+      <div className={`flex-1 w-full ${maxWidthClass} flex items-center justify-center relative min-h-0 min-w-0 overflow-hidden p-1 sm:p-2.5 landscape:p-1 touch-none`}>
+        <div ref={stageRef} className="w-full h-full min-h-0 min-w-0 flex items-center justify-center touch-none">
           <GameViewportEffects isCrtFilter={isCrtFilter}>
             <div 
-              className={`relative flex items-center justify-center bg-[#090b10] border border-white/[0.08] rounded-xl sm:rounded-2xl md:rounded-3xl shadow-2xl overflow-hidden transition-[border-radius] duration-300 ${
+              className={`relative flex items-center justify-center bg-[#090b10] border border-white/[0.08] rounded-xl sm:rounded-2xl md:rounded-3xl shadow-2xl overflow-hidden transition-[border-radius] duration-300 touch-none ${
                 stageSize.w === 0 ? 'w-full h-full max-w-full max-h-full' : ''
               }`}
               style={fittedStyle}
@@ -240,7 +242,7 @@ export const GameHeroCanvas: React.FC<GameHeroCanvasProps> = ({
 
       {/* 1-Line Controls Hint Strip */}
       {controlsHint && (
-        <div className="w-full max-w-5xl px-3 py-1 text-center text-[11px] text-zinc-400 truncate select-none">
+        <div className={`w-full ${maxWidthClass} px-3 py-1 landscape:hidden sm:landscape:block text-center text-[11px] text-zinc-400 truncate select-none`}>
           <span className="text-indigo-400 font-semibold">Kontrol:</span> {controlsHint}
         </div>
       )}

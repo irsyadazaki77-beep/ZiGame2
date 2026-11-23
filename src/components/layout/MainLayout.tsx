@@ -101,10 +101,10 @@ export function MainLayout({ children }: { children: React.ReactNode }) {
 
       {/* Main Content Area */}
       <div 
-        className={`flex-1 flex flex-col min-h-0 min-w-0 w-full h-[100dvh] relative transition-all duration-200 ease-in-out ${
+        className={`flex-1 flex flex-col min-h-[100dvh] min-w-0 w-full h-[100dvh] relative transition-all duration-200 ease-in-out ${
           isGamePage 
             ? 'pl-0 pb-0' 
-            : `${isSidebarCollapsed ? 'md:pl-[72px]' : 'md:pl-[208px]'} pb-[calc(3.75rem+env(safe-area-inset-bottom,0px))] md:pb-0`
+            : `${isSidebarCollapsed ? 'md:pl-[72px]' : 'md:pl-[208px]'} pb-[calc(3.5rem+env(safe-area-inset-bottom,0px))] md:pb-0`
         }`}
       >
         {/* Top Navbar */}

@@ -118,7 +118,7 @@ export const QuickArcadeSettings: React.FC<QuickArcadeSettingsProps> = React.mem
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex items-center justify-between p-4 border-b border-white/[0.06] bg-[#0c0f17]">
+        <div className="flex items-center justify-between px-4 pb-3.5 pt-[max(1rem,env(safe-area-inset-top,0px))] border-b border-white/[0.06] bg-[#0c0f17]">
           <div className="flex items-center gap-2">
             <Gamepad2 className="text-indigo-400" size={18} />
             <span className="font-bold font-mono text-sm tracking-wider text-zinc-100">KONTROL CABINET</span>
@@ -547,6 +547,47 @@ export const QuickArcadeSettings: React.FC<QuickArcadeSettingsProps> = React.mem
               <HelpCircle size={15} />
               <span>Cara Bermain & Kontrol Tombol</span>
             </button>
+
+            {/* Desktop Keyboard Shortcuts Cheatsheet */}
+            <div className="hidden md:block p-3 bg-white/[0.02] border border-white/[0.06] rounded-xl space-y-2">
+              <div className="text-[10px] font-bold font-mono text-zinc-400 uppercase tracking-wider">
+                Pintasan Keyboard Desktop
+              </div>
+              <div className="grid grid-cols-2 gap-1.5 text-[11px] text-zinc-300">
+                <div className="flex items-center justify-between bg-white/[0.02] px-2 py-1 rounded-md">
+                  <span className="text-zinc-400">Sidebar</span>
+                  <kbd className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 border border-white/10 text-zinc-200">[</kbd>
+                </div>
+                <div className="flex items-center justify-between bg-white/[0.02] px-2 py-1 rounded-md">
+                  <span className="text-zinc-400">Focus Mode</span>
+                  <kbd className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 border border-white/10 text-zinc-200">F</kbd>
+                </div>
+                <div className="flex items-center justify-between bg-white/[0.02] px-2 py-1 rounded-md">
+                  <span className="text-zinc-400">Kamera 3D</span>
+                  <kbd className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 border border-white/10 text-zinc-200">C</kbd>
+                </div>
+                <div className="flex items-center justify-between bg-white/[0.02] px-2 py-1 rounded-md">
+                  <span className="text-zinc-400">Atmosfer 3D</span>
+                  <kbd className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 border border-white/10 text-zinc-200">V</kbd>
+                </div>
+                <div className="flex items-center justify-between bg-white/[0.02] px-2 py-1 rounded-md">
+                  <span className="text-zinc-400">Dock 3D</span>
+                  <kbd className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 border border-white/10 text-zinc-200">H</kbd>
+                </div>
+                <div className="flex items-center justify-between bg-white/[0.02] px-2 py-1 rounded-md">
+                  <span className="text-zinc-400">Mute Audio</span>
+                  <kbd className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 border border-white/10 text-zinc-200">M</kbd>
+                </div>
+                <div className="col-span-2 flex items-center justify-between bg-white/[0.02] px-2 py-1 rounded-md">
+                  <span className="text-zinc-400">Mulai / Replay Cepat</span>
+                  <div className="flex items-center gap-1">
+                    <kbd className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 border border-white/10 text-zinc-200">Space</kbd>
+                    <span className="text-zinc-500 text-[10px]">/</span>
+                    <kbd className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 border border-white/10 text-zinc-200">R</kbd>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
 
           {/* Quick Game Switcher */}
@@ -581,7 +622,7 @@ export const QuickArcadeSettings: React.FC<QuickArcadeSettingsProps> = React.mem
         </div>
 
         {/* Footer */}
-        <div className="p-3 border-t border-white/[0.06] bg-[#0c0f17] flex items-center justify-between">
+        <div className="px-3 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom,0px))] border-t border-white/[0.06] bg-[#0c0f17] flex items-center justify-between">
           <span className="text-[9px] font-mono text-zinc-600 uppercase">ZiGame Cabinet OS v2.0</span>
           <span className="text-[9px] font-mono text-indigo-500/60 font-bold uppercase tracking-wider">RETRO ARCADE</span>
         </div>

@@ -68,29 +68,31 @@ export const GameOverlay: React.FC<GameOverlayProps> = ({
     <>
       {/* Ready / Start Overlay */}
       {gameState === 'ready' && (
-        <div className="absolute inset-0 bg-zinc-950/85 backdrop-blur-md flex flex-col items-center justify-center p-6 text-center z-20 animate-in fade-in duration-200">
-          <div className="w-12 h-12 rounded-xl bg-zinc-900 border border-white/[0.06] flex items-center justify-center text-indigo-400 mb-4 shadow-md shadow-black/30">
-            <Gamepad2 size={20} />
-          </div>
-          <h3 className="text-xl sm:text-2xl font-bold text-white mb-2 tracking-tight">
-            Siap Bermain?
-          </h3>
-          <p className="text-zinc-400 text-xs sm:text-sm mb-3 max-w-[340px] leading-relaxed bg-zinc-900/80 border border-white/[0.06] p-4 rounded-xl font-normal shadow-sm">
-            {instructions}
-          </p>
-          {controlsHint && (
-            <p className="text-[11px] text-indigo-300 mb-5 max-w-[340px] leading-snug">
-              {controlsHint}
+        <div className="absolute inset-0 bg-zinc-950/85 backdrop-blur-md flex flex-col items-center justify-center p-4 sm:p-6 landscape:py-2.5 landscape:px-4 text-center z-20 animate-in fade-in duration-200 overflow-y-auto no-scrollbar">
+          <div className="max-h-[92dvh] w-full flex flex-col items-center justify-center landscape:gap-1.5 my-auto">
+            <div className="w-12 h-12 landscape:w-9 landscape:h-9 rounded-xl bg-zinc-900 border border-white/[0.06] flex items-center justify-center text-indigo-400 mb-3 landscape:mb-1 shadow-md shadow-black/30 shrink-0">
+              <Gamepad2 size={20} className="landscape:w-4 landscape:h-4" />
+            </div>
+            <h3 className="text-xl sm:text-2xl landscape:text-lg font-bold text-white mb-1.5 landscape:mb-0.5 tracking-tight">
+              Siap Bermain?
+            </h3>
+            <p className="text-zinc-400 text-xs sm:text-sm landscape:text-[11px] mb-2.5 landscape:mb-1 max-w-[340px] leading-relaxed bg-zinc-900/80 border border-white/[0.06] p-3.5 sm:p-4 landscape:p-2.5 rounded-xl font-normal shadow-sm">
+              {instructions}
             </p>
-          )}
-          <button
-            onClick={(e) => { e.stopPropagation(); onStart(); }}
-            className="bg-indigo-600 hover:bg-indigo-500 hover:scale-[1.02] active:scale-[0.98] focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:outline-hidden text-white min-h-[44px] px-8 py-2.5 rounded-xl font-semibold text-sm shadow-lg shadow-indigo-600/10 flex items-center justify-center gap-2 transition-all duration-150 ease-out cursor-pointer border border-indigo-500/20"
-            aria-label="Mulai permainan dengan tombol spasi atau enter"
-            autoFocus
-          >
-            <Play size={16} fill="currentColor" /> Mulai (Spasi)
-          </button>
+            {controlsHint && (
+              <p className="text-[11px] text-indigo-300 mb-4 landscape:mb-1.5 max-w-[340px] leading-snug">
+                {controlsHint}
+              </p>
+            )}
+            <button
+              onClick={(e) => { e.stopPropagation(); onStart(); }}
+              className="bg-indigo-600 hover:bg-indigo-500 hover:scale-[1.02] active:scale-[0.98] focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:outline-hidden text-white min-h-[44px] landscape:min-h-[38px] px-8 py-2.5 landscape:py-1.5 rounded-xl font-semibold text-sm shadow-lg shadow-indigo-600/10 flex items-center justify-center gap-2 transition-all duration-150 ease-out cursor-pointer border border-indigo-500/20 shrink-0"
+              aria-label="Mulai permainan dengan tombol spasi atau enter"
+              autoFocus
+            >
+              <Play size={16} fill="currentColor" /> Mulai (Spasi)
+            </button>
+          </div>
         </div>
       )}
 
@@ -144,8 +146,8 @@ export const GameOverlay: React.FC<GameOverlayProps> = ({
 
       {/* Standardized Console-Style Game Over Result Card */}
       {gameState === 'gameover' && (
-        <div className="absolute inset-0 bg-zinc-950/90 backdrop-blur-md flex flex-col items-center justify-center p-4 sm:p-6 text-center z-30 pointer-events-auto overflow-y-auto animate-in fade-in duration-200">
-          <div className="w-full max-w-sm bg-zinc-900 border border-white/[0.06] rounded-2xl p-6 shadow-2xl flex flex-col items-center gap-4 my-auto shadow-black/60">
+        <div className="absolute inset-0 bg-zinc-950/90 backdrop-blur-md flex flex-col items-center justify-center p-3 sm:p-6 landscape:py-2 landscape:px-4 text-center z-30 pointer-events-auto overflow-y-auto no-scrollbar animate-in fade-in duration-200">
+          <div className="w-full max-w-sm max-h-[92dvh] overflow-y-auto no-scrollbar bg-zinc-900 border border-white/[0.06] rounded-2xl p-5 sm:p-6 landscape:py-3 landscape:px-4 shadow-2xl flex flex-col items-center gap-3.5 sm:gap-4 landscape:gap-2 my-auto shadow-black/60">
             {/* Header Status */}
             <div className="space-y-1 w-full flex flex-col items-center">
               {isNewRecord ? (

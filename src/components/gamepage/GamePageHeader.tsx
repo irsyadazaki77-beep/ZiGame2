@@ -34,14 +34,14 @@ export const GamePageHeader: React.FC<GamePageHeaderProps> = React.memo(({
 }) => {
   return (
     <div 
-      className="relative flex-none min-h-[3rem] sm:min-h-[3.5rem] h-auto w-full z-40 flex items-center justify-between px-3 sm:px-4 py-2 bg-zinc-950/95 backdrop-blur-md border-b border-white/[0.06] shadow-sm select-none pt-safe"
+      className="relative flex-none min-h-[3rem] sm:min-h-[3.5rem] landscape:min-h-[2.5rem] h-auto w-full z-40 flex items-center justify-between pl-[max(0.75rem,env(safe-area-inset-left,0px))] pr-[max(0.75rem,env(safe-area-inset-right,0px))] sm:px-4 pt-[max(0.35rem,env(safe-area-inset-top,0px))] pb-1.5 sm:py-2 landscape:py-1 bg-zinc-950/95 backdrop-blur-md border-b border-white/[0.06] shadow-sm select-none"
       id="arcade-top-navbar"
     >
       {/* Left: Back & Game Info */}
-      <div className="flex items-center gap-2 sm:gap-3">
+      <div className="flex items-center gap-2 sm:gap-3 landscape:gap-1.5 min-w-0">
         <button
           onClick={() => { audio.playCoin(); onNavigateHome(); }}
-          className="w-8 h-8 sm:w-9 sm:h-9 flex items-center justify-center rounded-lg sm:rounded-xl text-zinc-400 hover:text-white hover:bg-white/[0.06] border border-white/[0.08] transition-all duration-150 ease-out hover:scale-[1.05] active:scale-[0.95] cursor-pointer"
+          className="w-9 h-9 landscape:w-8 landscape:h-8 flex items-center justify-center rounded-lg sm:rounded-xl text-zinc-400 hover:text-white hover:bg-white/[0.06] border border-white/[0.08] transition-all duration-150 ease-out hover:scale-[1.05] active:scale-[0.95] cursor-pointer shrink-0"
           aria-label="Kembali ke Lobi"
           title="Kembali ke Lobi"
           id="back-to-lobby-btn"

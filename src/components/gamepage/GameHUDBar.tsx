@@ -33,14 +33,14 @@ export const GameHUDBar: React.FC<GameHUDBarProps> = ({
   const isRankedEligible = RANKED_GAME_ALLOWLIST.includes(activeGame.id as any);
 
   return (
-    <div className="relative flex-none w-full max-w-5xl mt-1 sm:mt-2 bg-zinc-900/90 border border-white/[0.06] backdrop-blur-md px-2 py-1 sm:px-3.5 sm:py-2 rounded-lg sm:rounded-xl flex flex-row items-center justify-between gap-1 sm:gap-2.5 font-sans shadow-lg shadow-black/20">
+    <div className="relative flex-none w-full max-w-5xl xl:max-w-6xl mt-1 sm:mt-2 bg-zinc-900/90 border border-white/[0.06] backdrop-blur-md px-2 py-1.5 sm:px-3.5 sm:py-2 rounded-lg sm:rounded-xl flex flex-row items-center justify-between gap-1 sm:gap-2.5 font-sans shadow-lg shadow-black/20 overflow-hidden">
       {/* Left: Score & Highscore indicators */}
       <div className="flex items-center gap-1 sm:gap-2 min-w-0">
         <div 
-          className="flex items-center gap-1 px-1.5 py-0.5 sm:px-3 sm:py-1 bg-amber-500/10 border border-amber-500/20 text-amber-300 rounded-lg text-[9px] xs:text-[10px] sm:text-xs font-semibold select-none shrink-0"
+          className="flex items-center gap-1 min-h-[38px] sm:min-h-[32px] px-2 py-1 sm:px-3 bg-amber-500/10 border border-amber-500/20 text-amber-300 rounded-lg text-[10px] sm:text-xs font-semibold select-none shrink-0"
           title={`Skor Tertinggi: ${activeGame.highScore.toLocaleString()}`}
         >
-          <Trophy size={10} className="text-amber-400 shrink-0" />
+          <Trophy size={11} className="text-amber-400 shrink-0" />
           <span className="font-mono">HI: <span className="hidden xs:inline">SCORE: </span>{activeGame.highScore.toLocaleString()}</span>
         </div>
 
@@ -54,7 +54,7 @@ export const GameHUDBar: React.FC<GameHUDBarProps> = ({
             aria-label="Toggle Mode Ranked Competitive"
             aria-pressed={isRankedMode}
             title={!isFirebaseUser ? 'Mode Ranked memerlukan login Firebase untuk sinkronisasi leaderboard & rating' : 'Beralih mode Ranked / Normal'}
-            className={`flex items-center gap-1 px-1.5 py-0.5 sm:px-3 sm:py-1 border rounded-lg text-[9px] xs:text-[10px] sm:text-xs font-bold transition-all cursor-pointer select-none shrink-0 ${
+            className={`flex items-center gap-1 min-h-[38px] sm:min-h-[32px] px-2 py-1.5 sm:px-3 sm:py-1 border rounded-lg text-[10px] sm:text-xs font-bold transition-all cursor-pointer select-none shrink-0 ${
               isRankedMode 
                 ? 'bg-rose-500/15 border-rose-500/35 text-rose-400' 
                 : 'bg-white/[0.03] border-white/[0.06] text-zinc-400 hover:text-white hover:bg-white/[0.06]'
@@ -67,7 +67,7 @@ export const GameHUDBar: React.FC<GameHUDBarProps> = ({
 
         {!isFirebaseUser && (
           <div
-            className="hidden sm:flex items-center gap-1 px-2 py-1 bg-amber-500/10 border border-amber-500/25 text-amber-300 rounded-lg text-[10px] font-mono select-none truncate"
+            className="hidden md:flex items-center gap-1 px-2 py-1 bg-amber-500/10 border border-amber-500/25 text-amber-300 rounded-lg text-[10px] font-mono select-none truncate"
             title="Anda sedang bermain di Mode Tamu Offline. Leaderboard ranked & sinkronisasi dompet cloud memerlukan login."
           >
             <CloudOff size={10} className="shrink-0" />
@@ -77,12 +77,12 @@ export const GameHUDBar: React.FC<GameHUDBarProps> = ({
       </div>
 
       {/* Right: Quick actions like competitive profile & quick retry */}
-      <div className="flex items-center gap-1 sm:gap-2">
+      <div className="flex items-center gap-1 sm:gap-2 shrink-0">
         <GamepadIndicator compact={true} />
         {competitiveInfo && isRankedMode && (
-          <div className="flex items-center gap-1 px-1.5 py-0.5 sm:px-3 sm:py-1 bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 rounded-lg text-[9px] xs:text-[10px] sm:text-xs font-semibold select-none tabular-nums">
-            <Shield size={10} className="text-emerald-400 shrink-0" />
-            <span className="font-mono">{competitiveInfo.rating}<span className="hidden xs:inline"> pts</span></span>
+          <div className="hidden xs:flex items-center gap-1 min-h-[38px] sm:min-h-[32px] px-2 py-1 sm:px-3 bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 rounded-lg text-[10px] sm:text-xs font-semibold select-none tabular-nums">
+            <Shield size={11} className="text-emerald-400 shrink-0" />
+            <span className="font-mono">{competitiveInfo.rating}<span className="hidden sm:inline"> pts</span></span>
           </div>
         )}
 
@@ -92,47 +92,47 @@ export const GameHUDBar: React.FC<GameHUDBarProps> = ({
               audioController.playClick();
               onToggleFullscreen();
             }}
-            className="px-1.5 py-0.5 sm:px-3 sm:py-1 bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.08] hover:border-teal-500/40 text-zinc-300 hover:text-white rounded-lg text-[9px] xs:text-[10px] sm:text-xs font-bold flex items-center gap-1 transition-all cursor-pointer active:scale-95 select-none"
+            className="min-h-[38px] sm:min-h-[32px] px-2.5 py-1.5 sm:px-3 sm:py-1 bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.08] hover:border-teal-500/40 text-zinc-300 hover:text-white rounded-lg text-[10px] sm:text-xs font-bold flex items-center justify-center gap-1 transition-all cursor-pointer active:scale-95 select-none"
             title={isFullscreen ? 'Keluar Layar Penuh' : 'Mode Layar Penuh (Mobile & Desktop)'}
             aria-label="Toggle Layar Penuh"
           >
-            {isFullscreen ? <Minimize size={11} className="text-teal-400 shrink-0" /> : <Maximize size={11} className="text-teal-400 shrink-0" />}
-            <span className="hidden xs:inline">{isFullscreen ? 'KECIL' : 'FULLSCREEN'}</span>
+            {isFullscreen ? <Minimize size={13} className="text-teal-400 shrink-0" /> : <Maximize size={13} className="text-teal-400 shrink-0" />}
+            <span className="hidden sm:inline">{isFullscreen ? 'KECIL' : 'FULLSCREEN'}</span>
           </button>
         )}
 
         {onOpenMultiplayerModal && (
           <button
             onClick={onOpenMultiplayerModal}
-            className="px-1.5 py-0.5 sm:px-3 sm:py-1 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 text-rose-300 hover:text-white rounded-lg text-[9px] xs:text-[10px] sm:text-xs font-bold flex items-center gap-1 transition-all cursor-pointer active:scale-95 select-none"
+            className="min-h-[38px] sm:min-h-[32px] px-2.5 py-1.5 sm:px-3 sm:py-1 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 text-rose-300 hover:text-white rounded-lg text-[10px] sm:text-xs font-bold flex items-center justify-center gap-1 transition-all cursor-pointer active:scale-95 select-none"
             title="Buka Lobby Duel 1v1 Real-Time"
             aria-label="Duel 1v1 Live"
             data-testid="open-multiplayer-btn"
           >
-            <Swords size={11} className="text-rose-400 shrink-0" />
-            <span className="hidden sm:inline">1V1 LIVE</span>
+            <Swords size={13} className="text-rose-400 shrink-0" />
+            <span className="hidden md:inline">1V1 LIVE</span>
           </button>
         )}
 
         {onOpenChallengeModal && (
           <button
             onClick={onOpenChallengeModal}
-            className="px-1.5 py-0.5 sm:px-3 sm:py-1 bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.08] hover:border-indigo-500/40 text-zinc-300 hover:text-white rounded-lg text-[9px] xs:text-[10px] sm:text-xs font-bold flex items-center gap-1 transition-all cursor-pointer active:scale-95 select-none"
+            className="min-h-[38px] sm:min-h-[32px] px-2.5 py-1.5 sm:px-3 sm:py-1 bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.08] hover:border-indigo-500/40 text-zinc-300 hover:text-white rounded-lg text-[10px] sm:text-xs font-bold flex items-center justify-center gap-1 transition-all cursor-pointer active:scale-95 select-none"
             title="Tantang Teman"
             aria-label="Tantang Teman"
           >
-            <Swords size={11} className="text-indigo-400 shrink-0" />
-            <span className="hidden xs:inline">TANTANG</span>
+            <Swords size={13} className="text-indigo-400 shrink-0" />
+            <span className="hidden sm:inline">TANTANG</span>
           </button>
         )}
 
         <button
           onClick={onRestart}
-          className="px-2 py-0.5 sm:px-3.5 sm:py-1 bg-indigo-600 hover:bg-indigo-500 border border-indigo-500/25 text-white rounded-lg text-[9px] xs:text-[10px] sm:text-xs font-bold flex items-center gap-1 transition-all cursor-pointer active:scale-95 select-none"
+          className="min-h-[38px] sm:min-h-[32px] px-2.5 py-1.5 sm:px-3.5 sm:py-1 bg-indigo-600 hover:bg-indigo-500 border border-indigo-500/25 text-white rounded-lg text-[10px] sm:text-xs font-bold flex items-center justify-center gap-1 transition-all cursor-pointer active:scale-95 select-none"
           title="Ulangi Permainan"
           aria-label="Ulangi Permainan"
         >
-          <RefreshCw size={10} className="shrink-0" />
+          <RefreshCw size={12} className="shrink-0" />
           <span>RETRY</span>
         </button>
       </div>

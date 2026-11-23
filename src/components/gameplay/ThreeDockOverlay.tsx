@@ -26,7 +26,12 @@ export const ThreeDockOverlay: React.FC<ThreeDockOverlayProps> = ({
   extraControls,
   presetLabels
 }) => {
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      return window.innerWidth < 640;
+    }
+    return false;
+  });
   const [atmosphere, setAtmosphere] = useState<StudioAtmosphere3D>(() => {
     const active = ThreeStageController.getActiveStage();
     if (active) return active.getAtmosphere();
@@ -92,9 +97,11 @@ export const ThreeDockOverlay: React.FC<ThreeDockOverlayProps> = ({
   const qualityLabel =
     quality === 'ultra' ? 'PBR Ultra' : quality === 'balanced' ? 'Balanced 60FPS' : 'Perf Mode';
 
+  const activeAtmosLabel = STUDIO_ATMOSPHERES_3D[atmosphere]?.label || 'Cyber Neon';
+
   return (
     <div
-      className="pointer-events-none absolute inset-x-0 bottom-3 pb-[env(safe-area-inset-bottom)] z-20 flex flex-col items-center px-3"
+      className="pointer-events-none absolute inset-x-0 bottom-2 sm:bottom-3 pb-[env(safe-area-inset-bottom,0px)] z-20 flex flex-col items-center px-2 sm:px-3"
       aria-label="Kontrol Kamera dan Visual 3D"
     >
       <button
@@ -104,11 +111,30 @@ export const ThreeDockOverlay: React.FC<ThreeDockOverlayProps> = ({
           e.stopPropagation();
           setCollapsed((c) => !c);
         }}
-        className="pointer-events-auto mb-1 min-h-[44px] sm:min-h-0 flex items-center gap-1.5 rounded-t-lg border border-white/10 bg-slate-950/90 px-3 py-1 text-[11px] font-medium text-slate-300 transition-colors hover:bg-slate-900 hover:text-white whitespace-nowrap shrink-0"
+        className={`pointer-events-auto mb-1 min-h-[36px] sm:min-h-0 flex items-center gap-1.5 border border-white/10 bg-slate-950/90 backdrop-blur-md px-3 py-1 text-[11px] font-medium text-slate-300 transition-colors hover:bg-slate-900 hover:text-white whitespace-nowrap shrink-0 shadow-lg ${
+          collapsed ? 'rounded-full' : 'rounded-t-lg'
+        }`}
         title="Sembunyikan atau tampilkan dock kontrol 3D (Shortcut: H)"
       >
-        {collapsed ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
-        <span>{collapsed ? 'Tampilkan Kontrol 3D (H)' : 'Sembunyikan Kontrol (H)'}</span>
+        {collapsed ? (
+          <>
+            <Eye className="h-3.5 w-3.5 text-cyan-400 shrink-0" />
+            <span className="font-semibold text-white">{labels[cameraPreset]}</span>
+            <span className="text-slate-500">·</span>
+            <span className="font-mono text-[10px] text-emerald-400 font-bold tabular-nums">{fps} FPS</span>
+            <span className="hidden xs:inline text-slate-500">·</span>
+            <span className="hidden xs:inline-flex items-center gap-1 text-cyan-300">
+              <Palette className="h-3 w-3" />
+              {activeAtmosLabel}
+            </span>
+            <ChevronUp className="h-3.5 w-3.5 text-slate-400 ml-0.5 shrink-0" />
+          </>
+        ) : (
+          <>
+            <ChevronDown className="h-3.5 w-3.5" />
+            <span>Sembunyikan Kontrol (H)</span>
+          </>
+        )}
       </button>
 
       {!collapsed && (
