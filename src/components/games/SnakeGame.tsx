@@ -9,8 +9,10 @@ import { ThreeDockOverlay } from '../gameplay/ThreeDockOverlay';
 import {
   ThreeStageController,
   CameraPreset3D,
-  QualityLevel3D
+  QualityLevel3D,
+  triggerMeshHitFlash
 } from '../../utils/threeStage';
+import { gameFx } from '../../utils/gameFx';
 import { Zap, Sparkles } from 'lucide-react';
 
 const GRID_HALF = 7; // -7 to +7 (15x15 3D arena)
@@ -286,6 +288,8 @@ export default function SnakeGame({
     stage.startLoop((dt, elapsed) => {
       appleGroup.rotation.y = elapsed * 3;
       appleCore.position.y = 0.48 + Math.sin(elapsed * 5) * 0.1;
+      const pulse = 1 + Math.sin(elapsed * 6.5) * 0.14;
+      appleCore.scale.set(pulse, pulse, pulse);
 
       if (gameStateRef.current !== 'playing') return;
 
@@ -311,7 +315,10 @@ export default function SnakeGame({
       const hitSelf = st.segments.some((s) => s.x === newHead.x && s.z === newHead.z);
       if (hitWall || hitSelf) {
         stage.particles.burst(st.segments[0].x, 0.5, st.segments[0].z, 36, 0xef4444, 9);
+        stage.triggerShockwave(st.segments[0].x, 0.08, st.segments[0].z, 0xef4444, 5.2, 0.48);
+        stage.spawnFloatingText('CRASH!', st.segments[0].x, 1.35, st.segments[0].z, '#ef4444', { scale: 1.35 });
         stage.triggerTrauma(0.75);
+        gameFx.triggerImpact('damage');
         audioController.playGameOver();
         triggerGameOver(scoreRef.current);
         return;
@@ -320,12 +327,24 @@ export default function SnakeGame({
       st.segments.unshift(newHead);
 
       if (newHead.x === st.apple.x && newHead.z === st.apple.z) {
-        addScore(st.turboTimer > 0 ? 30 : 15);
+        const isTurbo = st.turboTimer > 0;
+        const earned = isTurbo ? 30 : 15;
+        addScore(earned);
         setSnakeLen(st.segments.length);
         st.stepInterval = Math.max(0.085, st.stepInterval * 0.985);
-        stage.particles.burst(newHead.x, 0.6, newHead.z, 22, 0x22c55e, 7);
+        triggerMeshHitFlash(headGroup, 0.1, isTurbo ? 0xfacc15 : 0x22c55e);
+        stage.particles.burst(newHead.x, 0.6, newHead.z, 22, isTurbo ? 0xfacc15 : 0x22c55e, 7);
+        stage.triggerShockwave(newHead.x, 0.08, newHead.z, isTurbo ? 0xfacc15 : 0x22c55e, 3.4, 0.4);
+        stage.spawnFloatingText(
+          isTurbo ? `TURBO +${earned}!` : `+${earned}`,
+          newHead.x,
+          1.25,
+          newHead.z,
+          isTurbo ? '#facc15' : '#22c55e',
+          { scale: isTurbo ? 1.15 : 0.95 }
+        );
         stage.triggerTrauma(0.2);
-        if (st.turboTimer > 0) {
+        if (isTurbo) {
           audioController.playCombo(2);
         } else {
           audioController.playScore();
@@ -334,6 +353,8 @@ export default function SnakeGame({
           st.turboTimer = 5.0;
           setTurboActive(true);
           stage.kickFov(4);
+          stage.spawnFloatingText('TURBO MODE!', newHead.x, 1.9, newHead.z, '#38bdf8', { scale: 1.3 });
+          gameFx.triggerImpact('powerup');
           audioController.playPowerup();
         }
         st.apple = pickFreeCoord(st.segments);

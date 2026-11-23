@@ -443,3 +443,36 @@ body.reduced-motion .shake-subtle, body.reduced-motion .shake-medium, body.reduc
 .shake-heavy {
   animation: screen-shake-heavy 0.42s cubic-bezier(0.36, 0.07, 0.19, 0.97) both;
 }
+
+/* =========================================================================
+   CHROMATIC EDGE IMPACT VIGNETTES (DAMAGE / COMBO / MILESTONE / POWERUP)
+   ========================================================================= */
+@keyframes impact-flash-pulse {
+  0% { opacity: 0; }
+  20% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+.impact-vignette {
+  animation: impact-flash-pulse 0.34s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+.impact-damage {
+  background: radial-gradient(circle at center, transparent 54%, rgba(244, 63, 94, 0.32) 86%, rgba(225, 29, 72, 0.62) 100%);
+  box-shadow: inset 0 0 38px rgba(244, 63, 94, 0.55);
+}
+
+.impact-combo {
+  background: radial-gradient(circle at center, transparent 60%, rgba(56, 189, 248, 0.24) 88%, rgba(99, 102, 241, 0.46) 100%);
+  box-shadow: inset 0 0 30px rgba(56, 189, 248, 0.4);
+}
+
+.impact-milestone {
+  background: radial-gradient(circle at center, transparent 58%, rgba(250, 204, 21, 0.25) 88%, rgba(245, 158, 11, 0.52) 100%);
+  box-shadow: inset 0 0 34px rgba(250, 204, 21, 0.45);
+}
+
+.impact-powerup {
+  background: radial-gradient(circle at center, transparent 60%, rgba(16, 185, 129, 0.24) 88%, rgba(5, 150, 105, 0.48) 100%);
+  box-shadow: inset 0 0 30px rgba(16, 185, 129, 0.42);
+}

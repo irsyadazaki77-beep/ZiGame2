@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { screenShake, ShakeIntensity } from '../../utils/screenShake';
+import { gameFx, ImpactFlashKind } from '../../utils/gameFx';
 
 interface GameViewportEffectsProps {
   isCrtFilter: boolean;
@@ -11,9 +12,10 @@ export const GameViewportEffects: React.FC<GameViewportEffectsProps> = ({
   children
 }) => {
   const [shakeClass, setShakeClass] = useState<string>('');
+  const [impactFlash, setImpactFlash] = useState<{ kind: ImpactFlashKind; key: number } | null>(null);
 
   useEffect(() => {
-    let timer: NodeJS.Timeout;
+    let timer: ReturnType<typeof setTimeout>;
 
     const unsubscribe = screenShake.subscribe((intensity: ShakeIntensity) => {
       // Re-trigger animation cleanly
@@ -35,12 +37,36 @@ export const GameViewportEffects: React.FC<GameViewportEffectsProps> = ({
     };
   }, []);
 
+  useEffect(() => {
+    let flashTimer: ReturnType<typeof setTimeout>;
+    const unsubFx = gameFx.subscribe((kind) => {
+      setImpactFlash({ kind, key: Date.now() + Math.random() });
+      clearTimeout(flashTimer);
+      flashTimer = setTimeout(() => {
+        setImpactFlash(null);
+      }, 360);
+    });
+    return () => {
+      unsubFx();
+      clearTimeout(flashTimer);
+    };
+  }, []);
+
   return (
     <div className={`relative w-full h-full min-h-0 min-w-0 flex items-center justify-center ${shakeClass}`}>
       {/* Underlying Game Canvas Container */}
       <div className={`relative w-full h-full min-h-0 min-w-0 flex items-center justify-center ${isCrtFilter ? 'crt-bloom' : ''}`}>
         {children}
       </div>
+
+      {/* Transient Chromatic Impact Edge Vignette */}
+      {impactFlash && (
+        <div
+          key={impactFlash.key}
+          className={`absolute inset-0 pointer-events-none z-25 rounded-xl sm:rounded-2xl md:rounded-3xl impact-vignette impact-${impactFlash.kind}`}
+          aria-hidden="true"
+        />
+      )}
 
       {/* CRT Scanline & Curved Glass Shaders (Hardware-accelerated CSS) */}
       {isCrtFilter && (

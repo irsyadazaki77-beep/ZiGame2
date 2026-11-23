@@ -9,8 +9,10 @@ import { ThreeDockOverlay } from '../gameplay/ThreeDockOverlay';
 import {
   ThreeStageController,
   CameraPreset3D,
-  QualityLevel3D
+  QualityLevel3D,
+  MotionRibbonPool3D
 } from '../../utils/threeStage';
+import { gameFx } from '../../utils/gameFx';
 import { Sword, Flame, AlertTriangle } from 'lucide-react';
 
 interface SlashTarget3D {
@@ -182,6 +184,13 @@ export default function CyberSlasherGame({
     bladeTip.position.set(0, 2.5, 0.5);
     stage.scene.add(bladeTip);
 
+    const bladeTrail = new MotionRibbonPool3D(stage.scene, {
+      segments: 20,
+      color: 0x34d399,
+      radius: 0.2,
+      decayRate: 5.8
+    });
+
     const orbColors = [0x10b981, 0x06b6d4, 0xf59e0b, 0xec4899, 0xa855f7];
 
     const createTargetPool = (isBomb: boolean, color: number, initialSize: number) =>
@@ -217,6 +226,7 @@ export default function CyberSlasherGame({
 
     resetTargetsFnRef.current = () => {
       allPools.forEach((p) => p.releaseAll());
+      bladeTrail.reset();
     };
 
     const slashAt = (wx: number, wy: number) => {
@@ -225,6 +235,7 @@ export default function CyberSlasherGame({
       st.pointerWorldX = wx;
       st.pointerWorldY = wy;
       bladeTip.position.set(wx, wy, 0.5);
+      bladeTrail.pushPoint(wx, wy, 0.5);
 
       for (const pool of allPools) {
         const items = pool.getActiveItems();
@@ -237,7 +248,10 @@ export default function CyberSlasherGame({
 
             if (t.isBomb) {
               stage.particles.burst(t.x, t.y, 0, 42, 0xef4444, 11);
+              stage.triggerShockwave(t.x, t.y, 0, 0xef4444, 5.5, 0.45);
+              stage.spawnFloatingText('BOOM!', t.x, t.y + 0.5, 0, '#ef4444', { scale: 1.4 });
               stage.triggerTrauma(0.85);
+              gameFx.triggerImpact('damage');
               audioController.playExplosion();
               audioController.playGameOver();
               triggerGameOver(scoreRef.current);
@@ -247,14 +261,26 @@ export default function CyberSlasherGame({
               st.comboTimer = 1.6;
               setCombo(st.combo);
               const mult = Math.min(4, 1 + Math.floor(st.combo / 4));
-              addScore(t.points * mult);
+              const earned = t.points * mult;
+              addScore(earned);
               stage.particles.burst(t.x, t.y, 0, 22, t.color, 8.5);
+              stage.triggerShockwave(t.x, t.y, 0, t.color, 2.8, 0.34);
+              stage.spawnFloatingText(
+                st.combo >= 3 ? `COMBO x${st.combo}! +${earned}` : `SLICE! +${earned}`,
+                t.x,
+                t.y + 0.45,
+                0,
+                st.combo >= 3 ? '#facc15' : t.color,
+                { scale: st.combo >= 3 ? 1.15 : 0.95 }
+              );
               stage.triggerTrauma(0.2);
               if (st.combo % 5 === 0) {
-                stage.triggerSlowMo(0.45, 0.22);
+                stage.triggerSlowMo(0.4, 0.2);
                 stage.kickFov(3.5);
+                gameFx.triggerImpact('combo');
                 audioController.playCombo(st.combo);
               } else {
+                stage.triggerSlowMo(0.35, 0.06);
                 audioController.playScore();
               }
             }
@@ -309,6 +335,7 @@ export default function CyberSlasherGame({
     stage.startLoop((dt) => {
       bladeTip.rotation.y += dt * 8;
       bladeTip.rotation.x += dt * 5;
+      bladeTrail.update(dt);
 
       if (gameStateRef.current !== 'playing') return;
 

@@ -12,8 +12,10 @@ import {
   CameraPreset3D,
   QualityLevel3D,
   buildStarfighter3D,
-  buildEnemyShip3D
+  buildEnemyShip3D,
+  triggerMeshHitFlash
 } from '../../utils/threeStage';
+import { gameFx } from '../../utils/gameFx';
 import { Shield, Zap, Flame, Crosshair } from 'lucide-react';
 
 interface EnemyEntity3D {
@@ -507,15 +509,20 @@ export default function SpaceDefenderGame({
                 ps.shield = false;
                 setHasShield(false);
                 ps.invincibleTimer = 1.2;
+                triggerMeshHitFlash(shipPartsRef.current?.group, 0.12, 0x22d3ee);
                 stage.particles.burst(ps.x, 0.65, ps.z, 22, 0x22d3ee, 8);
+                stage.spawnFloatingText('SHIELD DOWN!', ps.x, 1.5, ps.z, '#22d3ee', { scale: 1.05 });
                 stage.triggerTrauma(0.35);
                 audioController.playShield();
               } else {
                 ps.lives -= 1;
                 setLives(ps.lives);
                 ps.invincibleTimer = 1.8;
+                triggerMeshHitFlash(shipPartsRef.current?.group, 0.14, 0xf43f5e);
                 stage.particles.burst(ps.x, 0.65, ps.z, 32, 0xef4444, 10);
+                stage.spawnFloatingText('-1 HULL', ps.x, 1.5, ps.z, '#f43f5e', { scale: 1.1 });
                 stage.triggerTrauma(0.65);
+                gameFx.triggerImpact('damage');
                 if (ps.lives <= 0) {
                   audioController.playGameOver();
                   triggerGameOver(scoreRef.current);
@@ -560,6 +567,8 @@ export default function SpaceDefenderGame({
               if (e.hp <= 0) {
                 destroyed = true;
                 break;
+              } else {
+                triggerMeshHitFlash(e.mesh, 0.08, 0xffffff);
               }
             }
           }
@@ -574,7 +583,8 @@ export default function SpaceDefenderGame({
             ps.comboTimer = 3.2;
             setCombo(ps.combo);
             const mult = Math.min(4, 1 + Math.floor(ps.combo / 5));
-            addScore(pts * mult);
+            const earned = pts * mult;
+            addScore(earned);
 
             stage.particles.burst(
               ex,
@@ -584,10 +594,27 @@ export default function SpaceDefenderGame({
               isCmd ? 0xf59e0b : 0xf43f5e,
               8.5
             );
+            stage.triggerShockwave(
+              ex,
+              0.08,
+              ez,
+              isCmd ? 0xf59e0b : 0xf43f5e,
+              isCmd ? 5.6 : 2.8,
+              isCmd ? 0.55 : 0.35
+            );
+            stage.spawnFloatingText(
+              isCmd ? `COMMANDER +${earned}` : mult > 1 ? `+${earned} x${mult}` : `+${earned}`,
+              ex,
+              1.45,
+              ez,
+              isCmd ? '#facc15' : mult > 1 ? '#38bdf8' : '#f43f5e',
+              { scale: isCmd ? 1.3 : 0.92 }
+            );
             stage.triggerTrauma(isCmd ? 0.55 : 0.22);
             if (isCmd) {
               stage.triggerSlowMo(0.38, 0.25);
               stage.kickFov(4.5);
+              gameFx.triggerImpact('milestone');
             }
             if (ps.combo > 1) {
               audioController.playCombo(ps.combo);
@@ -605,6 +632,9 @@ export default function SpaceDefenderGame({
               ps.wave += 1;
               setWave(ps.wave);
               stage.kickFov(6);
+              stage.triggerShockwave(0, 0.1, 0, 0x22d3ee, 8.0, 0.65);
+              stage.spawnFloatingText(`WAVE ${ps.wave}!`, 0, 1.9, 0, '#22d3ee', { scale: 1.4 });
+              gameFx.triggerImpact('milestone');
               audioController.playPowerup();
             }
             continue;

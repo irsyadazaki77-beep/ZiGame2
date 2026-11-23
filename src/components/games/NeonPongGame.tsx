@@ -9,8 +9,10 @@ import { ThreeDockOverlay } from '../gameplay/ThreeDockOverlay';
 import {
   ThreeStageController,
   CameraPreset3D,
-  QualityLevel3D
+  QualityLevel3D,
+  triggerMeshHitFlash
 } from '../../utils/threeStage';
+import { gameFx } from '../../utils/gameFx';
 import { Zap, Trophy } from 'lucide-react';
 
 const TABLE_HALF_W = 6.2;
@@ -297,10 +299,20 @@ export default function NeonPongGame({
         p.vx = offset * 10.5;
         p.rally += 1;
         setRally(p.rally);
-        addScore(15 + p.rally * 2);
+        const rallyPts = 15 + p.rally * 2;
+        addScore(rallyPts);
         playerPaddle.scale.set(1.16, 1.25, 0.78);
+        triggerMeshHitFlash(playerPaddle, 0.09, 0x22d3ee);
         stage.particles.burst(p.puckX, 0.3, pZ, 18, 0x22d3ee, 6.8);
-        stage.triggerShockwave(p.puckX, pZ, 0x22d3ee, 2.5);
+        stage.triggerShockwave(p.puckX, 0.08, pZ, 0x22d3ee, 2.5, 0.35);
+        stage.spawnFloatingText(
+          p.rally >= 3 ? `RALLY x${p.rally}! +${rallyPts}` : `+${rallyPts}`,
+          p.puckX,
+          1.15,
+          pZ - 0.3,
+          p.rally >= 3 ? '#facc15' : '#22d3ee',
+          { scale: p.rally >= 3 ? 1.05 : 0.82 }
+        );
         stage.triggerTrauma(0.2);
         audioController.playReflect();
       }
@@ -311,8 +323,9 @@ export default function NeonPongGame({
         p.vz = Math.min(18, Math.abs(p.vz) * 1.04);
         p.vx = offset * 9.5;
         aiPaddle.scale.set(1.16, 1.25, 0.78);
+        triggerMeshHitFlash(aiPaddle, 0.09, 0xf43f5e);
         stage.particles.burst(p.puckX, 0.3, aZ, 16, 0xf43f5e, 6.5);
-        stage.triggerShockwave(p.puckX, aZ, 0xf43f5e, 2.5);
+        stage.triggerShockwave(p.puckX, 0.08, aZ, 0xf43f5e, 2.5, 0.35);
         audioController.playReflect();
       }
 
@@ -324,9 +337,11 @@ export default function NeonPongGame({
         setPlayerGoals(p.playerGoals);
         addScore(100);
         stage.particles.burst(p.puckX, 0.5, -TABLE_HALF_Z, 34, 0x22d3ee, 9.5);
-        stage.triggerShockwave(p.puckX, -TABLE_HALF_Z, 0x22d3ee, 4.5);
+        stage.triggerShockwave(p.puckX, 0.08, -TABLE_HALF_Z, 0x22d3ee, 4.8, 0.52);
+        stage.spawnFloatingText('GOAL! +100', p.puckX, 1.5, -TABLE_HALF_Z + 1.0, '#22d3ee', { scale: 1.4 });
         stage.triggerTrauma(0.45);
         stage.kickFov(4);
+        gameFx.triggerImpact('milestone');
         audioController.playWin();
         p.puckX = 0;
         p.puckZ = 0;
@@ -340,8 +355,10 @@ export default function NeonPongGame({
         p.rally = 0;
         setRally(0);
         stage.particles.burst(p.puckX, 0.5, TABLE_HALF_Z, 34, 0xef4444, 9.5);
-        stage.triggerShockwave(p.puckX, TABLE_HALF_Z, 0xef4444, 4.5);
+        stage.triggerShockwave(p.puckX, 0.08, TABLE_HALF_Z, 0xef4444, 4.8, 0.52);
+        stage.spawnFloatingText('AI GOAL!', p.puckX, 1.5, TABLE_HALF_Z - 1.0, '#ef4444', { scale: 1.3 });
         stage.triggerTrauma(0.65);
+        gameFx.triggerImpact('damage');
         audioController.playHit();
         if (p.aiGoals >= 5) {
           audioController.playGameOver();

@@ -3,8 +3,11 @@ import { audioController } from '../../../sdk/audioController';
 import {
   ThreeStageController,
   CameraPreset3D,
-  QualityLevel3D
+  QualityLevel3D,
+  MotionRibbonPool3D,
+  triggerMeshHitFlash
 } from '../../../utils/threeStage';
+import { gameFx } from '../../../utils/gameFx';
 import { disposeMaterial, disposeThreeScene } from '../../../utils/threeCleanup';
 import { solveBrickCollisionStepSync } from '../../../sdk/physicsWorkerController';
 
@@ -58,6 +61,7 @@ export class BrickBreakerEngine {
   private container: HTMLElement | null = null;
   private paddleGroup: THREE.Group | null = null;
   private ballMesh: THREE.Mesh | null = null;
+  private ballTrail: MotionRibbonPool3D | null = null;
   private sharedBrickGeo: THREE.BoxGeometry | null = null;
   private bricks: BrickEntity3D[] = [];
   private keys: Record<string, boolean> = {};
@@ -252,6 +256,8 @@ export class BrickBreakerEngine {
     if (this.ballMesh) {
       this.ballMesh.position.set(st.ballX, 0.32, st.ballZ);
     }
+    this.ballTrail?.pushPoint(st.ballX, 0.32, st.ballZ);
+    this.ballTrail?.update(dt);
   }
 
   private runSinglePhysicsStep(subDt: number): void {
@@ -281,7 +287,9 @@ export class BrickBreakerEngine {
 
     if (stepResult.paddleBounced) {
       this.combo = 0;
+      triggerMeshHitFlash(this.paddleGroup, 0.085, 0x38bdf8);
       this.stage?.particles.burst(st.ballX, 0.35, BRICK_PADDLE_Z, 12, 0x38bdf8, 5);
+      this.stage?.triggerShockwave(st.ballX, 0.08, BRICK_PADDLE_Z, 0x38bdf8, 2.2, 0.3);
       audioController.playReflect();
       this.callbacks.onTrajectoryPoint?.(st.paddleX, st.ballZ, 'paddle_hit');
     } else {
@@ -307,6 +315,15 @@ export class BrickBreakerEngine {
         }
 
         this.stage?.particles.burst(hitBrick.x, 0.4, hitBrick.z, 20, hitBrick.color, 7.5);
+        this.stage?.triggerShockwave(hitBrick.x, 0.08, hitBrick.z, hitBrick.color, 2.8, 0.36);
+        this.stage?.spawnFloatingText(
+          this.combo >= 3 ? `COMBO x${this.combo}! +${stepResult.scoreDelta}` : `+${stepResult.scoreDelta}`,
+          hitBrick.x,
+          0.9,
+          hitBrick.z,
+          this.combo >= 3 ? '#facc15' : hitBrick.color,
+          { scale: this.combo >= 3 ? 1.15 : 0.9 }
+        );
         this.stage?.triggerTrauma(0.22);
         if (this.combo > 1) {
           audioController.playCombo(this.combo);
@@ -331,7 +348,11 @@ export class BrickBreakerEngine {
       st.ballX = st.paddleX;
       st.ballZ = 4.2;
       st.vz = -(9.5 + st.stage * 0.8);
+      this.ballTrail?.reset();
       this.stage?.kickFov(5);
+      this.stage?.triggerShockwave(0, 0.1, 0, 0xfacc15, 7.5, 0.6);
+      this.stage?.spawnFloatingText(`STAGE ${st.stage}! +150`, 0, 1.5, 0, '#facc15', { scale: 1.35 });
+      gameFx.triggerImpact('milestone');
 
       if (st.stage > 5) {
         // Player completed all 5 stages!
@@ -357,7 +378,11 @@ export class BrickBreakerEngine {
       }
 
       this.stage?.particles.burst(st.ballX, 0.4, BRICK_PADDLE_Z, 30, 0xef4444, 9);
+      this.stage?.triggerShockwave(st.ballX, 0.08, BRICK_PADDLE_Z, 0xef4444, 4.2, 0.45);
+      this.stage?.spawnFloatingText('-1 LIFE', st.ballX, 1.1, BRICK_PADDLE_Z, '#f43f5e', { scale: 1.15 });
       this.stage?.triggerTrauma(0.65);
+      gameFx.triggerImpact('damage');
+      this.ballTrail?.reset();
 
       if (st.lives <= 0) {
         audioController.playGameOver();
@@ -408,6 +433,12 @@ export class BrickBreakerEngine {
     }
 
     this.stage = stage;
+    this.ballTrail = new MotionRibbonPool3D(stage.scene, {
+      segments: 16,
+      color: 0x38bdf8,
+      radius: 0.24,
+      decayRate: 4.2
+    });
 
     // 3D Arena Side & Top Bumper Walls
     const wallMat = new THREE.MeshStandardMaterial({
@@ -550,6 +581,7 @@ export class BrickBreakerEngine {
 
     this.paddleGroup = null;
     this.ballMesh = null;
+    this.ballTrail = null;
     this.keys = {};
   }
 }

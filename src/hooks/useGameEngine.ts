@@ -4,6 +4,7 @@ import { createGameRuntimeContext } from '../sdk/runtimeContext';
 import { GameRuntimeContext } from '../types/gameSdk';
 import { ThreeStageController } from '../utils/threeStage';
 import { gamepadController } from '../sdk/gamepadController';
+import { gameFx } from '../utils/gameFx';
 
 export type GameEngineState = GameLifecycleState;
 
@@ -118,6 +119,11 @@ export function useGameEngine({
       stage.triggerShockwave(0, 0.08, 0, undefined, crossedHundred ? 7.2 : 5.0, 0.55);
       stage.triggerTrauma(crossedHundred ? 0.22 : 0.12);
       gamepadController.triggerHapticPulse('light');
+      if (crossedHundred) {
+        gameFx.triggerImpact('milestone');
+      } else if (delta >= 50) {
+        gameFx.triggerImpact('combo');
+      }
     }
   }, []);
 
@@ -159,6 +165,7 @@ export function useGameEngine({
       stage.triggerTrauma(0.48);
       stage.triggerShockwave(0, 0.1, 0, 0xf43f5e, 7.5, 0.65);
     }
+    gameFx.triggerImpact('damage');
     gamepadController.triggerHapticPulse('heavy');
     ctx.lifecycle.triggerGameOver(finalScore);
   }, [ctx]);

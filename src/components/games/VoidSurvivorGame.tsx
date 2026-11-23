@@ -11,8 +11,10 @@ import {
   ThreeStageController,
   CameraPreset3D,
   QualityLevel3D,
-  buildCyberActionHero3D
+  buildCyberActionHero3D,
+  triggerMeshHitFlash
 } from '../../utils/threeStage';
+import { gameFx } from '../../utils/gameFx';
 import { Shield, Sword, Sparkles, Heart } from 'lucide-react';
 
 interface VoidMonster3D {
@@ -491,9 +493,22 @@ export default function VoidSurvivorGame({
           for (let j = activeBolts.length - 1; j >= 0; j--) {
             const b = activeBolts[j];
             if (Math.hypot(b.x - m.x, b.z - m.z) < m.radius + 0.25) {
+              const isCrit = b.damage >= 2;
+              const displayDmg = Math.round(b.damage * 15);
               m.hp -= b.damage;
               boltPool.release(j);
               stage.particles.burst(m.x, 0.65, m.z, 7, 0xa855f7, 5.5);
+              if (m.hp > 0) {
+                triggerMeshHitFlash(m.mesh, 0.08, 0xffffff);
+                stage.spawnFloatingText(
+                  isCrit ? `CRIT -${displayDmg}` : `-${displayDmg}`,
+                  m.x,
+                  1.3,
+                  m.z,
+                  isCrit ? '#facc15' : '#e2e8f0',
+                  { scale: isCrit ? 0.95 : 0.72, duration: 0.52, riseSpeed: 1.8 }
+                );
+              }
               if (m.hp <= 0) break;
             }
           }
@@ -506,6 +521,22 @@ export default function VoidSurvivorGame({
             pool.release(i);
             addScore(xpVal * 2);
             stage.particles.burst(mxPos, 0.65, mzPos, isLord ? 32 : 14, 0xc084fc, 7.5);
+            stage.triggerShockwave(
+              mxPos,
+              0.08,
+              mzPos,
+              isLord ? 0xf59e0b : 0xa855f7,
+              isLord ? 5.2 : 2.5,
+              isLord ? 0.5 : 0.34
+            );
+            stage.spawnFloatingText(
+              isLord ? `VOID LORD +${xpVal * 2}` : `+${xpVal * 2}`,
+              mxPos,
+              1.45,
+              mzPos,
+              isLord ? '#facc15' : '#c084fc',
+              { scale: isLord ? 1.25 : 0.82 }
+            );
             stage.triggerTrauma(isLord ? 0.45 : 0.16);
             audioController.playExplosion();
 
@@ -520,11 +551,14 @@ export default function VoidSurvivorGame({
 
           // Hero contact damage
           if (dist < m.radius + 0.48 && hs.invuln <= 0) {
-            hs.hp = Math.max(0, hs.hp - (m.type === 'voidlord' ? 20 : 12));
+            const dmgTaken = m.type === 'voidlord' ? 20 : 12;
+            hs.hp = Math.max(0, hs.hp - dmgTaken);
             setHp(hs.hp);
             hs.invuln = 0.65;
             stage.triggerTrauma(0.5);
             stage.particles.burst(hs.x, 0.8, hs.z, 20, 0xef4444, 7);
+            stage.spawnFloatingText(`-${dmgTaken} HP`, hs.x, 1.7, hs.z, '#f43f5e', { scale: 1.05 });
+            gameFx.triggerImpact('damage');
             if (hs.hp <= 0) {
               audioController.playGameOver();
               triggerGameOver(scoreRef.current);
@@ -564,7 +598,10 @@ export default function VoidSurvivorGame({
             setHp(hs.hp);
             rebuildOrbitBlades(hs.bladeCount);
             stage.particles.burst(hs.x, 1.0, hs.z, 36, 0x22d3ee, 9);
+            stage.triggerShockwave(hs.x, 0.1, hs.z, 0x22d3ee, 6.2, 0.55);
+            stage.spawnFloatingText(`LEVEL ${hs.level}!`, hs.x, 2.0, hs.z, '#22d3ee', { scale: 1.35 });
             stage.kickFov(5);
+            gameFx.triggerImpact('powerup');
             audioController.playPowerup();
           }
         }

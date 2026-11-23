@@ -1026,6 +1026,7 @@ export class ThreeStageController {
     duration: number;
     maxRadius: number;
   }> = [];
+  private floatingTexts: FloatingTextPool3D | null = null;
 
   private static activeInstance: ThreeStageController | null = null;
 
@@ -1244,6 +1245,7 @@ export class ThreeStageController {
 
     const defaultCapacity = this.isSoftwareGl ? 120 : 280;
     this.particles = new InstancedParticlePool3D(this.scene, options.particleCapacity ?? defaultCapacity);
+    this.floatingTexts = new FloatingTextPool3D(this.scene, this.isSoftwareGl ? 10 : 22);
 
     // Initialize Post-Processing Pipeline (EffectComposer + UnrealBloomPass + OutputPass)
     if (this.bloomConfig.enabled && !this.isSoftwareGl) {
@@ -1516,6 +1518,30 @@ export class ThreeStageController {
   }
 
   /**
+   * Spawns a zero-GC world-space 3D floating combat/score text popup.
+   */
+  public spawnFloatingText(
+    text: string,
+    x = 0,
+    y = 1.2,
+    z = 0,
+    color: number | string = '#38bdf8',
+    options?: FloatingTextOptions3D
+  ): void {
+    if (this.disposed || !this.floatingTexts) return;
+    if (
+      !options?.force &&
+      (this.perfSettings.batterySaver ||
+        (typeof window !== 'undefined' &&
+          typeof window.matchMedia === 'function' &&
+          window.matchMedia('(prefers-reduced-motion: reduce)').matches))
+    ) {
+      return;
+    }
+    this.floatingTexts.spawn(text, x, y, z, color, options);
+  }
+
+  /**
    * Adds 3D camera trauma (0.0 to 1.0) for rotational & translational screen-shake.
    */
   public triggerTrauma(amount: number): void {
@@ -1639,8 +1665,10 @@ export class ThreeStageController {
       }
     }
 
-    // Step instanced 3D particles
+    // Step instanced 3D particles, floating combat text, and mesh hit-flashes
     this.particles.update(scaledDt);
+    this.floatingTexts?.update(clampedDt);
+    stepMeshHitFlashes(clampedDt);
 
     return scaledDt;
   }
@@ -1790,6 +1818,9 @@ export class ThreeStageController {
       this.composer = null;
     }
     this.renderPass = null;
+
+    this.floatingTexts?.dispose();
+    this.floatingTexts = null;
 
     disposeThreeScene(this.scene, this.renderer);
   }
@@ -2322,5 +2353,366 @@ export class LaserBeamPool3D {
         s.mesh.scale.z = 0.4 + t * 0.9;
       }
     }
+  }
+}
+
+/**
+ * ============================================================================
+ * 3D FLOATING COMBAT / SCORE TEXT POOL (ZERO-GC SPRITE BILLBOARDS)
+ * ============================================================================
+ */
+
+export interface FloatingTextOptions3D {
+  scale?: number;
+  duration?: number;
+  riseSpeed?: number;
+  force?: boolean;
+}
+
+interface FloatingTextSlot3D {
+  sprite: THREE.Sprite;
+  mat: THREE.SpriteMaterial;
+  canvas: HTMLCanvasElement;
+  ctx: CanvasRenderingContext2D | null;
+  texture: THREE.CanvasTexture;
+  active: boolean;
+  age: number;
+  duration: number;
+  riseSpeed: number;
+  baseScale: number;
+  driftX: number;
+}
+
+function normalizeColorHexString(color: number | string): string {
+  if (typeof color === 'number') {
+    return `#${color.toString(16).padStart(6, '0')}`;
+  }
+  return color;
+}
+
+export class FloatingTextPool3D {
+  private slots: FloatingTextSlot3D[] = [];
+  private cursor = 0;
+
+  constructor(scene: THREE.Scene, poolSize = 20) {
+    if (typeof document === 'undefined') return;
+    for (let i = 0; i < poolSize; i++) {
+      const canvas = document.createElement('canvas');
+      canvas.width = 256;
+      canvas.height = 96;
+      const ctx = canvas.getContext('2d');
+      const texture = new THREE.CanvasTexture(canvas);
+      texture.colorSpace = THREE.SRGBColorSpace;
+      const mat = new THREE.SpriteMaterial({
+        map: texture,
+        transparent: true,
+        opacity: 1,
+        depthTest: false,
+        depthWrite: false
+      });
+      const sprite = new THREE.Sprite(mat);
+      sprite.visible = false;
+      sprite.renderOrder = 25;
+      scene.add(sprite);
+      this.slots.push({
+        sprite,
+        mat,
+        canvas,
+        ctx,
+        texture,
+        active: false,
+        age: 0,
+        duration: 0.85,
+        riseSpeed: 2.1,
+        baseScale: 1.0,
+        driftX: 0
+      });
+    }
+  }
+
+  public spawn(
+    text: string,
+    x: number,
+    y: number,
+    z: number,
+    color: number | string = '#38bdf8',
+    options?: FloatingTextOptions3D
+  ): void {
+    if (this.slots.length === 0) return;
+    let slot = this.slots.find((s) => !s.active);
+    if (!slot) {
+      slot = this.slots[this.cursor % this.slots.length];
+      this.cursor += 1;
+    }
+
+    const hex = normalizeColorHexString(color);
+    const { ctx, canvas } = slot;
+    if (ctx) {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      const fontSize = text.length > 10 ? 28 : text.length > 6 ? 34 : 42;
+      ctx.font = `900 ${fontSize}px "Orbitron", "JetBrains Mono", system-ui, sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+
+      // Dark crisp outline for contrast on any 3D backdrop
+      ctx.lineWidth = 7;
+      ctx.lineJoin = 'round';
+      ctx.strokeStyle = 'rgba(2, 6, 23, 0.92)';
+      ctx.strokeText(text, canvas.width / 2, canvas.height / 2);
+
+      // Neon glow fill
+      ctx.shadowColor = hex;
+      ctx.shadowBlur = 14;
+      ctx.fillStyle = hex;
+      ctx.fillText(text, canvas.width / 2, canvas.height / 2);
+
+      // Specular bright inner highlight
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.42)';
+      ctx.fillText(text, canvas.width / 2, canvas.height / 2 - 1);
+      slot.texture.needsUpdate = true;
+    }
+
+    slot.active = true;
+    slot.age = 0;
+    slot.duration = Math.max(0.35, options?.duration ?? 0.85);
+    slot.riseSpeed = options?.riseSpeed ?? 2.1;
+    slot.baseScale = options?.scale ?? 1.0;
+    slot.driftX = (Math.random() - 0.5) * 0.55;
+    slot.mat.opacity = 1;
+    slot.sprite.position.set(x, y, z);
+    slot.sprite.scale.set(2.2 * slot.baseScale, 0.82 * slot.baseScale, 1);
+    slot.sprite.visible = true;
+  }
+
+  public update(dt: number): void {
+    for (let i = 0; i < this.slots.length; i++) {
+      const s = this.slots[i];
+      if (!s.active) continue;
+      s.age += dt;
+      const t = s.age / s.duration;
+      if (t >= 1) {
+        s.active = false;
+        s.sprite.visible = false;
+        continue;
+      }
+
+      // Rise with smooth deceleration
+      const easeOut = 1 - t * 0.55;
+      s.sprite.position.y += s.riseSpeed * easeOut * dt;
+      s.sprite.position.x += s.driftX * dt;
+
+      // Elastic pop-in bounce (0..0.2) then steady
+      let popScale = 1.0;
+      if (t < 0.14) {
+        const p = t / 0.14;
+        popScale = 0.45 + p * 0.9; // up to 1.35
+      } else if (t < 0.28) {
+        const p = (t - 0.14) / 0.14;
+        popScale = 1.35 - p * 0.35; // settle to 1.0
+      }
+
+      s.sprite.scale.set(
+        2.35 * s.baseScale * popScale,
+        0.88 * s.baseScale * popScale,
+        1
+      );
+
+      // Fade out in final 40%
+      s.mat.opacity = t > 0.6 ? Math.max(0, 1 - (t - 0.6) / 0.4) : 1;
+    }
+  }
+
+  public dispose(): void {
+    for (const s of this.slots) {
+      s.texture.dispose();
+      s.mat.dispose();
+    }
+    this.slots.length = 0;
+  }
+}
+
+/**
+ * ============================================================================
+ * 3D MESH HIT-FLASH SYSTEM (WHITE-HOT KINETIC IMPACT FEEDBACK)
+ * ============================================================================
+ */
+
+interface HitFlashEntry3D {
+  mat: THREE.Material;
+  remaining: number;
+  origEmissive?: number;
+  origEmissiveIntensity?: number;
+  origColor?: number;
+}
+
+const activeHitFlashes = new Map<THREE.Material, HitFlashEntry3D>();
+
+export function triggerMeshHitFlash(
+  object3d: THREE.Object3D | null | undefined,
+  durationSec = 0.085,
+  flashColorHex = 0xffffff
+): void {
+  if (!object3d) return;
+  object3d.traverse((child) => {
+    const mesh = child as THREE.Mesh;
+    if (!mesh.isMesh || !mesh.material) return;
+    const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+    for (const mat of mats) {
+      const existing = activeHitFlashes.get(mat);
+      if (existing) {
+        existing.remaining = Math.max(existing.remaining, durationSec);
+        continue;
+      }
+
+      const std = mat as THREE.MeshStandardMaterial;
+      if (std.emissive && typeof std.emissiveIntensity === 'number') {
+        activeHitFlashes.set(mat, {
+          mat,
+          remaining: durationSec,
+          origEmissive: std.emissive.getHex(),
+          origEmissiveIntensity: std.emissiveIntensity
+        });
+        std.emissive.setHex(flashColorHex);
+        std.emissiveIntensity = Math.max(1.5, std.emissiveIntensity + 1.15);
+      } else {
+        const basic = mat as THREE.MeshBasicMaterial;
+        if (basic.color) {
+          activeHitFlashes.set(mat, {
+            mat,
+            remaining: durationSec,
+            origColor: basic.color.getHex()
+          });
+          basic.color.setHex(flashColorHex);
+        }
+      }
+    }
+  });
+}
+
+function stepMeshHitFlashes(dt: number): void {
+  if (activeHitFlashes.size === 0) return;
+  for (const [mat, entry] of activeHitFlashes.entries()) {
+    entry.remaining -= dt;
+    if (entry.remaining <= 0) {
+      if (entry.origEmissive !== undefined) {
+        const std = mat as THREE.MeshStandardMaterial;
+        if (std.emissive) {
+          std.emissive.setHex(entry.origEmissive);
+          std.emissiveIntensity = entry.origEmissiveIntensity ?? 0;
+        }
+      } else if (entry.origColor !== undefined) {
+        const basic = mat as THREE.MeshBasicMaterial;
+        if (basic.color) {
+          basic.color.setHex(entry.origColor);
+        }
+      }
+      activeHitFlashes.delete(mat);
+    }
+  }
+}
+
+/**
+ * ============================================================================
+ * UNIVERSAL 3D MOTION RIBBON & TRAIL ENGINE (INSTANCED ZERO-GC)
+ * ============================================================================
+ */
+
+export interface MotionRibbonOptions3D {
+  segments?: number;
+  color?: number;
+  radius?: number;
+  decayRate?: number;
+}
+
+export class MotionRibbonPool3D {
+  public readonly mesh: THREE.InstancedMesh;
+  private mat: THREE.MeshBasicMaterial;
+  private segments: number;
+  private radius: number;
+  private decayRate: number;
+  private points: Array<{ x: number; y: number; z: number; life: number }> = [];
+  private head = 0;
+  private dummy = new THREE.Object3D();
+  private baseColor = new THREE.Color();
+  private tempColor = new THREE.Color();
+
+  constructor(scene: THREE.Scene, options: MotionRibbonOptions3D = {}) {
+    this.segments = Math.max(6, options.segments ?? 16);
+    this.radius = options.radius ?? 0.22;
+    this.decayRate = options.decayRate ?? 3.6;
+    this.baseColor.setHex(options.color ?? 0x22d3ee);
+
+    const geo = new THREE.SphereGeometry(1, 8, 8);
+    this.mat = new THREE.MeshBasicMaterial({
+      color: 0xffffff,
+      transparent: true,
+      opacity: 0.72,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false
+    });
+    this.mesh = new THREE.InstancedMesh(geo, this.mat, this.segments);
+    this.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    this.mesh.frustumCulled = false;
+
+    for (let i = 0; i < this.segments; i++) {
+      this.points.push({ x: 0, y: -999, z: 0, life: 0 });
+      this.dummy.position.set(0, -999, 0);
+      this.dummy.scale.set(0, 0, 0);
+      this.dummy.updateMatrix();
+      this.mesh.setMatrixAt(i, this.dummy.matrix);
+      this.mesh.setColorAt(i, this.baseColor);
+    }
+    this.mesh.instanceMatrix.needsUpdate = true;
+    if (this.mesh.instanceColor) this.mesh.instanceColor.needsUpdate = true;
+    scene.add(this.mesh);
+  }
+
+  public setColor(hex: number): void {
+    this.baseColor.setHex(hex);
+  }
+
+  public pushPoint(x: number, y: number, z: number): void {
+    const slot = this.points[this.head];
+    slot.x = x;
+    slot.y = y;
+    slot.z = z;
+    slot.life = 1.0;
+    this.head = (this.head + 1) % this.segments;
+  }
+
+  public reset(): void {
+    for (let i = 0; i < this.segments; i++) {
+      this.points[i].life = 0;
+      this.dummy.position.set(0, -999, 0);
+      this.dummy.scale.set(0, 0, 0);
+      this.dummy.updateMatrix();
+      this.mesh.setMatrixAt(i, this.dummy.matrix);
+    }
+    this.mesh.instanceMatrix.needsUpdate = true;
+  }
+
+  public update(dt: number): void {
+    for (let i = 0; i < this.segments; i++) {
+      const p = this.points[i];
+      if (p.life <= 0) {
+        this.dummy.position.set(0, -999, 0);
+        this.dummy.scale.set(0, 0, 0);
+        this.dummy.updateMatrix();
+        this.mesh.setMatrixAt(i, this.dummy.matrix);
+        continue;
+      }
+      p.life = Math.max(0, p.life - dt * this.decayRate);
+      const s = this.radius * p.life;
+      this.dummy.position.set(p.x, p.y, p.z);
+      this.dummy.scale.set(s, s, s);
+      this.dummy.updateMatrix();
+      this.mesh.setMatrixAt(i, this.dummy.matrix);
+
+      this.tempColor.copy(this.baseColor).multiplyScalar(0.25 + p.life * 0.85);
+      this.mesh.setColorAt(i, this.tempColor);
+    }
+    this.mesh.instanceMatrix.needsUpdate = true;
+    if (this.mesh.instanceColor) this.mesh.instanceColor.needsUpdate = true;
   }
 }
