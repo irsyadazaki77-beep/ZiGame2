@@ -9,7 +9,7 @@ interface GameArtworkProps {
 // Curated high-quality, high-contrast, beautiful gaming/abstract/neon photos corresponding to each game's theme.
 const GAME_THUMBNAILS: Record<string, string> = {
   snake: 'https://images.unsplash.com/photo-1518709268805-4e9042af9f23?auto=format&fit=crop&w=600&q=80',
-  brick: 'https://images.unsplash.com/photo-1595829830861-b54fc126b8b6?auto=format&fit=crop&w=600&q=80',
+  brick: 'https://images.unsplash.com/photo-1550745165-9bc0b252726f?auto=format&fit=crop&w=600&q=80',
   flappy: 'https://images.unsplash.com/photo-1559827291-72ee739d0d9a?auto=format&fit=crop&w=600&q=80',
   space: 'https://images.unsplash.com/photo-1506703719100-a0f3a48c0f86?auto=format&fit=crop&w=600&q=80',
   memory: 'https://images.unsplash.com/photo-1558494949-ef010cbdcc31?auto=format&fit=crop&w=600&q=80',

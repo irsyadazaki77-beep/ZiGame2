@@ -104,7 +104,7 @@ export default function HexDominionGame({
       }
       syncTileVisuals(targetTile);
       stage?.particles.burst(targetTile.x, 0.85, targetTile.z, 22, 0x6366f1, 6.8);
-      stage?.triggerShockwave(targetTile.x, targetTile.z, 0x38bdf8, 2.4);
+      stage?.triggerShockwave(targetTile.x, 0.08, targetTile.z, 0x38bdf8, 2.4, 0.36);
 
       // AI Counter-Move
       const aiCandidates = tiles.filter((t) => t.owner !== 'ai');

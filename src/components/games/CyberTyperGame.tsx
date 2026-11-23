@@ -141,7 +141,7 @@ export default function CyberTyperGame({
 
         if (isCompleted) {
           stage?.particles.burst(target.x, 0.75, target.z, 32, 0x10b981, 9.5);
-          stage?.triggerShockwave(target.x, target.z, 0x22c55e, 3.6);
+          stage?.triggerShockwave(target.x, 0.08, target.z, 0x22c55e, 3.6, 0.42);
           stage?.triggerTrauma(0.32);
           releaseSingleDroneRef.current(target);
           dronesRef.current = dronesRef.current.filter((d) => d.id !== target!.id);
@@ -347,7 +347,7 @@ export default function CyberTyperGame({
           st.combo = 0;
           setShieldHp(st.hp);
           stage.particles.burst(d.x, 0.85, 4.7, 34, 0xef4444, 9);
-          stage.triggerShockwave(d.x, 4.7, 0xef4444, 3.8);
+          stage.triggerShockwave(d.x, 0.08, 4.7, 0xef4444, 3.8, 0.45);
           stage.triggerTrauma(0.65);
           audioController.playExplosion();
           syncHudDrones();

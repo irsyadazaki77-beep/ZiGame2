@@ -71,7 +71,7 @@ export default function LockBreakerGame({
       const tx = Math.cos(st.targetAngle) * 3.1;
       const tz = Math.sin(st.targetAngle) * 3.1;
       stage?.particles.burst(tx, 0.7, tz, 24, 0xf59e0b, 7.5);
-      stage?.triggerShockwave(tx, tz, 0xf59e0b, 2.4);
+      stage?.triggerShockwave(tx, 0.08, tz, 0xf59e0b, 2.4, 0.36);
       stage?.triggerTrauma(0.24);
 
       if (st.pinsRemaining <= 0) {
@@ -80,7 +80,7 @@ export default function LockBreakerGame({
         st.speed = Math.min(5.2, 2.3 + st.vault * 0.25);
         setVaultLevel(st.vault);
         addScore(100);
-        stage?.triggerShockwave(0, 0, 0x22d3ee, 4.8);
+        stage?.triggerShockwave(0, 0.08, 0, 0x22d3ee, 4.8, 0.5);
         stage?.kickFov(5);
         audioController.playLevelUp();
         audioController.playPowerup();
@@ -89,7 +89,7 @@ export default function LockBreakerGame({
       st.targetAngle = (st.needleAngle + Math.PI * (0.45 + Math.random() * 1.1)) % (Math.PI * 2);
     } else {
       stage?.particles.burst(0, 0.8, 0, 36, 0xef4444, 9.5);
-      stage?.triggerShockwave(0, 0, 0xef4444, 4.5);
+      stage?.triggerShockwave(0, 0.08, 0, 0xef4444, 4.5, 0.48);
       stage?.triggerTrauma(0.75);
       audioController.playExplosion();
       audioController.playGameOver();

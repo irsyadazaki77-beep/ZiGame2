@@ -121,7 +121,7 @@ export default function RhythmTapGame({
           7.5
         );
         if (isPerfect) {
-          stage?.triggerShockwave(LANE_X[laneIdx], HIT_Z, LANE_COLORS[laneIdx], 2.5);
+          stage?.triggerShockwave(LANE_X[laneIdx], 0.08, HIT_Z, LANE_COLORS[laneIdx], 2.5, 0.34);
           stage?.triggerTrauma(0.18);
         }
       } else {

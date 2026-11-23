@@ -168,7 +168,7 @@ export default function CyberTetrisGame({
       const pts = [0, 100, 250, 500, 800][Math.min(4, cleared)] * t.level;
       addScore(pts);
       stage?.particles.burst(0, 4, 0, 28 * cleared, 0x22d3ee, 8.5);
-      stage?.triggerShockwave(0, 0, cleared >= 4 ? 0xfacc15 : 0x22d3ee, 4.8);
+      stage?.triggerShockwave(0, 0.08, 0, cleared >= 4 ? 0xfacc15 : 0x22d3ee, 4.8, 0.5);
       stage?.triggerTrauma(0.32);
       if (cleared >= 2) stage?.kickFov(4);
       audioController.playCombo(cleared + 1);

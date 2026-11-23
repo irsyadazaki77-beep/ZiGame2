@@ -253,9 +253,11 @@ export default function CyberMinesGame({
         );
         stage.triggerShockwave(
           cell.tileMesh.position.x,
+          0.08,
           cell.tileMesh.position.z,
           0xef4444,
-          4.2
+          4.2,
+          0.5
         );
         stage.triggerTrauma(0.8);
         audioController.playExplosion();
@@ -278,9 +280,11 @@ export default function CyberMinesGame({
       );
       stage.triggerShockwave(
         cell.tileMesh.position.x,
+        0.08,
         cell.tileMesh.position.z,
         0x38bdf8,
-        1.8
+        1.8,
+        0.34
       );
 
       if (cell.neighborMines === 0) {

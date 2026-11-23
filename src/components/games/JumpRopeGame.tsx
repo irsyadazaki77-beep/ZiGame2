@@ -277,7 +277,7 @@ export default function JumpRopeGame({
       if (prevAngle > Math.PI * 1.5 && st.ropeAngle < Math.PI * 0.5) {
         if (st.y < 0.48) {
           stage.particles.burst(0, 0.4, 0, 38, 0xef4444, 9.5);
-          stage.triggerShockwave(0, 0, 0xef4444, 4.2);
+          stage.triggerShockwave(0, 0.08, 0, 0xef4444, 4.2, 0.45);
           stage.triggerTrauma(0.75);
           audioController.playExplosion();
           audioController.playGameOver();
@@ -290,7 +290,7 @@ export default function JumpRopeGame({
           setRpm(Math.round(st.ropeSpeed * 18));
           addScore(20 + st.jumps * 2 + (isPerfect ? 15 : 0));
           stage.particles.burst(0, 0.15, 0, isPerfect ? 26 : 18, 0x22c55e, 7.2);
-          stage.triggerShockwave(0, 0, isPerfect ? 0xfacc15 : 0x22c55e, 3.2);
+          stage.triggerShockwave(0, 0.08, 0, isPerfect ? 0xfacc15 : 0x22c55e, 3.2, 0.38);
           stage.triggerTrauma(0.18);
           if (isPerfect) {
             updateHoloLabelSprite3D(comboSprite, `PERFECT x${st.jumps}!`, {
