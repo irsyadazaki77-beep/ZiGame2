@@ -9,7 +9,9 @@ import { ThreeDockOverlay } from '../gameplay/ThreeDockOverlay';
 import {
   ThreeStageController,
   CameraPreset3D,
-  QualityLevel3D
+  QualityLevel3D,
+  createHoloLabelSprite3D,
+  dampValue
 } from '../../utils/threeStage';
 import { Coins, Sparkles, Zap } from 'lucide-react';
 
@@ -137,14 +139,28 @@ export default function PlinkoNeoGame({
     stageRef.current = stage;
     setQuality(stage.getQualityLevel());
 
-    const pegGeo = new THREE.CylinderGeometry(0.18, 0.2, 0.55, 12);
+    // Side Bumper Rails & Backboard Deck
+    const railMat = new THREE.MeshStandardMaterial({
+      color: 0xa855f7,
+      emissive: 0x9333ea,
+      emissiveIntensity: 0.75
+    });
+    const wallL = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.55, 11.8), railMat);
+    wallL.position.set(-4.55, 0.275, -0.3);
+    const wallR = wallL.clone();
+    wallR.position.x = 4.55;
+    stage.scene.add(wallL, wallR);
+
+    const pegGeo = new THREE.CylinderGeometry(0.18, 0.22, 0.58, 14);
     const pegMat = new THREE.MeshPhysicalMaterial({
       color: 0xe2e8f0,
+      emissive: 0x38bdf8,
+      emissiveIntensity: 0.2,
       metalness: 0.88,
       roughness: 0.18,
       clearcoat: 0.9
     });
-    const pegs: { x: number; z: number }[] = [];
+    const pegs: { x: number; z: number; mesh: THREE.Mesh; scale: number }[] = [];
 
     for (let row = 0; row < 6; row++) {
       const cols = row % 2 === 0 ? 5 : 6;
@@ -152,33 +168,43 @@ export default function PlinkoNeoGame({
       for (let c = 0; c < cols; c++) {
         const x = (c - (cols - 1) / 2) * 1.45;
         const peg = new THREE.Mesh(pegGeo, pegMat);
-        peg.position.set(x, 0.275, z);
+        peg.position.set(x, 0.29, z);
         peg.castShadow = true;
         stage.scene.add(peg);
-        pegs.push({ x, z });
+        pegs.push({ x, z, mesh: peg, scale: 1 });
       }
     }
 
     const pocketColors = [0x38bdf8, 0xa855f7, 0xf59e0b, 0xa855f7, 0x38bdf8];
+    const pocketHexStr = ['#38bdf8', '#a855f7', '#f59e0b', '#a855f7', '#38bdf8'];
     for (let i = 0; i < 5; i++) {
       const px = (i - 2) * 1.65;
       const pocket = new THREE.Mesh(
-        new THREE.BoxGeometry(1.4, 0.35, 0.85),
+        new THREE.BoxGeometry(1.42, 0.38, 0.9),
         new THREE.MeshStandardMaterial({
           color: pocketColors[i],
           emissive: pocketColors[i],
-          emissiveIntensity: 0.55
+          emissiveIntensity: 0.65
         })
       );
-      pocket.position.set(px, 0.175, 5.2);
+      pocket.position.set(px, 0.19, 5.2);
       stage.scene.add(pocket);
+
+      const badge = createHoloLabelSprite3D(`${MULTIPLIERS[i]}X`, {
+        borderColor: pocketHexStr[i],
+        textColor: MULTIPLIERS[i] >= 10 ? '#facc15' : '#f8fafc',
+        scaleX: 1.35,
+        scaleY: 0.48
+      });
+      badge.position.set(px, 0.85, 5.2);
+      stage.scene.add(badge);
     }
 
     const ballGeo = new THREE.SphereGeometry(0.32, 16, 16);
     const ballMat = new THREE.MeshPhysicalMaterial({
       color: 0xfacc15,
       emissive: 0xeab308,
-      emissiveIntensity: 0.55,
+      emissiveIntensity: 0.65,
       metalness: 0.75,
       roughness: 0.15,
       clearcoat: 1.0
@@ -218,6 +244,13 @@ export default function PlinkoNeoGame({
     };
 
     stage.startLoop((dt) => {
+      for (const p of pegs) {
+        if (p.scale > 1.005) {
+          p.scale = dampValue(p.scale, 1.0, 14, dt);
+          p.mesh.scale.set(p.scale, 1, p.scale);
+        }
+      }
+
       if (gameStateRef.current !== 'playing') return;
 
       for (let i = activeBallsRef.current.length - 1; i >= 0; i--) {
@@ -246,7 +279,9 @@ export default function PlinkoNeoGame({
             const jitter = (Math.random() - 0.5) * 2.5;
             b.vx = nx * 4.2 + jitter;
             b.vz = Math.max(1.2, Math.abs(b.vz) * 0.55);
-            stage.particles.burst(p.x, 0.45, p.z, 6, 0xfacc15, 4);
+            p.scale = 1.48;
+            p.mesh.scale.set(1.48, 1.15, 1.48);
+            stage.particles.burst(p.x, 0.45, p.z, 7, 0xfacc15, 4.5);
             audioController.playReflect();
           }
         }
@@ -262,7 +297,8 @@ export default function PlinkoNeoGame({
           setLastMulti(mult);
           const pts = 25 * mult;
           addScore(pts);
-          stage.particles.burst(b.x, 0.5, 5.2, 24, pocketColors[slotIdx], 7.5);
+          stage.particles.burst(b.x, 0.5, 5.2, 26, pocketColors[slotIdx], 7.8);
+          stage.triggerShockwave(b.x, 5.2, pocketColors[slotIdx], mult >= 10 ? 3.8 : 2.4);
           stage.triggerTrauma(mult >= 10 ? 0.45 : 0.2);
           if (mult >= 10) {
             stage.kickFov(4);

@@ -72,7 +72,11 @@ export default function HexDominionGame({
     const mat = tile.baseMesh.material as THREE.MeshStandardMaterial;
     mat.color.setHex(OWNER_COLORS[tile.owner]);
     mat.emissive.setHex(tile.owner === 'neutral' ? 0x0f172a : OWNER_COLORS[tile.owner]);
-    mat.emissiveIntensity = tile.owner === 'neutral' ? 0.15 : 0.45;
+    mat.emissiveIntensity = tile.owner === 'neutral' ? 0.15 : 0.55;
+
+    const heightScale = tile.owner === 'neutral' ? 1 : 1 + Math.min(1.6, (tile.power - 1) * 0.28);
+    tile.baseMesh.scale.y = heightScale;
+    tile.baseMesh.position.y = 0.28 * heightScale;
 
     tile.unitMesh.visible = tile.owner !== 'neutral';
     const uMat = tile.unitMesh.material as THREE.MeshStandardMaterial;
@@ -99,7 +103,8 @@ export default function HexDominionGame({
         audioController.playScore();
       }
       syncTileVisuals(targetTile);
-      stage?.particles.burst(targetTile.x, 0.85, targetTile.z, 20, 0x6366f1, 6.5);
+      stage?.particles.burst(targetTile.x, 0.85, targetTile.z, 22, 0x6366f1, 6.8);
+      stage?.triggerShockwave(targetTile.x, targetTile.z, 0x38bdf8, 2.4);
 
       // AI Counter-Move
       const aiCandidates = tiles.filter((t) => t.owner !== 'ai');

@@ -2023,3 +2023,304 @@ export function buildCyberActionHero3D(primaryColor = 0x38bdf8, visorColor = 0xf
 
   return { group, legL, legR, armL, armR };
 }
+
+/**
+ * Framerate-independent exponential smoothing helper for 60fps 3D animations.
+ */
+export function dampValue(current: number, target: number, lambda: number, dt: number): number {
+  if (!Number.isFinite(dt) || dt <= 0) return current;
+  return THREE.MathUtils.lerp(current, target, 1 - Math.exp(-lambda * dt));
+}
+
+export interface HoloLabelOptions3D {
+  textColor?: string;
+  highlightColor?: string;
+  highlightPrefixLen?: number;
+  borderColor?: string;
+  bgColor?: string;
+  scaleX?: number;
+  scaleY?: number;
+}
+
+function drawHoloLabelCanvas(
+  canvas: HTMLCanvasElement,
+  text: string,
+  opts: HoloLabelOptions3D = {}
+): void {
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+
+  const w = canvas.width;
+  const h = canvas.height;
+  ctx.clearRect(0, 0, w, h);
+
+  const bgColor = opts.bgColor ?? 'rgba(6, 14, 26, 0.86)';
+  const borderColor = opts.borderColor ?? '#22d3ee';
+  const textColor = opts.textColor ?? '#f8fafc';
+  const highlightColor = opts.highlightColor ?? '#4ade80';
+  const prefixLen = Math.max(0, Math.min(text.length, opts.highlightPrefixLen ?? 0));
+
+  // Rounded badge pill
+  const pad = 10;
+  const r = 18;
+  ctx.fillStyle = bgColor;
+  ctx.strokeStyle = borderColor;
+  ctx.lineWidth = 4;
+  ctx.beginPath();
+  ctx.roundRect(pad, pad, w - pad * 2, h - pad * 2, r);
+  ctx.fill();
+  ctx.stroke();
+
+  ctx.font = '900 38px "JetBrains Mono", "Inter", monospace';
+  ctx.textBaseline = 'middle';
+
+  if (prefixLen > 0) {
+    const prefix = text.slice(0, prefixLen);
+    const rest = text.slice(prefixLen);
+    const prefixW = ctx.measureText(prefix).width;
+    const restW = ctx.measureText(rest).width;
+    const totalW = prefixW + restW;
+    const startX = (w - totalW) / 2;
+
+    ctx.textAlign = 'left';
+    ctx.fillStyle = highlightColor;
+    ctx.fillText(prefix, startX, h / 2 + 2);
+
+    ctx.fillStyle = textColor;
+    ctx.fillText(rest, startX + prefixW, h / 2 + 2);
+  } else {
+    ctx.textAlign = 'center';
+    ctx.fillStyle = textColor;
+    ctx.fillText(text, w / 2, h / 2 + 2);
+  }
+}
+
+export function createHoloLabelSprite3D(
+  text: string,
+  opts: HoloLabelOptions3D = {}
+): THREE.Sprite {
+  const canvas = document.createElement('canvas');
+  canvas.width = 320;
+  canvas.height = 88;
+  drawHoloLabelCanvas(canvas, text, opts);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.needsUpdate = true;
+
+  const mat = new THREE.SpriteMaterial({
+    map: texture,
+    transparent: true,
+    depthTest: false,
+    depthWrite: false
+  });
+  const sprite = new THREE.Sprite(mat);
+  sprite.scale.set(opts.scaleX ?? 2.35, opts.scaleY ?? 0.65, 1);
+  sprite.userData.holoCanvas = canvas;
+  sprite.userData.holoTexture = texture;
+  return sprite;
+}
+
+export function updateHoloLabelSprite3D(
+  sprite: THREE.Sprite,
+  text: string,
+  opts: HoloLabelOptions3D = {}
+): void {
+  const canvas = sprite.userData.holoCanvas as HTMLCanvasElement | undefined;
+  const texture = sprite.userData.holoTexture as THREE.CanvasTexture | undefined;
+  if (!canvas || !texture) return;
+  drawHoloLabelCanvas(canvas, text, opts);
+  texture.needsUpdate = true;
+}
+
+export function buildCyberTurret3D(primaryColor = 0x22c55e, accentColor = 0x38bdf8): {
+  group: THREE.Group;
+  head: THREE.Group;
+  barrels: THREE.Group;
+  core: THREE.Mesh;
+} {
+  const group = new THREE.Group();
+
+  const baseMat = new THREE.MeshPhysicalMaterial({
+    color: 0x1e293b,
+    metalness: 0.85,
+    roughness: 0.24,
+    clearcoat: 0.8
+  });
+  const armorMat = new THREE.MeshPhysicalMaterial({
+    color: primaryColor,
+    metalness: 0.68,
+    roughness: 0.22,
+    clearcoat: 0.9
+  });
+  const glowMat = new THREE.MeshStandardMaterial({
+    color: accentColor,
+    emissive: accentColor,
+    emissiveIntensity: 0.95,
+    roughness: 0.15
+  });
+
+  // Octagonal Pedestal Base
+  const pedestal = new THREE.Mesh(new THREE.CylinderGeometry(1.05, 1.32, 0.42, 8), baseMat);
+  pedestal.position.y = 0.21;
+  pedestal.castShadow = true;
+  pedestal.receiveShadow = true;
+  group.add(pedestal);
+
+  const baseRing = new THREE.Mesh(new THREE.TorusGeometry(1.12, 0.06, 10, 24), glowMat);
+  baseRing.rotation.x = Math.PI / 2;
+  baseRing.position.y = 0.42;
+  group.add(baseRing);
+
+  // Rotating Gimbal Head
+  const head = new THREE.Group();
+  head.position.y = 0.72;
+  group.add(head);
+
+  const hull = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.56, 1.24), armorMat);
+  hull.castShadow = true;
+  head.add(hull);
+
+  const core = new THREE.Mesh(new THREE.OctahedronGeometry(0.36, 1), glowMat);
+  core.position.set(0, 0.36, 0);
+  head.add(core);
+
+  // Dual Recoil Barrels pointing towards -Z
+  const barrels = new THREE.Group();
+  head.add(barrels);
+
+  const barrelGeo = new THREE.CylinderGeometry(0.1, 0.13, 1.25, 12);
+  barrelGeo.rotateX(Math.PI / 2);
+  const barrelL = new THREE.Mesh(barrelGeo, baseMat);
+  barrelL.position.set(-0.32, 0.05, -0.78);
+  barrelL.castShadow = true;
+  const barrelR = barrelL.clone();
+  barrelR.position.x = 0.32;
+
+  const tipGeo = new THREE.CylinderGeometry(0.13, 0.13, 0.18, 12);
+  tipGeo.rotateX(Math.PI / 2);
+  const tipL = new THREE.Mesh(tipGeo, glowMat);
+  tipL.position.set(-0.32, 0.05, -1.38);
+  const tipR = tipL.clone();
+  tipR.position.x = 0.32;
+
+  barrels.add(barrelL, barrelR, tipL, tipR);
+
+  return { group, head, barrels, core };
+}
+
+export function buildGroundShadowRing3D(radius = 0.75, color = 0x22d3ee): {
+  group: THREE.Group;
+  ringMesh: THREE.Mesh;
+  discMesh: THREE.Mesh;
+} {
+  const group = new THREE.Group();
+  group.position.y = 0.03;
+
+  const ringMat = new THREE.MeshBasicMaterial({
+    color,
+    transparent: true,
+    opacity: 0.78,
+    side: THREE.DoubleSide
+  });
+  const ringMesh = new THREE.Mesh(
+    new THREE.RingGeometry(radius * 0.76, radius, 28),
+    ringMat
+  );
+  ringMesh.rotation.x = -Math.PI / 2;
+
+  const discMat = new THREE.MeshBasicMaterial({
+    color: 0x020617,
+    transparent: true,
+    opacity: 0.45,
+    side: THREE.DoubleSide
+  });
+  const discMesh = new THREE.Mesh(new THREE.CircleGeometry(radius * 0.75, 24), discMat);
+  discMesh.rotation.x = -Math.PI / 2;
+
+  group.add(discMesh, ringMesh);
+  return { group, ringMesh, discMesh };
+}
+
+interface LaserBeamSlot3D {
+  mesh: THREE.Mesh;
+  mat: THREE.MeshBasicMaterial;
+  age: number;
+  maxAge: number;
+  active: boolean;
+}
+
+export class LaserBeamPool3D {
+  private slots: LaserBeamSlot3D[] = [];
+  private upVec = new THREE.Vector3(0, 1, 0);
+  private pA = new THREE.Vector3();
+  private pB = new THREE.Vector3();
+  private dir = new THREE.Vector3();
+  private mid = new THREE.Vector3();
+
+  constructor(scene: THREE.Scene, poolSize = 10, defaultColor = 0x22c55e) {
+    const geo = new THREE.CylinderGeometry(0.06, 0.08, 1, 8);
+    for (let i = 0; i < poolSize; i++) {
+      const mat = new THREE.MeshBasicMaterial({
+        color: defaultColor,
+        transparent: true,
+        opacity: 0.92,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false
+      });
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.visible = false;
+      mesh.frustumCulled = false;
+      scene.add(mesh);
+      this.slots.push({ mesh, mat, age: 0, maxAge: 0.16, active: false });
+    }
+  }
+
+  fire(
+    from: [number, number, number],
+    to: [number, number, number],
+    color = 0x22c55e,
+    duration = 0.15
+  ): void {
+    let slot = this.slots.find((s) => !s.active);
+    if (!slot) {
+      slot = this.slots[0];
+    }
+
+    this.pA.set(from[0], from[1], from[2]);
+    this.pB.set(to[0], to[1], to[2]);
+    this.dir.subVectors(this.pB, this.pA);
+    const len = this.dir.length();
+    if (len < 0.01) return;
+
+    this.mid.addVectors(this.pA, this.pB).multiplyScalar(0.5);
+    slot.mesh.position.copy(this.mid);
+    slot.mesh.scale.set(1, len, 1);
+    this.dir.normalize();
+    slot.mesh.quaternion.setFromUnitVectors(this.upVec, this.dir);
+
+    slot.mat.color.setHex(color);
+    slot.mat.opacity = 0.95;
+    slot.age = 0;
+    slot.maxAge = Math.max(0.05, duration);
+    slot.active = true;
+    slot.mesh.visible = true;
+  }
+
+  update(dt: number): void {
+    for (let i = 0; i < this.slots.length; i++) {
+      const s = this.slots[i];
+      if (!s.active) continue;
+      s.age += dt;
+      if (s.age >= s.maxAge) {
+        s.active = false;
+        s.mesh.visible = false;
+      } else {
+        const t = 1 - s.age / s.maxAge;
+        s.mat.opacity = t * 0.95;
+        s.mesh.scale.x = 0.4 + t * 0.9;
+        s.mesh.scale.z = 0.4 + t * 0.9;
+      }
+    }
+  }
+}

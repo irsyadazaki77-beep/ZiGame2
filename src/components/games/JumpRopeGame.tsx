@@ -10,7 +10,11 @@ import {
   ThreeStageController,
   CameraPreset3D,
   QualityLevel3D,
-  buildCyberActionHero3D
+  buildCyberActionHero3D,
+  buildGroundShadowRing3D,
+  createHoloLabelSprite3D,
+  updateHoloLabelSprite3D,
+  dampValue
 } from '../../utils/threeStage';
 import { Zap, Flame } from 'lucide-react';
 
@@ -53,7 +57,10 @@ export default function JumpRopeGame({
     ropeAngle: 0,
     ropeSpeed: 3.4,
     jumps: 0,
-    scoredThisCycle: false
+    scoredThisCycle: false,
+    scaleY: 1,
+    scaleXZ: 1,
+    bannerTimer: 0
   });
 
   const jump = useCallback(() => {
@@ -62,6 +69,8 @@ export default function JumpRopeGame({
     if (!st.jumping) {
       st.jumping = true;
       st.vy = 9.8;
+      st.scaleY = 1.26;
+      st.scaleXZ = 0.84;
       audioController.playJump();
     }
   }, []);
@@ -74,7 +83,10 @@ export default function JumpRopeGame({
       ropeAngle: Math.PI,
       ropeSpeed: 3.4,
       jumps: 0,
-      scoredThisCycle: false
+      scoredThisCycle: false,
+      scaleY: 1,
+      scaleXZ: 1,
+      bannerTimer: 0
     };
     setJumps(0);
     setRpm(60);
@@ -136,36 +148,89 @@ export default function JumpRopeGame({
     stageRef.current = stage;
     setQuality(stage.getQualityLevel());
 
-    const pylonMat = new THREE.MeshStandardMaterial({
-      color: 0x334155,
-      metalness: 0.8,
-      roughness: 0.25
+    const pylonMat = new THREE.MeshPhysicalMaterial({
+      color: 0x1e293b,
+      metalness: 0.85,
+      roughness: 0.22,
+      clearcoat: 0.85
     });
-    const pylonL = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.35, 2.2, 12), pylonMat);
-    pylonL.position.set(-3.4, 1.1, 0);
-    const pylonR = pylonL.clone();
-    pylonR.position.x = 3.4;
-    stage.scene.add(pylonL, pylonR);
+    const glowMat = new THREE.MeshStandardMaterial({
+      color: 0x22c55e,
+      emissive: 0x4ade80,
+      emissiveIntensity: 0.95
+    });
+
+    const buildEmitterPylon = (xPos: number) => {
+      const g = new THREE.Group();
+      g.position.set(xPos, 0, 0);
+      const base = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.72, 0.35, 8), pylonMat);
+      base.position.y = 0.175;
+      base.castShadow = true;
+      const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.24, 0.32, 2.1, 12), pylonMat);
+      shaft.position.y = 1.25;
+      shaft.castShadow = true;
+      const ring1 = new THREE.Mesh(new THREE.TorusGeometry(0.36, 0.05, 8, 20), glowMat);
+      ring1.rotation.x = Math.PI / 2;
+      ring1.position.y = 0.85;
+      const ring2 = ring1.clone();
+      ring2.position.y = 1.85;
+      const orb = new THREE.Mesh(new THREE.OctahedronGeometry(0.26, 0), glowMat);
+      orb.position.y = 2.52;
+      g.add(base, shaft, ring1, ring2, orb);
+      return { g, orb };
+    };
+
+    const pylonL = buildEmitterPylon(-3.4);
+    const pylonR = buildEmitterPylon(3.4);
+    stage.scene.add(pylonL.g, pylonR.g);
 
     const ropePivot = new THREE.Group();
     ropePivot.position.set(0, 1.45, 0);
     const ropeArc = new THREE.Mesh(
-      new THREE.TorusGeometry(2.8, 0.07, 10, 36, Math.PI),
+      new THREE.TorusGeometry(2.8, 0.075, 12, 42, Math.PI),
       new THREE.MeshStandardMaterial({
         color: 0x22c55e,
         emissive: 0x4ade80,
-        emissiveIntensity: 1.1
+        emissiveIntensity: 1.25
       })
     );
     ropeArc.rotation.z = Math.PI;
-    ropePivot.add(ropeArc);
+
+    const trailArc = new THREE.Mesh(
+      new THREE.TorusGeometry(2.8, 0.045, 10, 36, Math.PI),
+      new THREE.MeshBasicMaterial({
+        color: 0x86efac,
+        transparent: true,
+        opacity: 0.42
+      })
+    );
+    trailArc.rotation.z = Math.PI;
+    trailArc.rotation.x = -0.24;
+
+    ropePivot.add(ropeArc, trailArc);
     stage.scene.add(ropePivot);
+
+    const shadowRing = buildGroundShadowRing3D(0.85, 0x22c55e);
+    stage.scene.add(shadowRing.group);
 
     const hero = buildCyberActionHero3D(0x22c55e, 0xfacc15);
     hero.group.position.set(0, 0, 0);
     stage.scene.add(hero.group);
 
-    stage.startLoop((dt) => {
+    const comboSprite = createHoloLabelSprite3D('PERFECT!', {
+      borderColor: '#4ade80',
+      textColor: '#facc15',
+      scaleX: 2.2,
+      scaleY: 0.62
+    });
+    comboSprite.position.set(0, 2.75, 0);
+    comboSprite.visible = false;
+    stage.scene.add(comboSprite);
+
+    stage.startLoop((dt, elapsed) => {
+      pylonL.orb.rotation.y = elapsed * 2.8;
+      pylonR.orb.rotation.y = -elapsed * 2.8;
+
       if (gameStateRef.current !== 'playing') return;
 
       const st = ropeStateRef.current;
@@ -182,16 +247,37 @@ export default function JumpRopeGame({
           st.y = 0;
           st.vy = 0;
           st.jumping = false;
+          // Squash on landing
+          st.scaleY = 0.78;
+          st.scaleXZ = 1.22;
         }
       }
 
+      st.scaleY = dampValue(st.scaleY, 1.0, 14, dt);
+      st.scaleXZ = dampValue(st.scaleXZ, 1.0, 14, dt);
+
       hero.group.position.set(0, st.y, 0);
-      hero.armL.rotation.x = st.jumping ? -0.9 : 0;
-      hero.armR.rotation.x = st.jumping ? -0.9 : 0;
+      hero.group.scale.set(st.scaleXZ, st.scaleY, st.scaleXZ);
+      hero.armL.rotation.x = dampValue(hero.armL.rotation.x, st.jumping ? -1.15 : 0, 16, dt);
+      hero.armR.rotation.x = dampValue(hero.armR.rotation.x, st.jumping ? -1.15 : 0, 16, dt);
+      hero.legL.rotation.x = dampValue(hero.legL.rotation.x, st.jumping ? 0.55 : 0, 16, dt);
+      hero.legR.rotation.x = dampValue(hero.legR.rotation.x, st.jumping ? -0.45 : 0, 16, dt);
+
+      const shadowScale = Math.max(0.42, 1 - st.y * 0.25);
+      shadowRing.group.scale.setScalar(shadowScale);
+
+      if (st.bannerTimer > 0) {
+        st.bannerTimer -= dt;
+        comboSprite.position.y = 2.65 + (0.65 - st.bannerTimer) * 0.6;
+        if (st.bannerTimer <= 0) {
+          comboSprite.visible = false;
+        }
+      }
 
       if (prevAngle > Math.PI * 1.5 && st.ropeAngle < Math.PI * 0.5) {
         if (st.y < 0.48) {
-          stage.particles.burst(0, 0.4, 0, 36, 0xef4444, 9);
+          stage.particles.burst(0, 0.4, 0, 38, 0xef4444, 9.5);
+          stage.triggerShockwave(0, 0, 0xef4444, 4.2);
           stage.triggerTrauma(0.75);
           audioController.playExplosion();
           audioController.playGameOver();
@@ -199,11 +285,21 @@ export default function JumpRopeGame({
           return;
         } else {
           st.jumps += 1;
+          const isPerfect = st.y >= 0.72;
           setJumps(st.jumps);
           setRpm(Math.round(st.ropeSpeed * 18));
-          addScore(20 + st.jumps * 2);
-          stage.particles.burst(0, 0.2, 0, 18, 0x22c55e, 6.5);
+          addScore(20 + st.jumps * 2 + (isPerfect ? 15 : 0));
+          stage.particles.burst(0, 0.15, 0, isPerfect ? 26 : 18, 0x22c55e, 7.2);
+          stage.triggerShockwave(0, 0, isPerfect ? 0xfacc15 : 0x22c55e, 3.2);
           stage.triggerTrauma(0.18);
+          if (isPerfect) {
+            updateHoloLabelSprite3D(comboSprite, `PERFECT x${st.jumps}!`, {
+              borderColor: '#4ade80',
+              textColor: '#facc15'
+            });
+            comboSprite.visible = true;
+            st.bannerTimer = 0.65;
+          }
           audioController.playScore();
         }
       }

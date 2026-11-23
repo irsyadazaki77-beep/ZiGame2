@@ -308,14 +308,19 @@ export default function Neon2048Game({
           const mesh = cubeMeshes[r][c];
           if (val === 0) {
             mesh.visible = false;
+            mesh.userData.prevVal = 0;
           } else {
+            const wasEmptyOrMerged = mesh.userData.prevVal !== val;
+            mesh.userData.prevVal = val;
             mesh.visible = true;
             const mat = mesh.material as THREE.MeshStandardMaterial;
             mat.map = getTex(val);
             mat.needsUpdate = true;
             const heightScale = 1 + Math.min(1.2, Math.log2(val) * 0.08);
-            mesh.scale.set(1, heightScale, 1);
-            mesh.position.y = 0.32 + 0.325 * heightScale;
+            mesh.userData.targetHeight = heightScale;
+            if (wasEmptyOrMerged) {
+              mesh.scale.set(1.28, heightScale * 1.32, 1.28);
+            }
           }
         }
       }
@@ -343,7 +348,20 @@ export default function Neon2048Game({
     container.addEventListener('pointerdown', onPointerDown);
     container.addEventListener('pointerup', onPointerUp);
 
-    stage.startLoop(() => {});
+    stage.startLoop((dt) => {
+      const dampFactor = Math.min(1, dt * 14);
+      for (let r = 0; r < 4; r++) {
+        for (let c = 0; c < 4; c++) {
+          const m = cubeMeshes[r][c];
+          if (!m.visible) continue;
+          const th = (m.userData.targetHeight as number) || 1;
+          m.scale.x = THREE.MathUtils.lerp(m.scale.x, 1, dampFactor);
+          m.scale.y = THREE.MathUtils.lerp(m.scale.y, th, dampFactor);
+          m.scale.z = THREE.MathUtils.lerp(m.scale.z, 1, dampFactor);
+          m.position.y = 0.32 + 0.325 * m.scale.y;
+        }
+      }
+    });
 
     return () => {
       container.removeEventListener('pointerdown', onPointerDown);

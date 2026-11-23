@@ -181,6 +181,24 @@ export default function CyberClickerGame({
     );
     ring2.rotation.x = Math.PI / 2;
 
+    const pedestal = new THREE.Mesh(
+      new THREE.CylinderGeometry(1.65, 2.15, 0.38, 16),
+      new THREE.MeshPhysicalMaterial({
+        color: 0x0f172a,
+        metalness: 0.85,
+        roughness: 0.22,
+        clearcoat: 0.9
+      })
+    );
+    pedestal.position.y = 0.19;
+    const baseHalo = new THREE.Mesh(
+      new THREE.TorusGeometry(1.9, 0.06, 10, 32),
+      new THREE.MeshBasicMaterial({ color: 0x6366f1 })
+    );
+    baseHalo.rotation.x = Math.PI / 2;
+    baseHalo.position.y = 0.39;
+    stage.scene.add(pedestal, baseHalo);
+
     reactorGroup.add(coreCrystal, ring1, ring2);
     stage.scene.add(reactorGroup);
 

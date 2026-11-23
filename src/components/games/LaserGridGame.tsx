@@ -168,8 +168,10 @@ export default function LaserGridGame({
     stageRef.current = stage;
     setQuality(stage.getQualityLevel());
 
-    // Build 3x3 Elevated Glass-Steel Platform Pads
+    // Build 3x3 Elevated Glass-Steel Platform Pads + Perimeter Laser Emitters
     const padGeo = new THREE.BoxGeometry(2.1, 0.35, 2.1);
+    const trimGeo = new THREE.EdgesGeometry(padGeo);
+    const trimMat = new THREE.LineBasicMaterial({ color: 0xef4444, transparent: true, opacity: 0.45 });
     for (let rx = -1; rx <= 1; rx++) {
       for (let rz = -1; rz <= 1; rz++) {
         const padMat = new THREE.MeshPhysicalMaterial({
@@ -181,8 +183,25 @@ export default function LaserGridGame({
         const pad = new THREE.Mesh(padGeo, padMat);
         pad.position.set(rx * TILE_STEP, 0.175, rz * TILE_STEP);
         pad.receiveShadow = true;
+        pad.add(new THREE.LineSegments(trimGeo, trimMat));
         stage.scene.add(pad);
       }
+    }
+
+    const emitterGeo = new THREE.CylinderGeometry(0.28, 0.36, 0.85, 8);
+    const emitterMat = new THREE.MeshStandardMaterial({
+      color: 0x334155,
+      emissive: 0xef4444,
+      emissiveIntensity: 0.45,
+      metalness: 0.85,
+      roughness: 0.2
+    });
+    for (let idx = -1; idx <= 1; idx++) {
+      const emRow = new THREE.Mesh(emitterGeo, emitterMat);
+      emRow.position.set(-4.85, 0.65, idx * TILE_STEP);
+      const emCol = new THREE.Mesh(emitterGeo, emitterMat);
+      emCol.position.set(idx * TILE_STEP, 0.65, -4.85);
+      stage.scene.add(emRow, emCol);
     }
 
     const hero = buildCyberActionHero3D(0x38bdf8, 0xef4444);

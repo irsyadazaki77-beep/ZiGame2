@@ -140,28 +140,57 @@ export default function NeonPongGame({
     stageRef.current = stage;
     setQuality(stage.getQualityLevel());
 
+    const tableDeck = new THREE.Mesh(
+      new THREE.BoxGeometry(TABLE_HALF_W * 2, 0.08, TABLE_HALF_Z * 2),
+      new THREE.MeshPhysicalMaterial({
+        color: 0x060f24,
+        metalness: 0.85,
+        roughness: 0.2,
+        clearcoat: 0.9
+      })
+    );
+    tableDeck.position.y = -0.02;
+    tableDeck.receiveShadow = true;
+
     const railMat = new THREE.MeshStandardMaterial({
       color: 0x3b82f6,
       emissive: 0x2563eb,
-      emissiveIntensity: 0.65
+      emissiveIntensity: 0.75
     });
-    const wallL = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.5, TABLE_HALF_Z * 2 + 1), railMat);
-    wallL.position.set(-TABLE_HALF_W - 0.12, 0.25, 0);
+    const wallL = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.52, TABLE_HALF_Z * 2 + 1), railMat);
+    wallL.position.set(-TABLE_HALF_W - 0.13, 0.25, 0);
     const wallR = wallL.clone();
-    wallR.position.x = TABLE_HALF_W + 0.12;
+    wallR.position.x = TABLE_HALF_W + 0.13;
     const centerLine = new THREE.Mesh(
       new THREE.BoxGeometry(TABLE_HALF_W * 2, 0.04, 0.1),
       new THREE.MeshBasicMaterial({ color: 0x38bdf8 })
     );
-    centerLine.position.y = 0.02;
-    stage.scene.add(wallL, wallR, centerLine);
+    centerLine.position.y = 0.025;
+
+    const centerRing = new THREE.Mesh(
+      new THREE.TorusGeometry(1.45, 0.055, 10, 32),
+      new THREE.MeshBasicMaterial({ color: 0x38bdf8 })
+    );
+    centerRing.rotation.x = Math.PI / 2;
+    centerRing.position.y = 0.03;
+
+    const postGeo = new THREE.CylinderGeometry(0.26, 0.32, 0.75, 12);
+    for (const sx of [-1, 1]) {
+      for (const sz of [-1, 1]) {
+        const post = new THREE.Mesh(postGeo, railMat);
+        post.position.set(sx * (TABLE_HALF_W + 0.13), 0.375, sz * TABLE_HALF_Z);
+        stage.scene.add(post);
+      }
+    }
+
+    stage.scene.add(tableDeck, wallL, wallR, centerLine, centerRing);
 
     const playerPaddle = new THREE.Mesh(
       new THREE.BoxGeometry(2.3, 0.42, 0.45),
       new THREE.MeshPhysicalMaterial({
         color: 0x22d3ee,
         emissive: 0x06b6d4,
-        emissiveIntensity: 0.65,
+        emissiveIntensity: 0.75,
         metalness: 0.7,
         roughness: 0.2,
         clearcoat: 0.9
@@ -175,7 +204,7 @@ export default function NeonPongGame({
       new THREE.MeshPhysicalMaterial({
         color: 0xf43f5e,
         emissive: 0xe11d48,
-        emissiveIntensity: 0.65,
+        emissiveIntensity: 0.75,
         metalness: 0.7,
         roughness: 0.2,
         clearcoat: 0.9
@@ -189,13 +218,31 @@ export default function NeonPongGame({
       new THREE.MeshStandardMaterial({
         color: 0xfef08a,
         emissive: 0xfacc15,
-        emissiveIntensity: 0.95
+        emissiveIntensity: 1.1
       })
     );
     puck.position.set(0, 0.16, 0);
     puck.castShadow = true;
 
-    stage.scene.add(playerPaddle, aiPaddle, puck);
+    // 10-Segment Instanced Puck Motion Trail
+    const trailCount = 10;
+    const trailInst = new THREE.InstancedMesh(
+      new THREE.CylinderGeometry(0.32, 0.32, 0.1, 14),
+      new THREE.MeshBasicMaterial({
+        color: 0x38bdf8,
+        transparent: true,
+        opacity: 0.38
+      }),
+      trailCount
+    );
+    trailInst.frustumCulled = false;
+    const trailPts: { x: number; z: number }[] = Array.from({ length: trailCount }, () => ({
+      x: 0,
+      z: 0
+    }));
+    const dummyMat = new THREE.Matrix4();
+
+    stage.scene.add(playerPaddle, aiPaddle, puck, trailInst);
 
     const updatePaddleFromPointer = (e: PointerEvent) => {
       if (gameStateRef.current !== 'playing') return;
@@ -234,10 +281,12 @@ export default function NeonPongGame({
       if (p.puckX < -TABLE_HALF_W + 0.4) {
         p.puckX = -TABLE_HALF_W + 0.4;
         p.vx = Math.abs(p.vx);
+        stage.particles.burst(p.puckX, 0.25, p.puckZ, 8, 0x3b82f6, 4.5);
         audioController.playClick();
       } else if (p.puckX > TABLE_HALF_W - 0.4) {
         p.puckX = TABLE_HALF_W - 0.4;
         p.vx = -Math.abs(p.vx);
+        stage.particles.burst(p.puckX, 0.25, p.puckZ, 8, 0x3b82f6, 4.5);
         audioController.playClick();
       }
 
@@ -249,7 +298,9 @@ export default function NeonPongGame({
         p.rally += 1;
         setRally(p.rally);
         addScore(15 + p.rally * 2);
-        stage.particles.burst(p.puckX, 0.3, pZ, 16, 0x22d3ee, 6.5);
+        playerPaddle.scale.set(1.16, 1.25, 0.78);
+        stage.particles.burst(p.puckX, 0.3, pZ, 18, 0x22d3ee, 6.8);
+        stage.triggerShockwave(p.puckX, pZ, 0x22d3ee, 2.5);
         stage.triggerTrauma(0.2);
         audioController.playReflect();
       }
@@ -259,15 +310,21 @@ export default function NeonPongGame({
         const offset = (p.puckX - p.aiX) / 1.15;
         p.vz = Math.min(18, Math.abs(p.vz) * 1.04);
         p.vx = offset * 9.5;
-        stage.particles.burst(p.puckX, 0.3, aZ, 14, 0xf43f5e, 6);
+        aiPaddle.scale.set(1.16, 1.25, 0.78);
+        stage.particles.burst(p.puckX, 0.3, aZ, 16, 0xf43f5e, 6.5);
+        stage.triggerShockwave(p.puckX, aZ, 0xf43f5e, 2.5);
         audioController.playReflect();
       }
+
+      playerPaddle.scale.lerp(new THREE.Vector3(1, 1, 1), Math.min(1, dt * 14));
+      aiPaddle.scale.lerp(new THREE.Vector3(1, 1, 1), Math.min(1, dt * 14));
 
       if (p.puckZ < -TABLE_HALF_Z - 0.6) {
         p.playerGoals += 1;
         setPlayerGoals(p.playerGoals);
         addScore(100);
-        stage.particles.burst(p.puckX, 0.5, -TABLE_HALF_Z, 32, 0x22d3ee, 9);
+        stage.particles.burst(p.puckX, 0.5, -TABLE_HALF_Z, 34, 0x22d3ee, 9.5);
+        stage.triggerShockwave(p.puckX, -TABLE_HALF_Z, 0x22d3ee, 4.5);
         stage.triggerTrauma(0.45);
         stage.kickFov(4);
         audioController.playWin();
@@ -282,7 +339,8 @@ export default function NeonPongGame({
         setAiGoals(p.aiGoals);
         p.rally = 0;
         setRally(0);
-        stage.particles.burst(p.puckX, 0.5, TABLE_HALF_Z, 32, 0xef4444, 9);
+        stage.particles.burst(p.puckX, 0.5, TABLE_HALF_Z, 34, 0xef4444, 9.5);
+        stage.triggerShockwave(p.puckX, TABLE_HALF_Z, 0xef4444, 4.5);
         stage.triggerTrauma(0.65);
         audioController.playHit();
         if (p.aiGoals >= 5) {
@@ -297,6 +355,18 @@ export default function NeonPongGame({
       }
 
       puck.position.set(p.puckX, 0.16, p.puckZ);
+
+      // Update Puck Motion Trail
+      trailPts.pop();
+      trailPts.unshift({ x: p.puckX, z: p.puckZ });
+      for (let tIdx = 0; tIdx < trailCount; tIdx++) {
+        const pt = trailPts[tIdx];
+        const s = Math.max(0.18, 1 - tIdx / trailCount) * 0.85;
+        dummyMat.makeScale(s, 1, s);
+        dummyMat.setPosition(pt.x, 0.08, pt.z);
+        trailInst.setMatrixAt(tIdx, dummyMat);
+      }
+      trailInst.instanceMatrix.needsUpdate = true;
     });
 
     return () => {

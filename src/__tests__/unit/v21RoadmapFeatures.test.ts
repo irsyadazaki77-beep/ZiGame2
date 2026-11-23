@@ -21,7 +21,15 @@ import {
 } from '../../config/battlePassConfig';
 import { ugcLevelService, UgcTileType } from '../../services/ugcLevelService';
 import { multiplayerService } from '../../services/multiplayerService';
-import { STUDIO_ATMOSPHERES_3D, StudioAtmosphere3D } from '../../utils/threeStage';
+import * as THREE from 'three';
+import {
+  STUDIO_ATMOSPHERES_3D,
+  StudioAtmosphere3D,
+  dampValue,
+  buildCyberTurret3D,
+  buildGroundShadowRing3D,
+  LaserBeamPool3D
+} from '../../utils/threeStage';
 
 describe('ZiGame v2.1 / v2.2 Roadmap Features — 5 Pillars Unit Suite', () => {
   beforeEach(() => {
@@ -152,6 +160,26 @@ describe('ZiGame v2.1 / v2.2 Roadmap Features — 5 Pillars Unit Suite', () => {
         expect(cfg.exposure).toBeGreaterThan(1.0);
         expect(cfg.bloomStrength).toBeGreaterThan(0.4);
       }
+    });
+
+    it('builds shared 3D visual kit primitives (CyberTurret, GroundShadowRing, LaserBeamPool, dampValue)', () => {
+      expect(dampValue(0, 10, 14, 0.016)).toBeGreaterThan(0);
+      expect(dampValue(0, 10, 14, 0)).toBe(0);
+
+      const turret = buildCyberTurret3D(0x22c55e, 0x38bdf8);
+      expect(turret.group).toBeInstanceOf(THREE.Group);
+      expect(turret.head).toBeInstanceOf(THREE.Group);
+      expect(turret.barrels).toBeInstanceOf(THREE.Group);
+
+      const shadow = buildGroundShadowRing3D(0.85, 0x22c55e);
+      expect(shadow.group).toBeInstanceOf(THREE.Group);
+
+      const scene = new THREE.Scene();
+      const pool = new LaserBeamPool3D(scene, 4, 0x22c55e);
+      pool.fire([0, 0.85, 4.4], [2.5, 0.75, -5.0], 0x22c55e, 0.15);
+      pool.update(0.05);
+      pool.update(0.2);
+      expect(scene.children.length).toBe(4);
     });
   });
 });

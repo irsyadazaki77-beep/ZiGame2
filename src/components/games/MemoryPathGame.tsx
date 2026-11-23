@@ -119,6 +119,20 @@ export default function MemoryPathGame({
     setQuality(stage.getQualityLevel());
 
     const step = 1.45;
+    const railMat = new THREE.MeshStandardMaterial({
+      color: 0x3b82f6,
+      emissive: 0x1d4ed8,
+      emissiveIntensity: 0.65
+    });
+    const railL = new THREE.Mesh(
+      new THREE.BoxGeometry(0.18, 0.42, BRIDGE_ROWS * step + 0.6),
+      railMat
+    );
+    railL.position.set(-(BRIDGE_COLS * step) / 2 - 0.25, 0.25, 0);
+    const railR = railL.clone();
+    railR.position.x = (BRIDGE_COLS * step) / 2 + 0.25;
+    stage.scene.add(railL, railR);
+
     const tileGeo = new THREE.BoxGeometry(1.22, 0.25, 1.22);
     const tiles: BridgeTile3D[][] = [];
     const allMeshes: THREE.Mesh[] = [];
@@ -138,6 +152,7 @@ export default function MemoryPathGame({
         const wz = (BRIDGE_ROWS - 1 - r - (BRIDGE_ROWS - 1) / 2) * step;
         const mesh = new THREE.Mesh(tileGeo, mat);
         mesh.position.set(wx, 0.35, wz);
+        mesh.userData.targetY = 0.35;
         mesh.castShadow = true;
         stage.scene.add(mesh);
 
@@ -153,17 +168,26 @@ export default function MemoryPathGame({
       const st = pathStateRef.current;
       for (let r = 0; r < BRIDGE_ROWS; r++) {
         for (let c = 0; c < BRIDGE_COLS; c++) {
-          const mat = tiles[r][c].mesh.material as THREE.MeshPhysicalMaterial;
+          const m = tiles[r][c].mesh;
+          const mat = m.material as THREE.MeshPhysicalMaterial;
           const isSafe = st.safeCols[r] === c;
           const isStepped = r < st.currentRow && isSafe;
+          const isActiveRow = !showPreview && r === st.currentRow;
           if ((showPreview && isSafe) || isStepped) {
             mat.color.setHex(0x38bdf8);
             mat.emissive.setHex(0x06b6d4);
-            mat.emissiveIntensity = 0.9;
+            mat.emissiveIntensity = 0.95;
+            m.userData.targetY = isStepped ? 0.46 : 0.42;
+          } else if (isActiveRow) {
+            mat.color.setHex(0x334155);
+            mat.emissive.setHex(0x1e3a8a);
+            mat.emissiveIntensity = 0.48;
+            m.userData.targetY = 0.38;
           } else {
             mat.color.setHex(0x1e293b);
             mat.emissive.setHex(0x0f172a);
             mat.emissiveIntensity = 0.25;
+            m.userData.targetY = 0.35;
           }
         }
       }
@@ -252,6 +276,12 @@ export default function MemoryPathGame({
     container.addEventListener('pointerdown', onPointerDown);
 
     stage.startLoop((dt) => {
+      const damp = Math.min(1, dt * 14);
+      for (const m of allMeshes) {
+        const ty = (m.userData.targetY as number) || 0.35;
+        m.position.y = THREE.MathUtils.lerp(m.position.y, ty, damp);
+      }
+
       if (gameStateRef.current !== 'playing') return;
       const st = pathStateRef.current;
       if (st.previewTimer > 0) {

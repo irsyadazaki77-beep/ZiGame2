@@ -9,7 +9,12 @@ import {
   ThreeStageController,
   CameraPreset3D,
   QualityLevel3D,
-  buildEnemyShip3D
+  buildEnemyShip3D,
+  buildCyberTurret3D,
+  createHoloLabelSprite3D,
+  updateHoloLabelSprite3D,
+  LaserBeamPool3D,
+  dampValue
 } from '../../utils/threeStage';
 import { Keyboard, Shield, Zap } from 'lucide-react';
 
@@ -40,6 +45,7 @@ interface WordDrone3D {
   z: number;
   speed: number;
   mesh: THREE.Group;
+  labelSprite: THREE.Sprite;
 }
 
 export default function CyberTyperGame({
@@ -78,12 +84,16 @@ export default function CyberTyperGame({
   const typerRef = useRef({
     hp: 100,
     spawnTimer: 0.4,
-    nextId: 1
+    nextId: 1,
+    aimYaw: 0,
+    barrelRecoil: 0,
+    combo: 0
   });
 
   const dronesRef = useRef<WordDrone3D[]>([]);
   const releaseDronesRef = useRef<() => void>(() => {});
   const releaseSingleDroneRef = useRef<(d: WordDrone3D) => void>(() => {});
+  const fireLaserRef = useRef<(toX: number, toZ: number, isFinish: boolean) => void>(() => {});
 
   const syncHudDrones = useCallback(() => {
     setHudDrones(
@@ -111,18 +121,36 @@ export default function CyberTyperGame({
 
       if (target) {
         target.typedLen += 1;
-        audioController.playLaser();
-        stage?.particles.burst(target.x, 0.75, target.z, 8, 0x22c55e, 5.5);
+        typerRef.current.combo += 1;
+        // Aim turret head toward target drone
+        const dx = target.x;
+        const dz = target.z - 5.5;
+        typerRef.current.aimYaw = Math.atan2(-dx, -dz);
+        typerRef.current.barrelRecoil = 0.28;
 
-        if (target.typedLen >= target.word.length) {
-          stage?.particles.burst(target.x, 0.75, target.z, 28, 0x10b981, 8.5);
-          stage?.triggerTrauma(0.28);
+        const isCompleted = target.typedLen >= target.word.length;
+        fireLaserRef.current(target.x, target.z, isCompleted);
+        audioController.playLaser();
+        stage?.particles.burst(target.x, 0.75, target.z, 10, 0x22c55e, 6.0);
+
+        updateHoloLabelSprite3D(target.labelSprite, target.word, {
+          highlightPrefixLen: target.typedLen,
+          borderColor: '#22c55e',
+          highlightColor: '#4ade80'
+        });
+
+        if (isCompleted) {
+          stage?.particles.burst(target.x, 0.75, target.z, 32, 0x10b981, 9.5);
+          stage?.triggerShockwave(target.x, target.z, 0x22c55e, 3.6);
+          stage?.triggerTrauma(0.32);
           releaseSingleDroneRef.current(target);
           dronesRef.current = dronesRef.current.filter((d) => d.id !== target!.id);
-          addScore(target.word.length * 15);
+          addScore(target.word.length * 15 + Math.min(60, typerRef.current.combo * 3));
           audioController.playScore();
         }
         syncHudDrones();
+      } else {
+        typerRef.current.combo = 0;
       }
     },
     [addScore, syncHudDrones]
@@ -134,7 +162,10 @@ export default function CyberTyperGame({
     typerRef.current = {
       hp: 100,
       spawnTimer: 0.4,
-      nextId: 1
+      nextId: 1,
+      aimYaw: 0,
+      barrelRecoil: 0,
+      combo: 0
     };
     setShieldHp(100);
     setHudDrones([]);
@@ -193,24 +224,66 @@ export default function CyberTyperGame({
     stageRef.current = stage;
     setQuality(stage.getQualityLevel());
 
-    const coreTurret = new THREE.Mesh(
-      new THREE.OctahedronGeometry(0.85, 1),
-      new THREE.MeshStandardMaterial({
-        color: 0x22c55e,
-        emissive: 0x16a34a,
-        emissiveIntensity: 0.85,
-        wireframe: false
-      })
-    );
-    coreTurret.position.set(0, 0.85, 5.5);
-    stage.scene.add(coreTurret);
+    // Build Multi-Part Cyber Turret + Firewall Energy Barrier
+    const turret = buildCyberTurret3D(0x22c55e, 0x38bdf8);
+    turret.group.position.set(0, 0, 5.5);
+    stage.scene.add(turret.group);
+
+    const barrierMat = new THREE.MeshStandardMaterial({
+      color: 0x22c55e,
+      emissive: 0x10b981,
+      emissiveIntensity: 0.75,
+      transparent: true,
+      opacity: 0.42
+    });
+    const firewallBar = new THREE.Mesh(new THREE.BoxGeometry(12.4, 0.45, 0.14), barrierMat);
+    firewallBar.position.set(0, 0.25, 4.7);
+    stage.scene.add(firewallBar);
+
+    const pylonGeo = new THREE.CylinderGeometry(0.24, 0.32, 1.35, 8);
+    const pylonMat = new THREE.MeshPhysicalMaterial({
+      color: 0x1e293b,
+      metalness: 0.85,
+      roughness: 0.22
+    });
+    const pylonL = new THREE.Mesh(pylonGeo, pylonMat);
+    pylonL.position.set(-6.2, 0.67, 4.7);
+    const pylonR = pylonL.clone();
+    pylonR.position.x = 6.2;
+    stage.scene.add(pylonL, pylonR);
+
+    const laserPool = new LaserBeamPool3D(stage.scene, 10, 0x22c55e);
+    fireLaserRef.current = (toX: number, toZ: number, isFinish: boolean) => {
+      laserPool.fire(
+        [0, 0.85, 4.4],
+        [toX, 0.75, toZ],
+        isFinish ? 0x38bdf8 : 0x22c55e,
+        isFinish ? 0.22 : 0.14
+      );
+    };
 
     const dronePool = new ObjectPool<WordDrone3D>(
       () => {
         const mesh = buildEnemyShip3D('interceptor');
+        const labelSprite = createHoloLabelSprite3D('MATRIX', {
+          borderColor: '#38bdf8',
+          scaleX: 2.55,
+          scaleY: 0.68
+        });
+        labelSprite.position.set(0, 1.18, 0);
+        mesh.add(labelSprite);
         mesh.visible = false;
         stage.scene.add(mesh);
-        return { id: 0, word: '', typedLen: 0, x: 0, z: -12.5, speed: 2, mesh };
+        return {
+          id: 0,
+          word: '',
+          typedLen: 0,
+          x: 0,
+          z: -12.5,
+          speed: 2,
+          mesh,
+          labelSprite
+        };
       },
       (d) => {
         d.mesh.visible = false;
@@ -228,10 +301,15 @@ export default function CyberTyperGame({
     };
 
     stage.startLoop((dt, elapsed) => {
-      coreTurret.rotation.y = elapsed * 2;
+      const st = typerRef.current;
+      turret.core.rotation.y = elapsed * 2.5;
+      turret.head.rotation.y = dampValue(turret.head.rotation.y, st.aimYaw, 14, dt);
+      st.barrelRecoil = dampValue(st.barrelRecoil, 0, 12, dt);
+      turret.barrels.position.z = st.barrelRecoil;
+      laserPool.update(dt);
+
       if (gameStateRef.current !== 'playing') return;
 
-      const st = typerRef.current;
       st.spawnTimer -= dt;
       if (st.spawnTimer <= 0 && dronesRef.current.length < 5) {
         st.spawnTimer = 1.95;
@@ -247,6 +325,10 @@ export default function CyberTyperGame({
         drone.speed = 1.85 + Math.random() * 0.65;
         drone.mesh.position.set(x, 0.75, z);
         drone.mesh.visible = true;
+        updateHoloLabelSprite3D(drone.labelSprite, word, {
+          highlightPrefixLen: 0,
+          borderColor: '#38bdf8'
+        });
         dronesRef.current.push(drone);
         syncHudDrones();
       }
@@ -254,14 +336,18 @@ export default function CyberTyperGame({
       for (let i = dronesRef.current.length - 1; i >= 0; i--) {
         const d = dronesRef.current[i];
         d.z += d.speed * dt;
-        d.mesh.position.set(d.x, 0.75, d.z);
+        const bobY = 0.75 + Math.sin(elapsed * 4 + d.id) * 0.12;
+        d.mesh.position.set(d.x, bobY, d.z);
+        d.mesh.rotation.z = Math.sin(elapsed * 2.5 + d.id) * 0.08;
 
-        if (d.z >= 4.8) {
+        if (d.z >= 4.7) {
           dronePool.releaseItem(d);
           dronesRef.current.splice(i, 1);
           st.hp = Math.max(0, st.hp - 25);
+          st.combo = 0;
           setShieldHp(st.hp);
-          stage.particles.burst(0, 0.85, 5.5, 32, 0xef4444, 9);
+          stage.particles.burst(d.x, 0.85, 4.7, 34, 0xef4444, 9);
+          stage.triggerShockwave(d.x, 4.7, 0xef4444, 3.8);
           stage.triggerTrauma(0.65);
           audioController.playExplosion();
           syncHudDrones();

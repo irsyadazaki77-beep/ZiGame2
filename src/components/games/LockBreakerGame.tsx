@@ -70,7 +70,8 @@ export default function LockBreakerGame({
 
       const tx = Math.cos(st.targetAngle) * 3.1;
       const tz = Math.sin(st.targetAngle) * 3.1;
-      stage?.particles.burst(tx, 0.7, tz, 22, 0xf59e0b, 7.5);
+      stage?.particles.burst(tx, 0.7, tz, 24, 0xf59e0b, 7.5);
+      stage?.triggerShockwave(tx, tz, 0xf59e0b, 2.4);
       stage?.triggerTrauma(0.24);
 
       if (st.pinsRemaining <= 0) {
@@ -79,6 +80,7 @@ export default function LockBreakerGame({
         st.speed = Math.min(5.2, 2.3 + st.vault * 0.25);
         setVaultLevel(st.vault);
         addScore(100);
+        stage?.triggerShockwave(0, 0, 0x22d3ee, 4.8);
         stage?.kickFov(5);
         audioController.playLevelUp();
         audioController.playPowerup();
@@ -87,6 +89,7 @@ export default function LockBreakerGame({
       st.targetAngle = (st.needleAngle + Math.PI * (0.45 + Math.random() * 1.1)) % (Math.PI * 2);
     } else {
       stage?.particles.burst(0, 0.8, 0, 36, 0xef4444, 9.5);
+      stage?.triggerShockwave(0, 0, 0xef4444, 4.5);
       stage?.triggerTrauma(0.75);
       audioController.playExplosion();
       audioController.playGameOver();
@@ -182,34 +185,55 @@ export default function LockBreakerGame({
     outerRing.position.y = 0.4;
     outerRing.castShadow = true;
 
+    const innerRing = new THREE.Mesh(new THREE.TorusGeometry(2.05, 0.14, 12, 36), goldMat);
+    innerRing.rotation.x = Math.PI / 2;
+    innerRing.position.y = 0.44;
+
     const centerHub = new THREE.Mesh(new THREE.CylinderGeometry(1.15, 1.35, 0.65, 24), goldMat);
     centerHub.position.y = 0.325;
     centerHub.castShadow = true;
 
-    vaultGroup.add(outerRing, centerHub);
+    // 12 Mechanical Tumbler Gear Spokes around the Vault
+    const spokeGeo = new THREE.BoxGeometry(0.24, 0.28, 0.88);
+    for (let s = 0; s < 12; s++) {
+      const ang = (s / 12) * Math.PI * 2;
+      const spoke = new THREE.Mesh(spokeGeo, steelMat);
+      spoke.position.set(Math.cos(ang) * 2.1, 0.35, Math.sin(ang) * 2.1);
+      spoke.rotation.y = -ang + Math.PI / 2;
+      vaultGroup.add(spoke);
+    }
+
+    vaultGroup.add(outerRing, innerRing, centerHub);
     stage.scene.add(vaultGroup);
 
     const targetOrb = new THREE.Mesh(
-      new THREE.OctahedronGeometry(0.45, 0),
+      new THREE.OctahedronGeometry(0.46, 0),
       new THREE.MeshStandardMaterial({
         color: 0xfacc15,
         emissive: 0xf59e0b,
-        emissiveIntensity: 0.95
+        emissiveIntensity: 1.05
       })
     );
+    const targetHalo = new THREE.Mesh(
+      new THREE.TorusGeometry(0.62, 0.055, 10, 24),
+      new THREE.MeshBasicMaterial({ color: 0xfacc15 })
+    );
+    targetHalo.rotation.x = Math.PI / 2;
+    targetOrb.add(targetHalo);
     stage.scene.add(targetOrb);
 
     const needleMesh = new THREE.Mesh(
-      new THREE.BoxGeometry(0.28, 0.25, 0.9),
+      new THREE.BoxGeometry(0.28, 0.25, 1.15),
       new THREE.MeshStandardMaterial({
         color: 0x22d3ee,
         emissive: 0x06b6d4,
-        emissiveIntensity: 0.95
+        emissiveIntensity: 1.05
       })
     );
     stage.scene.add(needleMesh);
 
     stage.startLoop((dt, elapsed) => {
+      innerRing.rotation.z = elapsed * 0.85;
       if (gameStateRef.current !== 'playing') return;
 
       const st = lockRef.current;

@@ -120,6 +120,28 @@ export default function BlockMatchGame({
     setQuality(stage.getQualityLevel());
 
     const step = 1.15;
+    const baseTray = new THREE.Mesh(
+      new THREE.BoxGeometry(GRID_N * step + 0.55, 0.24, GRID_N * step + 0.55),
+      new THREE.MeshPhysicalMaterial({
+        color: 0x0f172a,
+        metalness: 0.82,
+        roughness: 0.24,
+        clearcoat: 0.88
+      })
+    );
+    baseTray.position.y = 0.08;
+    baseTray.receiveShadow = true;
+    stage.scene.add(baseTray);
+
+    const selectRing = new THREE.Mesh(
+      new THREE.TorusGeometry(0.56, 0.055, 10, 28),
+      new THREE.MeshBasicMaterial({ color: 0xfacc15 })
+    );
+    selectRing.rotation.x = Math.PI / 2;
+    selectRing.position.y = 0.25;
+    selectRing.visible = false;
+    stage.scene.add(selectRing);
+
     const gemGeos = [
       new THREE.OctahedronGeometry(0.46, 0),
       new THREE.DodecahedronGeometry(0.44, 0),
@@ -138,14 +160,15 @@ export default function BlockMatchGame({
         const mat = new THREE.MeshPhysicalMaterial({
           color: GEM_COLORS[t],
           emissive: GEM_COLORS[t],
-          emissiveIntensity: 0.4,
+          emissiveIntensity: 0.45,
           roughness: 0.15,
           metalness: 0.25,
           clearcoat: 0.95
         });
         const mesh = new THREE.Mesh(gemGeos[t], mat);
-        mesh.position.set((c - (GRID_N - 1) / 2) * step, 0.55, (r - (GRID_N - 1) / 2) * step);
+        mesh.position.set((c - (GRID_N - 1) / 2) * step, 0.58, (r - (GRID_N - 1) / 2) * step);
         mesh.castShadow = true;
+        mesh.userData.targetScale = 1.0;
         stage.scene.add(mesh);
 
         const cell: GemCell3D = { r, c, type: t, mesh };
@@ -159,6 +182,13 @@ export default function BlockMatchGame({
 
     syncCellAppearanceRef.current = () => {
       const sel = matchStateRef.current.selected;
+      if (sel) {
+        const selMesh = grid[sel.r][sel.c].mesh;
+        selectRing.position.set(selMesh.position.x, 0.25, selMesh.position.z);
+        selectRing.visible = true;
+      } else {
+        selectRing.visible = false;
+      }
       for (let r = 0; r < GRID_N; r++) {
         for (let c = 0; c < GRID_N; c++) {
           const cell = grid[r][c];
@@ -167,8 +197,8 @@ export default function BlockMatchGame({
           mat.color.setHex(GEM_COLORS[cell.type]);
           mat.emissive.setHex(GEM_COLORS[cell.type]);
           const isSel = sel && sel.r === r && sel.c === c;
-          mat.emissiveIntensity = isSel ? 1.1 : 0.4;
-          cell.mesh.scale.setScalar(isSel ? 1.28 : 1.0);
+          mat.emissiveIntensity = isSel ? 1.15 : 0.45;
+          cell.mesh.userData.targetScale = isSel ? 1.28 : 1.0;
         }
       }
     };
@@ -286,9 +316,14 @@ export default function BlockMatchGame({
     container.addEventListener('pointerdown', onPointerDown);
 
     stage.startLoop((dt, elapsed) => {
+      selectRing.rotation.z = elapsed * 2.5;
+      const dampFactor = Math.min(1, dt * 14);
       for (const m of allMeshes) {
         m.rotation.y += dt * 1.6;
-        m.position.y = 0.55 + Math.sin(elapsed * 3 + m.position.x) * 0.06;
+        m.position.y = 0.58 + Math.sin(elapsed * 3 + m.position.x) * 0.06;
+        const ts = (m.userData.targetScale as number) || 1.0;
+        const nextS = THREE.MathUtils.lerp(m.scale.x, ts, dampFactor);
+        m.scale.setScalar(nextS);
       }
     });
 

@@ -167,7 +167,7 @@ export default function SineRiderGame({
     glider.group.position.set(-3.2, 3.0, 0);
     stage.scene.add(glider.group);
 
-    // 3D Sine Wave Trail Ribbon Spheres
+    // 3D Sine Wave Trail Ribbon Spheres + Future Trajectory Forecast Dots
     const trailCount = 28;
     const trailGeo = new THREE.SphereGeometry(0.11, 8, 8);
     const trailMat = new THREE.MeshBasicMaterial({ color: 0x22d3ee });
@@ -176,6 +176,19 @@ export default function SineRiderGame({
     stage.scene.add(trailInstanced);
     const trailHistory: number[] = Array(trailCount).fill(3.0);
     const dummyMat = new THREE.Matrix4();
+
+    const forecastCount = 18;
+    const forecastInst = new THREE.InstancedMesh(
+      new THREE.SphereGeometry(0.085, 8, 8),
+      new THREE.MeshBasicMaterial({
+        color: 0x38bdf8,
+        transparent: true,
+        opacity: 0.48
+      }),
+      forecastCount
+    );
+    forecastInst.frustumCulled = false;
+    stage.scene.add(forecastInst);
 
     const ringGeo = new THREE.TorusGeometry(0.78, 0.09, 10, 24);
     ringGeo.rotateY(Math.PI / 2);
@@ -235,6 +248,18 @@ export default function SineRiderGame({
         trailInstanced.setMatrixAt(i, dummyMat);
       }
       trailInstanced.instanceMatrix.needsUpdate = true;
+
+      // Update 3D Predictive Sine Curve Ahead of Glider
+      for (let f = 0; f < forecastCount; f++) {
+        const futureDt = (f + 1) * 0.085;
+        const futureX = -3.2 + futureDt * r.speed;
+        const futureY = 3.2 + Math.sin(r.phase + activeFreq * futureDt) * r.amp;
+        const fs = Math.max(0.35, 1 - f / forecastCount);
+        dummyMat.makeScale(fs, fs, fs);
+        dummyMat.setPosition(futureX, futureY, 0);
+        forecastInst.setMatrixAt(f, dummyMat);
+      }
+      forecastInst.instanceMatrix.needsUpdate = true;
 
       r.spawnTimer -= dt;
       if (r.spawnTimer <= 0) {

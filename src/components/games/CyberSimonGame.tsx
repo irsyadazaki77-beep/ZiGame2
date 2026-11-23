@@ -183,7 +183,7 @@ export default function CyberSimonGame({
     stageRef.current = stage;
     setQuality(stage.getQualityLevel());
 
-    // Build Central Synthesizer Base Chassis + 4 Quartz Crystal Pads
+    // Build Central Synthesizer Base Chassis + Central Resonator Core + 4 Quartz Crystal Pads
     const baseHub = new THREE.Mesh(
       new THREE.CylinderGeometry(3.8, 4.1, 0.38, 32),
       new THREE.MeshPhysicalMaterial({
@@ -196,8 +196,26 @@ export default function CyberSimonGame({
     baseHub.position.y = 0.19;
     stage.scene.add(baseHub);
 
+    const coreMat = new THREE.MeshStandardMaterial({
+      color: 0xa855f7,
+      emissive: 0x9333ea,
+      emissiveIntensity: 0.85,
+      roughness: 0.15
+    });
+    const centerCrystal = new THREE.Mesh(new THREE.OctahedronGeometry(0.62, 0), coreMat);
+    centerCrystal.position.y = 1.15;
+    const centerRing = new THREE.Mesh(
+      new THREE.TorusGeometry(0.95, 0.055, 10, 28),
+      new THREE.MeshBasicMaterial({ color: 0xa855f7 })
+    );
+    centerRing.rotation.x = Math.PI / 2;
+    centerCrystal.add(centerRing);
+    stage.scene.add(centerCrystal);
+
     const padMeshes: THREE.Mesh[] = [];
+    const beamMeshes: THREE.Mesh[] = [];
     const padGeo = new THREE.CylinderGeometry(1.18, 1.28, 0.45, 24);
+    const beamGeo = new THREE.CylinderGeometry(0.85, 1.05, 3.2, 18, 1, true);
 
     for (let i = 0; i < 4; i++) {
       const mat = new THREE.MeshPhysicalMaterial({
@@ -214,6 +232,22 @@ export default function CyberSimonGame({
       mesh.userData.padIdx = i;
       stage.scene.add(mesh);
       padMeshes.push(mesh);
+
+      const bMesh = new THREE.Mesh(
+        beamGeo,
+        new THREE.MeshBasicMaterial({
+          color: PAD_COLORS[i],
+          transparent: true,
+          opacity: 0.35,
+          blending: THREE.AdditiveBlending,
+          side: THREE.DoubleSide,
+          depthWrite: false
+        })
+      );
+      bMesh.position.set(PAD_POSITIONS[i][0], 2.1, PAD_POSITIONS[i][1]);
+      bMesh.visible = false;
+      stage.scene.add(bMesh);
+      beamMeshes.push(bMesh);
     }
 
     const raycaster = new THREE.Raycaster();
@@ -262,10 +296,20 @@ export default function CyberSimonGame({
         }
       }
 
+      centerCrystal.rotation.y += dt * 2.2;
+      if (st.litPad >= 0) {
+        coreMat.color.setHex(PAD_COLORS[st.litPad]);
+        coreMat.emissive.setHex(PAD_COLORS[st.litPad]);
+      } else {
+        coreMat.color.setHex(0xa855f7);
+        coreMat.emissive.setHex(0x9333ea);
+      }
+
       for (let i = 0; i < 4; i++) {
         const m = padMeshes[i];
         const mat = m.material as THREE.MeshPhysicalMaterial;
         const isLit = st.litPad === i;
+        beamMeshes[i].visible = isLit;
         mat.emissiveIntensity = THREE.MathUtils.damp(
           mat.emissiveIntensity,
           isLit ? 1.35 : 0.22,

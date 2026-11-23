@@ -168,6 +168,7 @@ export default function CyberTetrisGame({
       const pts = [0, 100, 250, 500, 800][Math.min(4, cleared)] * t.level;
       addScore(pts);
       stage?.particles.burst(0, 4, 0, 28 * cleared, 0x22d3ee, 8.5);
+      stage?.triggerShockwave(0, 0, cleared >= 4 ? 0xfacc15 : 0x22d3ee, 4.8);
       stage?.triggerTrauma(0.32);
       if (cleared >= 2) stage?.kickFov(4);
       audioController.playCombo(cleared + 1);
@@ -293,19 +294,48 @@ export default function CyberTetrisGame({
     const towerW = COLS * cellStep;
     const towerH = ROWS * cellStep;
 
-    // 3D Matrix Frame Pillars
+    // 3D Matrix Frame Pillars, Base Pedestal, Backplate & Top Danger Line
     const frameMat = new THREE.MeshStandardMaterial({
       color: 0x06b6d4,
       emissive: 0x0891b2,
-      emissiveIntensity: 0.55,
+      emissiveIntensity: 0.65,
       metalness: 0.8,
       roughness: 0.2
     });
-    const pillarL = new THREE.Mesh(new THREE.BoxGeometry(0.18, towerH + 0.4, 0.7), frameMat);
-    pillarL.position.set(-towerW / 2 - 0.15, towerH / 2, 0);
+    const pillarL = new THREE.Mesh(new THREE.BoxGeometry(0.22, towerH + 0.45, 0.78), frameMat);
+    pillarL.position.set(-towerW / 2 - 0.16, towerH / 2, 0);
     const pillarR = pillarL.clone();
-    pillarR.position.x = towerW / 2 + 0.15;
-    stage.scene.add(pillarL, pillarR);
+    pillarR.position.x = towerW / 2 + 0.16;
+
+    const basePedestal = new THREE.Mesh(
+      new THREE.BoxGeometry(towerW + 0.65, 0.24, 1.05),
+      frameMat
+    );
+    basePedestal.position.set(0, 0.08, 0);
+
+    const backplate = new THREE.Mesh(
+      new THREE.PlaneGeometry(towerW, towerH),
+      new THREE.MeshStandardMaterial({
+        color: 0x081526,
+        metalness: 0.85,
+        roughness: 0.3,
+        transparent: true,
+        opacity: 0.72
+      })
+    );
+    backplate.position.set(0, towerH / 2 + 0.04, -0.34);
+
+    const dangerLine = new THREE.Mesh(
+      new THREE.BoxGeometry(towerW, 0.06, 0.72),
+      new THREE.MeshBasicMaterial({
+        color: 0xf43f5e,
+        transparent: true,
+        opacity: 0.68
+      })
+    );
+    dangerLine.position.set(0, towerH - cellStep * 1.5, 0);
+
+    stage.scene.add(pillarL, pillarR, basePedestal, backplate, dangerLine);
 
     // Instanced 3D Crystal Cubes for Board + Active Piece
     const totalCells = COLS * ROWS;
@@ -319,6 +349,17 @@ export default function CyberTetrisGame({
     const instanced = new THREE.InstancedMesh(cubeGeo, cubeMat, totalCells);
     instanced.frustumCulled = false;
     stage.scene.add(instanced);
+
+    // 3D Ghost Landing Projection (up to 16 cells)
+    const ghostMat = new THREE.MeshBasicMaterial({
+      color: 0x38bdf8,
+      wireframe: true,
+      transparent: true,
+      opacity: 0.42
+    });
+    const ghostInstanced = new THREE.InstancedMesh(cubeGeo, ghostMat, 16);
+    ghostInstanced.frustumCulled = false;
+    stage.scene.add(ghostInstanced);
 
     const dummyMat = new THREE.Matrix4();
     const dummyCol = new THREE.Color();
@@ -334,6 +375,33 @@ export default function CyberTetrisGame({
           movePiece(0, 1);
         }
       }
+
+      // Compute Ghost Piece Landing Row
+      let ghostY = t.py;
+      while (!collides(t.board, t.piece, t.px, ghostY + 1)) {
+        ghostY += 1;
+      }
+
+      let gIdx = 0;
+      for (let pr = 0; pr < t.piece.length; pr++) {
+        for (let pc = 0; pc < t.piece[pr].length; pc++) {
+          if (t.piece[pr][pc] && ghostY > t.py && gIdx < 16) {
+            const gc = t.px + pc;
+            const gr = ghostY + pr;
+            const wx = (gc - (COLS - 1) / 2) * cellStep;
+            const wy = (ROWS - 1 - gr) * cellStep + 0.32;
+            dummyMat.makeScale(0.96, 0.96, 0.96);
+            dummyMat.setPosition(wx, wy, 0);
+            ghostInstanced.setMatrixAt(gIdx++, dummyMat);
+          }
+        }
+      }
+      while (gIdx < 16) {
+        dummyMat.makeScale(0, 0, 0);
+        dummyMat.setPosition(0, -999, 0);
+        ghostInstanced.setMatrixAt(gIdx++, dummyMat);
+      }
+      ghostInstanced.instanceMatrix.needsUpdate = true;
 
       // Render Board + Active Piece into InstancedMesh
       let idx = 0;
@@ -376,7 +444,7 @@ export default function CyberTetrisGame({
       stage.dispose();
       stageRef.current = null;
     };
-  }, [movePiece]);
+  }, [collides, movePiece]);
 
   return (
     <div className="relative w-full h-full min-h-[280px] sm:min-h-[380px] lg:min-h-[460px] bg-slate-950 overflow-hidden rounded-2xl border border-cyan-500/20 touch-none select-none">
