@@ -202,7 +202,7 @@ export default function GamePage({ games, profile, dailyMissions, onScoreUpdate,
   return (
     <div 
       ref={containerRef}
-      className={`relative w-full h-full overflow-hidden flex flex-col bg-gradient-to-b ${currentAmbient.class} text-zinc-100 font-sans select-none`}
+      className={`relative w-full flex-1 min-h-0 h-full overflow-hidden flex flex-col bg-gradient-to-b ${currentAmbient.class} text-zinc-100 font-sans select-none`}
       id="arcade-gamepage-root"
     >
       {/* Boss Mode Overlay Screen */}

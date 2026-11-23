@@ -175,14 +175,14 @@ export default function SnakeGame({
     const headGroup = new THREE.Group();
     const headMat = new THREE.MeshPhysicalMaterial({
       color: 0x22c55e,
-      metalness: 0.4,
-      roughness: 0.2,
-      clearcoat: 0.85
+      metalness: 0.25,
+      roughness: 0.38,
+      clearcoat: 0.35
     });
     const eyeMat = new THREE.MeshStandardMaterial({
       color: 0xfef08a,
       emissive: 0xfacc15,
-      emissiveIntensity: 0.95
+      emissiveIntensity: 0.85
     });
     const headBox = new THREE.Mesh(new THREE.BoxGeometry(0.84, 0.68, 0.88), headMat);
     headBox.position.y = 0.34;
@@ -198,11 +198,11 @@ export default function SnakeGame({
     const maxSegments = 225;
     const segGeo = new THREE.BoxGeometry(0.76, 0.56, 0.76);
     const segMat = new THREE.MeshStandardMaterial({
-      color: 0x4ade80,
+      color: 0x22c55e,
       emissive: 0x15803d,
-      emissiveIntensity: 0.35,
-      roughness: 0.28,
-      metalness: 0.5
+      emissiveIntensity: 0.18,
+      roughness: 0.42,
+      metalness: 0.25
     });
     const bodyInstanced = new THREE.InstancedMesh(segGeo, segMat, maxSegments);
     bodyInstanced.frustumCulled = false;

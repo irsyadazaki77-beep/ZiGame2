@@ -1,6 +1,6 @@
 export type GameQualityTier = 'flagship' | 'core' | 'experimental' | 'legacy';
 export type GameCategory = 'All' | 'Classic' | 'Arcade' | 'Shooter' | 'Puzzle' | 'Endless' | 'Action';
-export type TouchControlsType = 'dpad' | 'leftright' | 'updown' | 'actiononly' | 'none';
+export type TouchControlsType = 'dpad' | 'dpad-action' | 'leftright' | 'updown' | 'actiononly' | 'none';
 
 export type GameLifecycleState =
   | 'initialize'

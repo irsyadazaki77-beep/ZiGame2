@@ -416,14 +416,14 @@ export class BrickBreakerEngine {
     try {
       stage = new ThreeStageController({
         container,
-        backgroundColor: 0x0d0614,
-        fogColor: 0x0d0614,
-        fogDensity: 0.016,
+        backgroundColor: 0x090410,
+        fogColor: 0x090410,
+        fogDensity: 0.022,
         initialPreset: 'chase',
         gridPrimaryColor: '#ec4899',
-        gridSecondaryColor: '#14091e',
+        gridSecondaryColor: '#090410',
         cameraPresets: {
-          chase: { position: [0, 8.8, 12.2], lookAt: [0, 0.3, -0.5], fov: 50 },
+          chase: { position: [0, 9.8, 14.2], lookAt: [0, 0.2, 0.6], fov: 52 },
           isometric: { position: [9.5, 12.5, 9.5], lookAt: [0, 0.3, -0.5], fov: 46 },
           diorama: { position: [0, 16.8, 1.8], lookAt: [0, 0, -0.5], fov: 46 }
         }

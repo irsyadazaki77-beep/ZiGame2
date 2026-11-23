@@ -34,56 +34,56 @@ export const STUDIO_ATMOSPHERES_3D: Record<StudioAtmosphere3D, StudioAtmosphereC
     id: 'cyber-neon',
     label: 'Cyber Neon',
     hemiSky: 0x38bdf8,
-    hemiGround: 0x0f172a,
+    hemiGround: 0x050811,
     keyColor: 0xfffbeb,
     rimColor: 0xc084fc,
     accentColor: 0x22d3ee,
-    exposure: 1.15,
-    bloomStrength: 0.58,
+    exposure: 0.94,
+    bloomStrength: 0.36,
   },
   'synthwave-sunset': {
     id: 'synthwave-sunset',
     label: 'Synthwave',
     hemiSky: 0xf43f5e,
-    hemiGround: 0x1e1b4b,
+    hemiGround: 0x110e2b,
     keyColor: 0xfde68a,
     rimColor: 0x22d3ee,
     accentColor: 0xf43f5e,
-    exposure: 1.22,
-    bloomStrength: 0.72,
+    exposure: 0.96,
+    bloomStrength: 0.42,
   },
   'emerald-matrix': {
     id: 'emerald-matrix',
     label: 'Matrix Bio',
     hemiSky: 0x10b981,
-    hemiGround: 0x022c22,
+    hemiGround: 0x021712,
     keyColor: 0xecfccb,
     rimColor: 0x06b6d4,
     accentColor: 0x10b981,
-    exposure: 1.18,
-    bloomStrength: 0.64,
+    exposure: 0.94,
+    bloomStrength: 0.38,
   },
   'solar-flare': {
     id: 'solar-flare',
     label: 'Solar Flare',
     hemiSky: 0xf59e0b,
-    hemiGround: 0x1c1917,
+    hemiGround: 0x120f0d,
     keyColor: 0xfef3c7,
     rimColor: 0xef4444,
     accentColor: 0xf59e0b,
-    exposure: 1.25,
-    bloomStrength: 0.68,
+    exposure: 0.98,
+    bloomStrength: 0.4,
   },
   'abyssal-void': {
     id: 'abyssal-void',
     label: 'Abyssal Void',
     hemiSky: 0x6366f1,
-    hemiGround: 0x090d16,
+    hemiGround: 0x050811,
     keyColor: 0xe0f2fe,
     rimColor: 0xa855f7,
     accentColor: 0x818cf8,
-    exposure: 1.12,
-    bloomStrength: 0.66,
+    exposure: 0.92,
+    bloomStrength: 0.4,
   },
 };
 
@@ -1043,9 +1043,9 @@ export class ThreeStageController {
     this.enableShadowsOption = options.enableShadows ?? true;
     this.bloomConfig = {
       enabled: options.bloom?.enabled ?? true,
-      strength: options.bloom?.strength ?? 0.58,
-      radius: options.bloom?.radius ?? 0.4,
-      threshold: options.bloom?.threshold ?? 0.82
+      strength: options.bloom?.strength ?? 0.42,
+      radius: options.bloom?.radius ?? 0.36,
+      threshold: options.bloom?.threshold ?? 0.9
     };
 
     if (typeof localStorage !== 'undefined') {
@@ -1071,9 +1071,9 @@ export class ThreeStageController {
     };
     this.currentPreset = options.initialPreset || 'chase';
 
-    const bgHex = options.backgroundColor ?? 0x070b14;
+    const bgHex = options.backgroundColor ?? 0x050811;
     const fogHex = options.fogColor ?? bgHex;
-    const fogDensity = options.fogDensity ?? 0.018;
+    const fogDensity = options.fogDensity ?? 0.024;
 
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(bgHex);
@@ -1121,21 +1121,22 @@ export class ThreeStageController {
       document.addEventListener('visibilitychange', this.handleVisibilityChange, false);
     }
 
-    // Studio Environment Map (RoomEnvironment + PMREMGenerator)
+    // Studio Environment Map (RoomEnvironment + PMREMGenerator) with controlled intensity
     try {
       const pmremGenerator = new THREE.PMREMGenerator(this.renderer);
       this.scene.environment = pmremGenerator.fromScene(new RoomEnvironment(), 0.04).texture;
+      this.scene.environmentIntensity = 0.28;
       pmremGenerator.dispose();
     } catch {
       // Safe fallback if PMREM fails on constrained context
     }
 
-    // Three-Point Studio Lighting Rig
-    this.hemiLight = new THREE.HemisphereLight(0x38bdf8, 0x0f172a, 0.75);
+    // Three-Point Studio Lighting Rig (Balanced contrast, no highlight blowout)
+    this.hemiLight = new THREE.HemisphereLight(0x38bdf8, 0x050811, 0.52);
     this.hemiLight.position.set(0, 30, 0);
 
     const shadowD = options.shadowBounds ?? 16;
-    this.keyLight = new THREE.DirectionalLight(0xfffbeb, 1.85);
+    this.keyLight = new THREE.DirectionalLight(0xfffbeb, 1.18);
     this.keyLight.position.set(12, 22, 14);
     this.keyLight.castShadow = !this.isSoftwareGl && this.enableShadowsOption;
     this.keyLight.shadow.mapSize.set(1024, 1024);
@@ -1148,7 +1149,7 @@ export class ThreeStageController {
     this.keyLight.shadow.bias = -0.0005;
     this.keyLight.shadow.normalBias = 0.02;
 
-    this.rimLight = new THREE.DirectionalLight(0xc084fc, 0.9);
+    this.rimLight = new THREE.DirectionalLight(0xc084fc, 0.72);
     this.rimLight.position.set(-14, 12, -14);
     this.applyRendererQuality();
 
@@ -1160,19 +1161,20 @@ export class ThreeStageController {
     }
 
     if (options.enableGridFloor !== false) {
-      const gridSize = options.gridSize ?? 48;
+      const gridSize = options.gridSize ?? 120;
       const gridTex = createCyberGridTexture(
         this.renderer,
         options.gridPrimaryColor || '#06b6d4',
-        options.gridSecondaryColor || '#090d18',
+        options.gridSecondaryColor || '#050811',
         4
       );
       gridTex.repeat.set(gridSize / 4, gridSize / 4);
       const floorGeo = new THREE.PlaneGeometry(gridSize, gridSize);
       const floorMat = new THREE.MeshStandardMaterial({
         map: gridTex,
-        roughness: 0.42,
-        metalness: 0.38
+        roughness: 0.86,
+        metalness: 0.12,
+        envMapIntensity: 0.14
       });
       const floorMesh = new THREE.Mesh(floorGeo, floorMat);
       floorMesh.rotation.x = -Math.PI / 2;
@@ -1181,7 +1183,7 @@ export class ThreeStageController {
       this.scene.add(floorMesh);
 
       // Animated Cyber Horizon Perimeter Ring
-      const ringGeo = new THREE.TorusGeometry(gridSize * 0.44, 0.07, 8, 48);
+      const ringGeo = new THREE.TorusGeometry(Math.min(26, gridSize * 0.22), 0.07, 8, 48);
       ringGeo.rotateX(Math.PI / 2);
       this.horizonRingMat = new THREE.MeshBasicMaterial({
         color: STUDIO_ATMOSPHERES_3D[this.atmosphere].accentColor,

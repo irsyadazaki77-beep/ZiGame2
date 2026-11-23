@@ -102,7 +102,7 @@ export const CANONICAL_GAME_REGISTRY: Record<CanonicalGameId, GameRegistryItem> 
     controls: 'Arrows + Space',
     controlsHint: 'Desktop: WASD/Panah & Spasi · Mobile: D-Pad + tombol tembak',
     tier: 'arcade',
-    controlType: 'dpad',
+    controlType: 'dpad-action',
     supportedInputs: ['keyboard', 'touch', 'gamepad'],
     avgDuration: '2-5 mins'
   },

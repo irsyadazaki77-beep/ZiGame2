@@ -157,8 +157,10 @@ describe('ZiGame v2.1 / v2.2 Roadmap Features — 5 Pillars Unit Suite', () => {
       ]);
       for (const k of keys) {
         const cfg = STUDIO_ATMOSPHERES_3D[k];
-        expect(cfg.exposure).toBeGreaterThan(1.0);
-        expect(cfg.bloomStrength).toBeGreaterThan(0.4);
+        expect(cfg.exposure).toBeGreaterThanOrEqual(0.85);
+        expect(cfg.exposure).toBeLessThanOrEqual(1.15);
+        expect(cfg.bloomStrength).toBeGreaterThanOrEqual(0.3);
+        expect(cfg.bloomStrength).toBeLessThanOrEqual(0.55);
       }
     });
 

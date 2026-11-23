@@ -129,7 +129,13 @@ export const GameHeroCanvas: React.FC<GameHeroCanvasProps> = ({
     }
   }, []);
 
-  const targetRatio = parseAspectRatio(aspectRatio);
+  const baseRatio = parseAspectRatio(aspectRatio);
+  let targetRatio = baseRatio;
+  if (stageSize.w > 0 && stageSize.h > 0 && stageSize.h > stageSize.w * 0.9 && baseRatio > 1.2) {
+    // On mobile portrait screens, allow wide 16:9 3D arenas to expand vertically for better visibility
+    targetRatio = Math.max(1.08, Math.min(baseRatio, stageSize.w / (stageSize.h * 0.88)));
+  }
+
   let fittedStyle: React.CSSProperties = {
     boxShadow: '0 4px 24px rgba(0,0,0,0.6)',
   };
@@ -201,7 +207,7 @@ export const GameHeroCanvas: React.FC<GameHeroCanvasProps> = ({
         <div ref={stageRef} className="w-full h-full min-h-0 min-w-0 flex items-center justify-center touch-none">
           <GameViewportEffects isCrtFilter={isCrtFilter}>
             <div 
-              className={`relative flex items-center justify-center bg-[#090b10] border border-white/[0.08] rounded-xl sm:rounded-2xl md:rounded-3xl shadow-2xl overflow-hidden transition-[border-radius] duration-300 touch-none ${
+              className={`relative flex items-center justify-center bg-[#090b10] border border-white/[0.08] rounded-xl sm:rounded-2xl md:rounded-3xl shadow-2xl overflow-hidden transition-[border-radius] duration-300 touch-none [&>*]:min-h-0! ${
                 stageSize.w === 0 ? 'w-full h-full max-w-full max-h-full' : ''
               }`}
               style={fittedStyle}

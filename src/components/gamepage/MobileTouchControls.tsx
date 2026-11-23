@@ -197,7 +197,7 @@ export const MobileTouchControls: React.FC<MobileTouchControlsProps> = ({ visibl
 
       {/* LANDSCAPE MODE OVERLAY */}
       <div 
-        className="hidden lg:hidden landscape:block pointer-events-none fixed inset-0 z-40 select-none"
+        className="hidden max-lg:landscape:block pointer-events-none fixed inset-0 z-40 select-none"
         id="virtual-mobile-gamepad-deck-landscape"
       >
         {/* Floating Left Overlay */}

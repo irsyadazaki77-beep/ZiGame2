@@ -135,7 +135,7 @@ try {
   } else {
     initErrorMessage = 'Firebase client configuration missing. Set VITE_FIREBASE_API_KEY and VITE_FIREBASE_PROJECT_ID (or provide firebase-applet-config.json in development). Cloud sync & ranked login are disabled; Offline Guest Mode remains available.';
     if (!import.meta.env.VITEST && import.meta.env.MODE !== 'test') {
-      logger.error(initErrorMessage);
+      logger.warn(initErrorMessage);
     }
   }
 } catch (e) {
