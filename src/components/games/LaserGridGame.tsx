@@ -258,6 +258,7 @@ export default function LaserGridGame({
         addScore(35);
         audioController.playScore();
         stage.particles.burst(st.x, 0.9, st.z, 20, 0xfacc15, 6.5);
+        stage.spawnFloatingText('+35 DATA!', st.x, 1.5, st.z, '#facc15', { scale: 1.15 });
         let nx = st.orbX;
         let nz = st.orbZ;
         while (nx === st.gx && nz === st.gz) {

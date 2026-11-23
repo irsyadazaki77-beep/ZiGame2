@@ -342,6 +342,7 @@ export default function PixelDinoGame({
             else pteroPool.releaseItem(h);
             hazardsRef.current.splice(i, 1);
             stage.particles.burst(-4.2, d.y + 0.8, 0, 34, 0xef4444, 10);
+            stage.spawnFloatingText('CRASH!', -4.2, d.y + 1.5, 0, '#ef4444', { scale: 1.35 });
             stage.triggerTrauma(0.75);
             audioController.playExplosion();
             audioController.playGameOver();
@@ -354,6 +355,7 @@ export default function PixelDinoGame({
           if (h.type === 'cactus') cactusPool.releaseItem(h);
           else pteroPool.releaseItem(h);
           hazardsRef.current.splice(i, 1);
+          stage.spawnFloatingText('DODGED!', -4.2, d.y + 1.4, 0, '#38bdf8', { scale: 0.9 });
         }
       }
     });

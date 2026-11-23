@@ -80,8 +80,10 @@ export default function CyberSimonGame({
       if (st.sequence[st.playerStep] === padIdx) {
         st.playerStep += 1;
         addScore(20);
+        stage?.spawnFloatingText('+20', px, 1.35, pz, PAD_COLORS[padIdx], { scale: 0.95 });
         if (st.playerStep >= st.sequence.length) {
           addScore(50);
+          stage?.spawnFloatingText(`ROUND ${st.sequence.length} CLEAR! +50`, 0, 1.8, 0, '#facc15', { scale: 1.3 });
           audioController.playScore();
           stage?.kickFov(3.5);
           st.sequence.push(Math.floor(Math.random() * 4));

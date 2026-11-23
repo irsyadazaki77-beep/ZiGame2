@@ -95,11 +95,13 @@ export default function HexDominionGame({
       if (targetTile.owner === 'player') {
         targetTile.power += 2;
         addScore(20);
+        stage?.spawnFloatingText('FORTIFY +20', targetTile.x, 1.45, targetTile.z, '#38bdf8', { scale: 1.0 });
         audioController.playPowerup();
       } else {
         targetTile.owner = 'player';
         targetTile.power = Math.max(2, targetTile.power);
         addScore(45);
+        stage?.spawnFloatingText('CAPTURED +45!', targetTile.x, 1.55, targetTile.z, '#818cf8', { scale: 1.15 });
         audioController.playScore();
       }
       syncTileVisuals(targetTile);

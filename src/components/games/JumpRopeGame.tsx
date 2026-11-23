@@ -286,11 +286,20 @@ export default function JumpRopeGame({
         } else {
           st.jumps += 1;
           const isPerfect = st.y >= 0.72;
+          const earned = 20 + st.jumps * 2 + (isPerfect ? 15 : 0);
           setJumps(st.jumps);
           setRpm(Math.round(st.ropeSpeed * 18));
-          addScore(20 + st.jumps * 2 + (isPerfect ? 15 : 0));
+          addScore(earned);
           stage.particles.burst(0, 0.15, 0, isPerfect ? 26 : 18, 0x22c55e, 7.2);
           stage.triggerShockwave(0, 0.08, 0, isPerfect ? 0xfacc15 : 0x22c55e, 3.2, 0.38);
+          stage.spawnFloatingText(
+            isPerfect ? `PERFECT +${earned}!` : `+${earned}`,
+            0,
+            1.65,
+            0,
+            isPerfect ? '#facc15' : '#4ade80',
+            { scale: isPerfect ? 1.25 : 1.0 }
+          );
           stage.triggerTrauma(0.18);
           if (isPerfect) {
             updateHoloLabelSprite3D(comboSprite, `PERFECT x${st.jumps}!`, {

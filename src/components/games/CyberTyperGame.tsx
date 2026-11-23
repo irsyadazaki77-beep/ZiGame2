@@ -140,12 +140,14 @@ export default function CyberTyperGame({
         });
 
         if (isCompleted) {
+          const earned = target.word.length * 15 + Math.min(60, typerRef.current.combo * 3);
           stage?.particles.burst(target.x, 0.75, target.z, 32, 0x10b981, 9.5);
           stage?.triggerShockwave(target.x, 0.08, target.z, 0x22c55e, 3.6, 0.42);
+          stage?.spawnFloatingText(`+${earned}`, target.x, 1.5, target.z, '#4ade80', { scale: 1.15 });
           stage?.triggerTrauma(0.32);
           releaseSingleDroneRef.current(target);
           dronesRef.current = dronesRef.current.filter((d) => d.id !== target!.id);
-          addScore(target.word.length * 15 + Math.min(60, typerRef.current.combo * 3));
+          addScore(earned);
           audioController.playScore();
         }
         syncHudDrones();

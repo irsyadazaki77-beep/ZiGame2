@@ -338,14 +338,10 @@ export default function OrbitalDefenseGame({
       for (let i = activeDrones.length - 1; i >= 0; i--) {
         const d = activeDrones[i];
         if (d.hp <= 0) {
-          stage.particles.burst(
-            d.mesh.position.x,
-            0.7,
-            d.mesh.position.z,
-            18,
-            0xf59e0b,
-            7.5
-          );
+          const dx = d.mesh.position.x;
+          const dz = d.mesh.position.z;
+          stage.particles.burst(dx, 0.7, dz, 18, 0xf59e0b, 7.5);
+          stage.spawnFloatingText('+25', dx, 1.35, dz, '#facc15', { scale: 1.05 });
           dronePool.release(i);
           ds.energy += 15;
           setEnergy(ds.energy);
@@ -357,6 +353,7 @@ export default function OrbitalDefenseGame({
             ds.wave += 1;
             setWave(ds.wave);
             stage.kickFov(4);
+            stage.spawnFloatingText(`WAVE ${ds.wave}!`, 0, 2.2, 0, '#22d3ee', { scale: 1.4 });
             audioController.playPowerup();
           }
           continue;

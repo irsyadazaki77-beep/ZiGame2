@@ -217,7 +217,8 @@ export default function MemoryPathGame({
 
       if (st.safeCols[tile.r] === tile.c) {
         st.currentRow += 1;
-        addScore(30 * st.round);
+        const earned = 30 * st.round;
+        addScore(earned);
         audioController.playScore();
         stage.particles.burst(
           tile.mesh.position.x,
@@ -227,10 +228,12 @@ export default function MemoryPathGame({
           0x38bdf8,
           6.5
         );
+        stage.spawnFloatingText(`+${earned}`, tile.mesh.position.x, 1.3, tile.mesh.position.z, '#38bdf8', { scale: 1.05 });
         syncBridgeVisuals(false);
 
         if (st.currentRow >= BRIDGE_ROWS) {
           addScore(100);
+          stage.spawnFloatingText(`BRIDGE CLEAR! +100`, 0, 1.85, 0, '#facc15', { scale: 1.35 });
           st.round += 1;
           setRound(st.round);
           audioController.playLevelUp();

@@ -733,6 +733,7 @@ export default function ArcheryNeoGame({ onGameOver, onScoreUpdate, highScore }:
             addScore(75);
             audioController.playPowerup();
             stageCtrl.particles.burst(bonusOrb.position.x, bonusOrb.position.y, bonusOrb.position.z, 28, 0x10b981, 8);
+            stageCtrl.spawnFloatingText('+2 ARROWS +75', bonusOrb.position.x, bonusOrb.position.y + 0.6, bonusOrb.position.z, '#10b981', { scale: 1.25 });
             stageCtrl.cameraRig.addTrauma(0.35);
             showBanner('QUIVER ORB! +2 ANAK PANAH & +75');
           }
@@ -786,6 +787,14 @@ export default function ArcheryNeoGame({ onGameOver, onScoreUpdate, highScore }:
               setCombo(comboRef.current);
               const totalPts = basePts * comboRef.current;
               addScore(totalPts);
+              stageCtrl.spawnFloatingText(
+                comboRef.current > 1 ? `${ringName} +${totalPts} x${comboRef.current}` : `${ringName} +${totalPts}`,
+                arr.pos.x,
+                arr.pos.y + 0.6,
+                st.targetZ + 0.4,
+                burstColor,
+                { scale: basePts >= 100 ? 1.35 : 1.05 }
+              );
               showBanner(`${ringName} +${totalPts} (x${comboRef.current})`);
 
               const nextStage = Math.floor((scoreRef.current + totalPts) / 350) + 1;

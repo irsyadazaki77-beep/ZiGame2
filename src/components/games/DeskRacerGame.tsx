@@ -768,6 +768,14 @@ export default function DeskRacerGame({ onScoreUpdate, onGameOver, highScore }: 
           const completedLapMs = lapElapsed;
           const lapBonus = Math.max(400, Math.round(2200 - completedLapMs / 25)) * comboMultiplierVal;
           totalScoreAccum += lapBonus;
+          stage.spawnFloatingText(
+            `LAP ${currentLap} +${lapBonus}!`,
+            playerCar.position.x,
+            playerCar.position.y + 1.5,
+            playerCar.position.z,
+            '#facc15',
+            { scale: 1.35 }
+          );
 
           if (completedLapMs < bestLapRecordMs) {
             bestLapRecordMs = completedLapMs;

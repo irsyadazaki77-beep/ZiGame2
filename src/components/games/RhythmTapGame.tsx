@@ -106,7 +106,16 @@ export default function RhythmTapGame({
         setJudgment(isPerfect ? 'PERFECT!' : 'GREAT!');
         showJudgment3DRef.current(judgeText, isPerfect ? '#facc15' : '#38bdf8');
         const mult = Math.min(4, 1 + Math.floor(st.combo / 6));
-        addScore((isPerfect ? 30 : 15) * mult);
+        const earned = (isPerfect ? 30 : 15) * mult;
+        addScore(earned);
+        stage?.spawnFloatingText(
+          isPerfect ? `PERFECT +${earned}` : `GREAT +${earned}`,
+          LANE_X[laneIdx],
+          1.25,
+          HIT_Z,
+          isPerfect ? '#facc15' : '#38bdf8',
+          { scale: isPerfect ? 1.2 : 0.95 }
+        );
         if (st.combo > 1) {
           audioController.playCombo(st.combo);
         } else {

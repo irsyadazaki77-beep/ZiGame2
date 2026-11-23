@@ -12,6 +12,7 @@ export interface GameOverlayProps {
   countdown?: number;
   score?: number;
   highScore?: number;
+  maxCombo?: number;
   onStart: () => void;
   onResume?: () => void;
   onRestart: () => void;
@@ -23,11 +24,55 @@ export interface GameOverlayProps {
   gameoverMessage?: string;
 }
 
+function computePerformanceRank(score: number, highScore: number, maxCombo: number): {
+  grade: 'S' | 'A' | 'B' | 'C' | 'D';
+  label: string;
+  badgeClass: string;
+} {
+  const benchmark = Math.max(highScore, 200);
+  const ratio = score / benchmark;
+
+  if ((score >= 500 && maxCombo >= 8) || (score >= 300 && ratio >= 1.25) || score >= 1000) {
+    return {
+      grade: 'S',
+      label: 'LEGENDARY',
+      badgeClass: 'bg-amber-500/20 text-amber-300 border-amber-400/50 shadow-amber-500/20'
+    };
+  }
+  if (ratio >= 0.9 || score >= 300) {
+    return {
+      grade: 'A',
+      label: 'EXPERT',
+      badgeClass: 'bg-fuchsia-500/20 text-fuchsia-300 border-fuchsia-400/50 shadow-fuchsia-500/20'
+    };
+  }
+  if (ratio >= 0.55 || score >= 120) {
+    return {
+      grade: 'B',
+      label: 'ADEPT',
+      badgeClass: 'bg-cyan-500/20 text-cyan-300 border-cyan-400/50 shadow-cyan-500/20'
+    };
+  }
+  if (score >= 30) {
+    return {
+      grade: 'C',
+      label: 'ROOKIE',
+      badgeClass: 'bg-emerald-500/20 text-emerald-300 border-emerald-400/40 shadow-emerald-500/15'
+    };
+  }
+  return {
+    grade: 'D',
+    label: 'WARMUP',
+    badgeClass: 'bg-zinc-800/80 text-zinc-300 border-white/10 shadow-black/20'
+  };
+}
+
 export const GameOverlay: React.FC<GameOverlayProps> = ({
   gameState,
   countdown,
   score = 0,
   highScore = 0,
+  maxCombo = 0,
   onStart,
   onResume,
   onRestart,
@@ -63,6 +108,7 @@ export const GameOverlay: React.FC<GameOverlayProps> = ({
   const isNewRecord = score > 0 && score > highScore;
   const coinsEarned = score > 0 ? Math.max(2, Math.floor(score / 10)) : 0;
   const xpEarned = score > 0 ? Math.floor(score * 1.5) : 0;
+  const rank = computePerformanceRank(score, highScore, maxCombo);
 
   return (
     <>
@@ -174,17 +220,34 @@ export const GameOverlay: React.FC<GameOverlayProps> = ({
               )}
             </div>
 
-            {/* Final Score Display */}
-            <div className="w-full bg-zinc-950/60 border border-white/[0.04] p-4.5 rounded-xl space-y-1 shadow-inner">
-              <span className="text-xs text-zinc-400 font-medium font-sans">
-                Skor Akhir
-              </span>
+            {/* Final Score Display & Performance Rank */}
+            <div className="w-full bg-zinc-950/60 border border-white/[0.04] p-4 rounded-xl space-y-1.5 shadow-inner relative">
+              <div className="flex items-center justify-between gap-2 mb-1">
+                <span className="text-xs text-zinc-400 font-medium font-sans">
+                  Skor Akhir
+                </span>
+                <div
+                  className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full border text-[10px] font-black tracking-wider uppercase shadow-sm ${rank.badgeClass}`}
+                  aria-label={`Peringkat performa ${rank.grade}`}
+                >
+                  <span>RANK {rank.grade}</span>
+                  <span className="opacity-75">• {rank.label}</span>
+                </div>
+              </div>
               <div className="text-4xl sm:text-5xl font-black text-white tracking-tight font-mono">
                 {score.toLocaleString()}
               </div>
-              <div className="text-xs text-zinc-400 pt-1 flex items-center justify-center gap-1.5 font-sans">
-                <Trophy size={13} className="text-amber-400" />
-                <span>Rekor: <strong className="text-zinc-200">{Math.max(score, highScore).toLocaleString()}</strong></span>
+              <div className="text-xs text-zinc-400 pt-1 flex items-center justify-center flex-wrap gap-3 font-sans">
+                <span className="flex items-center gap-1.5">
+                  <Trophy size={13} className="text-amber-400" />
+                  <span>Rekor: <strong className="text-zinc-200">{Math.max(score, highScore).toLocaleString()}</strong></span>
+                </span>
+                {maxCombo > 1 && (
+                  <span className="flex items-center gap-1 text-amber-300 font-semibold font-mono">
+                    <Sparkles size={12} className="text-amber-400" />
+                    Max Combo {maxCombo}x
+                  </span>
+                )}
               </div>
             </div>
 

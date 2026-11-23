@@ -1,5 +1,6 @@
 import React from 'react';
 import { ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Zap, CircleDot } from 'lucide-react';
+import { haptics } from '../../utils/haptics';
 
 export interface MobileControlButtonProps {
   icon: React.ReactNode;
@@ -20,6 +21,7 @@ export const MobileControlButton: React.FC<MobileControlButtonProps> = ({
 }) => {
   const handleStart = (e: React.SyntheticEvent) => {
     e.preventDefault();
+    haptics.trigger(variant === 'action' ? 'medium' : 'light');
     onPress();
   };
   const handleEnd = (e: React.SyntheticEvent) => {

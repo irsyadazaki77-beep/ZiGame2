@@ -289,10 +289,12 @@ export default function GravityShiftGame({
                 addScore(30);
                 audioController.playScore();
                 stage.particles.burst(-4.5, s.y + (s.inverted ? -0.8 : 0.8), 0, 18, 0x22d3ee, 7);
+                stage.spawnFloatingText('+30 ORB!', -4.5, s.y + (s.inverted ? -1.1 : 1.1), 0, '#22d3ee', { scale: 1.1 });
                 continue;
               } else {
                 pool.release(i);
                 stage.particles.burst(-4.5, s.y + (s.inverted ? -0.8 : 0.8), 0, 36, 0xf43f5e, 10);
+                stage.spawnFloatingText('IMPACT!', -4.5, s.y + 0.8, 0, '#f43f5e', { scale: 1.3 });
                 stage.triggerTrauma(0.75);
                 audioController.playGameOver();
                 triggerGameOver(scoreRef.current);

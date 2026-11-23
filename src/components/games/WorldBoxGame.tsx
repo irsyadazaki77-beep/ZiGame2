@@ -175,7 +175,8 @@ export default function WorldBoxGame({ onGameOver, onScoreUpdate, highScore }: G
 
   if (!engineRef.current) {
     engineRef.current = new WorldBoxEngine({
-      onScoreAdd: (pts) => addScore(pts),
+      onScoreAdd: (pts) =>
+        addScore(pts, pts >= 25 ? { x: 0, y: 2.2, z: 0, text: `+${pts} CREATION`, color: '#4ade80', scale: 1.1 } : undefined),
       onSound: (type) => {
         if (type === 'click') audioController.playClick();
         else if (type === 'coin') audioController.playCoin();

@@ -596,8 +596,17 @@ export default function WizardChess3DGame({ onScoreUpdate, onGameOver, highScore
           const diffMult =
             gameModeRef.current === 'ai-hard' ? 2.0 : gameModeRef.current === 'ai-medium' ? 1.4 : 1.0;
           const capturePts = victimPiece ? Math.round(PIECE_VALUES[victimPiece.type] * diffMult) : 15;
-          scoreValRef.current += capturePts * comboMultiplier;
+          const totalGain = capturePts * comboMultiplier;
+          scoreValRef.current += totalGain;
           updateScore(scoreValRef.current);
+          stage.spawnFloatingText(
+            victimPiece ? `CAPTURED +${totalGain}!` : `+${totalGain}`,
+            destWorld.x,
+            1.6,
+            destWorld.z,
+            victimPiece ? '#facc15' : '#38bdf8',
+            { scale: victimPiece ? 1.25 : 0.9 }
+          );
 
           if (victimPiece) {
             setComboMultiplier((c) => Math.min(8, c * 2));

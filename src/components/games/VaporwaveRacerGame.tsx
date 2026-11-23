@@ -850,9 +850,11 @@ export default function VaporwaveRacerGame({ onScoreUpdate, onGameOver, highScor
             updateScore(scoreRef.current + pts);
             if (dx < 2.6) {
               audioController.playNearMiss();
+              stage.spawnFloatingText(`NEAR MISS +${pts}!`, st.visualX, 1.5, 0, '#facc15', { scale: 1.2 });
               showToast(`OVERTAKE DEKAT! +${pts} (x${st.combo})`);
             } else {
               audioController.playScore();
+              stage.spawnFloatingText(`+${pts}`, st.visualX, 1.4, 0, '#38bdf8', { scale: 0.95 });
             }
           }
 

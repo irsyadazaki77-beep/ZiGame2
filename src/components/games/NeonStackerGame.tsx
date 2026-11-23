@@ -341,7 +341,14 @@ export default function NeonStackerGame({ onGameOver, onScoreUpdate, highScore }
     setCombo(newCombo);
 
     const pts = (25 + st.rowIdx * 5) * newCombo;
-    addScore(pts);
+    addScore(pts, {
+      x: nextX,
+      y: yPos + 0.9,
+      z: nextZ,
+      text: isPerfect ? `PERFECT +${pts}!` : `+${pts}`,
+      color: isPerfect ? '#facc15' : '#38bdf8',
+      scale: isPerfect ? 1.25 : 1.0
+    });
 
     st.prevX = nextX;
     st.prevZ = nextZ;

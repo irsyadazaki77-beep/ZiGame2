@@ -799,6 +799,9 @@ export default function PixelGolfGame({ onGameOver, onScoreUpdate, highScore }: 
             const pts =
               strokesRef.current === 1 ? 300 : diff < 0 ? 200 : diff === 0 ? 140 : 90;
             addScore(pts);
+            stage.spawnFloatingText(label, st.layout.holeX, 1.4, st.layout.holeZ, strokesRef.current === 1 ? '#facc15' : '#a855f7', {
+              scale: strokesRef.current === 1 ? 1.4 : 1.2
+            });
             timeLeftRef.current = Math.min(90, timeLeftRef.current + 10);
             const nextSec = Math.ceil(timeLeftRef.current);
             lastTimeShownRef.current = nextSec;

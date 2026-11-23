@@ -342,6 +342,7 @@ export default function NeonHeistGame({
           addScore(50);
           audioController.playScore();
           stage.particles.burst(t.x, 1.2, t.z, 22, 0x10b981, 6.5);
+          stage.spawnFloatingText('HACKED +50!', t.x, 1.85, t.z, '#10b981', { scale: 1.15 });
         }
       }
 
@@ -352,6 +353,7 @@ export default function NeonHeistGame({
         setFloorLevel(hs.floor);
         audioController.playLevelUp();
         stage.particles.burst(0, 1.0, -6.8, 36, 0x22d3ee, 9);
+        stage.spawnFloatingText(`FLOOR ${hs.floor - 1} CLEARED! +150`, 0, 1.9, -6.8, '#22d3ee', { scale: 1.35 });
         stage.kickFov(5);
         buildFloorRef.current(hs.floor);
         return;

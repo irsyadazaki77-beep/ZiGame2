@@ -263,10 +263,12 @@ export default function MemoryGridGame({
             st.matchedCount += 1;
             setPairsFound(st.matchedCount);
             addScore(50);
+            stage.spawnFloatingText('MATCH +50!', card.group.position.x, 1.35, card.group.position.z, SYMBOL_COLORS[card.symbolId], { scale: 1.15 });
             audioController.playScore();
 
             if (st.matchedCount >= 8) {
               addScore(200);
+              stage.spawnFloatingText('DECK CLEAR! +200', 0, 1.85, 0, '#facc15', { scale: 1.35 });
               audioController.playWin();
               audioController.playLevelUp();
               stage.kickFov(5);

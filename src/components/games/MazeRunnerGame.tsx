@@ -396,7 +396,7 @@ export default function MazeRunnerGame({ onGameOver, onScoreUpdate, highScore }:
         comboRef.current = Math.min(8, comboRef.current + 1);
         setCombo(comboRef.current);
         const pts = 50 * comboRef.current;
-        addScore(pts);
+        addScore(pts, { x: nc - half, y: 1.45, z: nr - half, text: `+${pts} ORB!`, color: '#facc15', scale: 1.15 });
         timeLeftRef.current = Math.min(60, timeLeftRef.current + 6);
         const nextSec = Math.ceil(timeLeftRef.current);
         lastTimeShownRef.current = nextSec;
@@ -409,7 +409,7 @@ export default function MazeRunnerGame({ onGameOver, onScoreUpdate, highScore }:
         audioController.playLevelUp();
         phaseChargesRef.current = Math.min(3, phaseChargesRef.current + 1);
         setPhaseCharges(phaseChargesRef.current);
-        addScore(35 * comboRef.current);
+        addScore(35 * comboRef.current, { x: nc - half, y: 1.45, z: nr - half, text: 'PHASE +1!', color: '#22d3ee', scale: 1.15 });
         showBanner('PHASE CHARGE DITEMUKAN!');
       } else if (cell === 'goal') {
         audioController.playWin();
@@ -418,7 +418,7 @@ export default function MazeRunnerGame({ onGameOver, onScoreUpdate, highScore }:
         st.fxQueue.push({ type: 'goal', x: nc - half, z: nr - half });
         const nextLvl = levelRef.current + 1;
         const clearBonus = (120 + levelRef.current * 30) * comboRef.current;
-        addScore(clearBonus);
+        addScore(clearBonus, { x: nc - half, y: 1.8, z: nr - half, text: `SECTOR CLEAR +${clearBonus}!`, color: '#4ade80', scale: 1.35 });
         comboRef.current = Math.min(8, comboRef.current + 1);
         setCombo(comboRef.current);
         levelRef.current = nextLvl;

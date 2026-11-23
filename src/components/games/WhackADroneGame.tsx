@@ -92,6 +92,14 @@ export default function WhackADroneGame({
           pod.isGolden ? 0xfacc15 : 0xd946ef,
           7.5
         );
+        stage.spawnFloatingText(
+          pod.isGolden ? `GOLD +${pts}!` : `+${pts}`,
+          pod.x,
+          1.45,
+          pod.z,
+          pod.isGolden ? '#facc15' : '#e879f9',
+          { scale: pod.isGolden ? 1.3 : 1.05 }
+        );
         stage.triggerTrauma(0.24);
       }
     },

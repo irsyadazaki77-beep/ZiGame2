@@ -286,6 +286,7 @@ export default function SineRiderGame({
             const distY = Math.abs(g.y - r.y);
             if (g.isHazard && distY < 0.78) {
               stage.particles.burst(-3.2, r.y, 0, 34, 0xef4444, 9.5);
+              stage.spawnFloatingText('CRASH!', -3.2, r.y + 0.7, 0, '#ef4444', { scale: 1.3 });
               stage.triggerTrauma(0.75);
               audioController.playGameOver();
               triggerGameOver(scoreRef.current);
@@ -296,6 +297,7 @@ export default function SineRiderGame({
               addScore(25);
               audioController.playScore();
               stage.particles.burst(-3.2, r.y, 0, 18, 0x22d3ee, 7);
+              stage.spawnFloatingText('+25 WAVE!', -3.2, r.y + 0.7, 0, '#22d3ee', { scale: 1.1 });
               continue;
             }
           }

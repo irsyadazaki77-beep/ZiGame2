@@ -841,6 +841,14 @@ export default function NeonDriftGame({ onScoreUpdate, onGameOver, highScore }: 
             haptics.trigger('light');
             screenShake.trigger('medium');
             stage.cameraRig.kickFov(3.5);
+            stage.spawnFloatingText(
+              `NEAR MISS +${bonusPoints}!`,
+              pState.x,
+              1.65,
+              0,
+              '#facc15',
+              { scale: 1.25 }
+            );
 
             setCombo(pState.combo);
             setNearMissToast({

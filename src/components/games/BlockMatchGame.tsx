@@ -280,7 +280,16 @@ export default function BlockMatchGame({
         st.combo += 1;
         setMovesLeft(st.moves);
         setCombo(st.combo);
-        addScore(totalCleared * 20);
+        const earned = totalCleared * 20;
+        addScore(earned);
+        stage.spawnFloatingText(
+          st.combo > 1 ? `+${earned} x${st.combo}` : `+${earned}`,
+          cell.mesh.position.x,
+          1.3,
+          cell.mesh.position.z,
+          st.combo >= 3 ? '#facc15' : '#38bdf8',
+          { scale: st.combo >= 3 ? 1.25 : 1.05 }
+        );
         audioController.playCombo(st.combo);
         stage.triggerTrauma(0.22);
         syncCellAppearanceRef.current();

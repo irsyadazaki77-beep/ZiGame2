@@ -16,15 +16,24 @@ export interface GameHUDProps {
   className?: string;
   onPause?: () => void;
   isPaused?: boolean;
+  combo?: number;
+  comboMultiplier?: number;
 }
 
-export const GameHUD: React.FC<GameHUDProps> = ({ stats, position = 'top-left', compact, className = '' }) => {
+export const GameHUD: React.FC<GameHUDProps> = ({
+  stats,
+  position = 'top-left',
+  compact,
+  className = '',
+  combo = 0,
+  comboMultiplier = 1
+}) => {
   let positionClass = 'top-0 left-0';
   if (position === 'top-center') positionClass = 'top-0 left-1/2 -translate-x-1/2';
   if (position === 'top-right') positionClass = 'top-0 right-0';
 
   return (
-    <div className={`absolute z-10 flex gap-2 sm:gap-3.5 pointer-events-none p-3 sm:p-4 ${positionClass} ${className}`}>
+    <div className={`absolute z-10 flex items-center gap-2 sm:gap-3.5 pointer-events-none p-3 sm:p-4 ${positionClass} ${className}`}>
       {stats.map(stat => {
         const isEmp = stat.emphasized;
         const cardBg = isEmp 
@@ -56,6 +65,19 @@ export const GameHUD: React.FC<GameHUDProps> = ({ stats, position = 'top-left', 
           </div>
         );
       })}
+      {combo > 1 && (
+        <div
+          key={combo}
+          className="flex flex-col items-center justify-center px-2.5 py-1 sm:px-3.5 sm:py-1.5 rounded-xl border border-amber-400/40 bg-amber-500/15 backdrop-blur-md shadow-lg shadow-amber-500/10 animate-in zoom-in-75 duration-150"
+        >
+          <span className="text-[9px] sm:text-[10px] font-sans font-bold uppercase tracking-wider text-amber-300 leading-none mb-0.5">
+            COMBO
+          </span>
+          <span className="font-mono font-black text-xs sm:text-base leading-none text-amber-400 tabular-nums">
+            x{combo}{comboMultiplier > 1 ? ` (${comboMultiplier}×)` : ''}
+          </span>
+        </div>
+      )}
     </div>
   );
 };

@@ -65,13 +65,15 @@ export default function LockBreakerGame({
     if (diff < 0.34) {
       st.dir *= -1;
       st.pinsRemaining -= 1;
-      addScore(30 * st.vault);
+      const earned = 30 * st.vault;
+      addScore(earned);
       audioController.playScore();
 
       const tx = Math.cos(st.targetAngle) * 3.1;
       const tz = Math.sin(st.targetAngle) * 3.1;
       stage?.particles.burst(tx, 0.7, tz, 24, 0xf59e0b, 7.5);
       stage?.triggerShockwave(tx, 0.08, tz, 0xf59e0b, 2.4, 0.36);
+      stage?.spawnFloatingText(`CLICK +${earned}`, tx, 1.45, tz, '#facc15', { scale: 1.1 });
       stage?.triggerTrauma(0.24);
 
       if (st.pinsRemaining <= 0) {
@@ -81,6 +83,7 @@ export default function LockBreakerGame({
         setVaultLevel(st.vault);
         addScore(100);
         stage?.triggerShockwave(0, 0.08, 0, 0x22d3ee, 4.8, 0.5);
+        stage?.spawnFloatingText(`VAULT ${st.vault - 1} OPEN! +100`, 0, 1.85, 0, '#22d3ee', { scale: 1.35 });
         stage?.kickFov(5);
         audioController.playLevelUp();
         audioController.playPowerup();

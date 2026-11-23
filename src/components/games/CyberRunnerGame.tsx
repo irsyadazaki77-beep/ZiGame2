@@ -387,6 +387,7 @@ export default function CyberRunnerGame({
               addScore(25);
               audioController.playScore();
               stage.particles.burst(r.x, r.y + 0.9, 2.5, 16, 0xfacc15, 6);
+              stage.spawnFloatingText('+25', r.x, r.y + 1.5, 2.5, '#facc15', { scale: 1.05 });
               continue;
             }
             if (o.type === 'boost') {
@@ -396,6 +397,7 @@ export default function CyberRunnerGame({
               addScore(40);
               audioController.playPowerup();
               stage.particles.burst(r.x, r.y + 0.9, 2.5, 22, 0x22d3ee, 8);
+              stage.spawnFloatingText('SHIELD +40!', r.x, r.y + 1.6, 2.5, '#22d3ee', { scale: 1.25 });
               stage.kickFov(6);
               continue;
             }
@@ -410,10 +412,12 @@ export default function CyberRunnerGame({
                 r.shield = false;
                 setHasShield(false);
                 stage.particles.burst(r.x, r.y + 0.8, 2.5, 28, 0x22d3ee, 9);
+                stage.spawnFloatingText('SHIELD SAVED!', r.x, r.y + 1.6, 2.5, '#38bdf8', { scale: 1.2 });
                 stage.triggerTrauma(0.45);
                 audioController.playShield();
               } else {
                 stage.particles.burst(r.x, r.y + 0.8, 2.5, 38, 0xef4444, 11);
+                stage.spawnFloatingText('CRASH!', r.x, r.y + 1.6, 2.5, '#ef4444', { scale: 1.35 });
                 stage.triggerTrauma(0.75);
                 audioController.playGameOver();
                 triggerGameOver(scoreRef.current);

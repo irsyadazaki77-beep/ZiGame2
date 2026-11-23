@@ -305,10 +305,12 @@ export default function FlappyPixelGame({
             addScore(15);
             audioController.playScore();
             stage.particles.burst(-2.5, p.gapY, 0, 14, 0xfacc15, 6);
+            stage.spawnFloatingText('+15 COIN!', -2.5, p.gapY + 0.65, 0, '#facc15', { scale: 1.1 });
           }
 
           if (Math.abs(b.y - p.gapY) > GAP_HALF - 0.3) {
             stage.particles.burst(-2.5, b.y, 0, 34, 0xef4444, 10);
+            stage.spawnFloatingText('CRASH!', -2.5, b.y + 0.6, 0, '#ef4444', { scale: 1.3 });
             stage.triggerTrauma(0.75);
             audioController.playGameOver();
             triggerGameOver(scoreRef.current);
@@ -321,6 +323,7 @@ export default function FlappyPixelGame({
           b.gates += 1;
           setGatesPassed(b.gates);
           addScore(10);
+          stage.spawnFloatingText('+10', -2.5, b.y + 0.7, 0, '#38bdf8', { scale: 0.95 });
           audioController.playClick();
         }
 

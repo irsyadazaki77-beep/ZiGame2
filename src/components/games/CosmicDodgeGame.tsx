@@ -608,6 +608,14 @@ export default function CosmicDodgeGame({ onScoreUpdate, onGameOver, highScore }
                 const pts = 20 * st.combo;
                 updateScore(scoreRef.current + pts);
                 stage.particles.burst(h.x, h.y, 0, 18, 0xfacc15, 7);
+                stage.spawnFloatingText(
+                  st.combo > 1 ? `+${pts} x${st.combo}` : `+${pts}`,
+                  h.x,
+                  h.y + 0.6,
+                  0,
+                  '#facc15',
+                  { scale: st.combo >= 3 ? 1.25 : 1.0 }
+                );
                 stage.cameraRig.kickFov(2.5);
                 showBanner(`HYPER STAR +${pts} (x${st.combo})`);
                 h.z = -125 - Math.random() * 25;
@@ -618,6 +626,7 @@ export default function CosmicDodgeGame({ onScoreUpdate, onGameOver, highScore }
                 st.shields = Math.min(3, st.shields + 1);
                 setShields(st.shields);
                 stage.particles.burst(h.x, h.y, 0, 22, 0x22d3ee, 7);
+                stage.spawnFloatingText('SHIELD +1!', h.x, h.y + 0.6, 0, '#22d3ee', { scale: 1.2 });
                 showBanner('PERISAI PLASMA +1!');
                 h.z = -140;
               } else if (!wantsWarp && st.invulnTimer <= 0) {
@@ -631,6 +640,7 @@ export default function CosmicDodgeGame({ onScoreUpdate, onGameOver, highScore }
                   screenShake.trigger('medium');
                   stage.cameraRig.addTrauma(0.65);
                   stage.particles.burst(st.x, st.y, 0, 30, 0xef4444, 9);
+                  stage.spawnFloatingText('SHIELD BLOCKED!', st.x, st.y + 0.7, 0, '#38bdf8', { scale: 1.15 });
                   showBanner('PERISAI MENAHAN METEOR!');
                   h.z = -130;
                 } else {

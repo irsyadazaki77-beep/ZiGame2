@@ -166,9 +166,18 @@ export default function CyberTetrisGame({
       setLinesCleared(t.lines);
       setLevel(t.level);
       const pts = [0, 100, 250, 500, 800][Math.min(4, cleared)] * t.level;
+      const clearLabel = ['', 'SINGLE!', 'DOUBLE!', 'TRIPLE!', 'TETRIS!'][Math.min(4, cleared)];
       addScore(pts);
       stage?.particles.burst(0, 4, 0, 28 * cleared, 0x22d3ee, 8.5);
       stage?.triggerShockwave(0, 0.08, 0, cleared >= 4 ? 0xfacc15 : 0x22d3ee, 4.8, 0.5);
+      stage?.spawnFloatingText(
+        `${clearLabel} +${pts}`,
+        0,
+        5.0,
+        0,
+        cleared >= 4 ? '#facc15' : '#22d3ee',
+        { scale: cleared >= 4 ? 1.4 : 1.15 }
+      );
       stage?.triggerTrauma(0.32);
       if (cleared >= 2) stage?.kickFov(4);
       audioController.playCombo(cleared + 1);

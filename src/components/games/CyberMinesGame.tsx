@@ -306,6 +306,7 @@ export default function CyberMinesGame({
 
       if (unrevealedSafe === 0) {
         addScore(250);
+        stage.spawnFloatingText('BOARD CLEAR! +250', 0, 1.8, 0, '#facc15', { scale: 1.35 });
         audioController.playWin();
         audioController.playLevelUp();
         stage.kickFov(5);

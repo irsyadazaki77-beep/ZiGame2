@@ -471,9 +471,13 @@ export default function CosmicAsteroidGame({
             const ax = a.x;
             const az = a.z;
             const sizeTier = a.sizeTier;
+            const pts = sizeTier === 3 ? 20 : sizeTier === 2 ? 50 : 100;
             pool.release(i);
-            addScore(sizeTier === 3 ? 20 : sizeTier === 2 ? 50 : 100);
+            addScore(pts);
             stage.particles.burst(ax, 0.7, az, sizeTier * 10, 0x06b6d4, 7.5);
+            stage.spawnFloatingText(`+${pts}`, ax, 1.35, az, sizeTier === 1 ? '#facc15' : '#38bdf8', {
+              scale: sizeTier === 1 ? 1.2 : 0.95
+            });
             stage.triggerTrauma(0.28);
             audioController.playExplosion();
 

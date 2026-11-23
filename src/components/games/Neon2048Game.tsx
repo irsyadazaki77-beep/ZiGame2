@@ -165,6 +165,9 @@ export default function Neon2048Game({
           addScore(gained);
           audioController.playScore();
           stageRef.current?.particles.burst(0, 0.8, 0, 20, 0xf43f5e, 6.5);
+          stageRef.current?.spawnFloatingText(`MERGE +${gained}!`, 0, 1.55, 0, gained >= 64 ? '#facc15' : '#f43f5e', {
+            scale: gained >= 64 ? 1.3 : 1.05
+          });
           stageRef.current?.triggerTrauma(0.2);
         } else {
           audioController.playClick();

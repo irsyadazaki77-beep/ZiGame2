@@ -299,6 +299,14 @@ export default function PlinkoNeoGame({
           addScore(pts);
           stage.particles.burst(b.x, 0.5, 5.2, 26, pocketColors[slotIdx], 7.8);
           stage.triggerShockwave(b.x, 0.08, 5.2, pocketColors[slotIdx], mult >= 10 ? 3.8 : 2.4, 0.42);
+          stage.spawnFloatingText(
+            `x${mult} +${pts}`,
+            b.x,
+            1.25,
+            5.2,
+            pocketColors[slotIdx],
+            { scale: mult >= 10 ? 1.35 : 1.05 }
+          );
           stage.triggerTrauma(mult >= 10 ? 0.45 : 0.2);
           if (mult >= 10) {
             stage.kickFov(4);

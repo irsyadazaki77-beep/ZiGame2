@@ -66,6 +66,7 @@ export default function CyberClickerGame({
     const stage = stageRef.current;
     if (stage) {
       stage.particles.burst(0, 1.5, 0, 16, 0x6366f1, 7.5);
+      stage.spawnFloatingText(`+${r.clickPower}`, (Math.random() - 0.5) * 1.4, 2.2, (Math.random() - 0.5) * 0.8, '#818cf8', { scale: 1.05 });
       stage.triggerTrauma(0.16);
     }
   }, [addScore]);
