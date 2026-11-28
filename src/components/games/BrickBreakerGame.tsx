@@ -4,12 +4,11 @@ import { useGameEngine } from '../../hooks/useGameEngine';
 import { inputManager } from '../../services/inputService';
 import { GameOverlay } from '../gameplay/GameOverlay';
 import { ThreeDockOverlay } from '../gameplay/ThreeDockOverlay';
-import { GameErrorBoundary } from '../gameplay/GameErrorBoundary';
 import { BrickBreakerEngine } from './brick-breaker/BrickBreakerEngine';
 import { CameraPreset3D, QualityLevel3D } from '../../utils/threeStage';
 import { Flame, Sparkles, Zap } from 'lucide-react';
 
-function BrickBreakerView({
+export default function BrickBreakerGame({
   onGameOver,
   onScoreUpdate,
   highScore
@@ -160,13 +159,5 @@ function BrickBreakerView({
         themeColor="pink"
       />
     </div>
-  );
-}
-
-export default function BrickBreakerGame(props: GameComponentProps) {
-  return (
-    <GameErrorBoundary gameTitle="Brick Neon 3D">
-      <BrickBreakerView {...props} />
-    </GameErrorBoundary>
   );
 }
